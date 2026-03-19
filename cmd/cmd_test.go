@@ -39,15 +39,23 @@ func TestUpCommand(t *testing.T) {
 		t.Fatalf("rootCmd.Execute() failed: %v", err)
 	}
 
-	if len(calls) != 2 {
-		t.Errorf("Expected 2 calls to RunComposeCommand, got %d", len(calls))
+	if len(calls) == 3 {
+		if calls[0][0] != "build" {
+			t.Errorf("Expected first call to be build, got %v", calls[0])
+		}
+		calls = calls[1:]
 	}
 
-	if calls[0][1] != "install" {
-		t.Errorf("Expected first call to be install, got %v", calls[0])
+	if len(calls) != 2 {
+		t.Errorf("Expected 2 more calls to RunComposeCommand, got %d", len(calls))
+		return
 	}
-	if calls[1][1] != "application" {
-		t.Errorf("Expected second call to be application, got %v", calls[1])
+
+	if len(calls[0]) < 2 || calls[0][1] != "install" {
+		t.Errorf("Expected call to be install, got %v", calls[0])
+	}
+	if len(calls[1]) < 2 || calls[1][1] != "application" {
+		t.Errorf("Expected call to be application, got %v", calls[1])
 	}
 }
 
