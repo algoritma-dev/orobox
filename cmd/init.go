@@ -16,7 +16,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"gopkg.in/yaml.v3"
+	yamlv3 "gopkg.in/yaml.v3"
 )
 
 var (
@@ -161,7 +161,7 @@ func generateConfig() {
 		},
 	}
 
-	data, err := yaml.Marshal(&conf)
+	data, err := yamlv3.Marshal(&conf)
 	if err != nil {
 		fmt.Printf("Warning: %s\n", err)
 		return

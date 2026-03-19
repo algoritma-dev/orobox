@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/viper"
-	"gopkg.in/yaml.v3"
+	yamlv3 "gopkg.in/yaml.v3"
 )
 
 type DomainConfig struct {
@@ -129,7 +129,7 @@ func (c *OroConfig) Validate() error {
 
 func ParseConfig(data []byte) (*OroConfig, error) {
 	var c OroConfig
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder := yamlv3.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&c); err != nil {
 		return nil, err

@@ -108,5 +108,27 @@ The Orobox environment typically includes:
 - **Elasticsearch/OpenSearch**: For search functionality (optional).
 - **Mailpit**: To capture emails sent during development (optional).
 
+## Development
+
+If you want to contribute to Orobox, you can use the provided `Makefile` to simplify common development tasks.
+
+### Prerequisites
+- **Go** (version 1.25.0 or later)
+- **golangci-lint** (version 1.64.0 or later recommended)
+
+### Available Commands
+- **Run Linting**:
+  ```bash
+  make lint
+  ```
+- **Run Tests**:
+  ```bash
+  make test
+  ```
+- **Build Locally**:
+  ```bash
+  make build
+  ```
+
 ---
 Developed to simplify the work of OroCommerce developers.

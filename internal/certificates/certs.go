@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"gopkg.in/yaml.v3"
+	yamlv3 "gopkg.in/yaml.v3"
 	"orobox/internal/config"
 )
 
@@ -18,7 +18,7 @@ func InstallSslCertificates() {
 	}
 
 	var oroConfig config.OroConfig
-	err = yaml.Unmarshal(data, &oroConfig)
+	err = yamlv3.Unmarshal(data, &oroConfig)
 	if err != nil {
 		fmt.Printf("Warning: error parsing %s: %v\n", configPath, err)
 		return
