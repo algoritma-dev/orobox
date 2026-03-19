@@ -1,3 +1,4 @@
+// Package docker provides helpers to generate and run Docker Compose for Orobox.
 package docker
 
 import (
@@ -16,6 +17,9 @@ import (
 
 var memoizedComposeCmd []string
 
+// GetComposeCommand returns the docker compose command to use, preferring
+// the integrated 'docker compose' when available and falling back to
+// the legacy 'docker-compose'.
 func GetComposeCommand() []string {
 	if memoizedComposeCmd != nil {
 		return memoizedComposeCmd
@@ -31,6 +35,8 @@ func GetComposeCommand() []string {
 	return memoizedComposeCmd
 }
 
+// EnsureDockerCompose renders and writes all docker-related files under the
+// internal directory. It returns true if any file content changed.
 func EnsureDockerCompose() bool {
 	internalDir := config.GetInternalDir()
 	err := os.MkdirAll(internalDir, 0755)
@@ -59,8 +65,8 @@ func EnsureDockerCompose() bool {
 		BundleNamespace      string
 		Domains              []config.DomainConfig
 		MemoryLimit          string
-		NginxHttpPort        string
-		NginxHttpsPort       string
+		NginxHTTPPort        string
+		NginxHTTPSPort       string
 		PhpFpmPort           string
 		HasSsl               bool
 		CertsPath            string
@@ -73,20 +79,20 @@ func EnsureDockerCompose() bool {
 		PhpFpmPort:      "9000",
 	}
 
-	data.NginxHttpPort = viper.GetString("nginx_http_port")
-	if data.NginxHttpPort == "" {
-		data.NginxHttpPort = os.Getenv("ORO_NGINX_HTTP_PORT")
+	data.NginxHTTPPort = viper.GetString("nginx_http_port")
+	if data.NginxHTTPPort == "" {
+		data.NginxHTTPPort = os.Getenv("ORO_NGINX_HTTP_PORT")
 	}
-	if data.NginxHttpPort == "" {
-		data.NginxHttpPort = "8080"
+	if data.NginxHTTPPort == "" {
+		data.NginxHTTPPort = "8080"
 	}
 
-	data.NginxHttpsPort = viper.GetString("nginx_https_port")
-	if data.NginxHttpsPort == "" {
-		data.NginxHttpsPort = os.Getenv("ORO_NGINX_HTTPS_PORT")
+	data.NginxHTTPSPort = viper.GetString("nginx_https_port")
+	if data.NginxHTTPSPort == "" {
+		data.NginxHTTPSPort = os.Getenv("ORO_NGINX_HTTPS_PORT")
 	}
-	if data.NginxHttpsPort == "" {
-		data.NginxHttpsPort = "8443"
+	if data.NginxHTTPSPort == "" {
+		data.NginxHTTPSPort = "8443"
 	}
 
 	_ = viper.UnmarshalKey("domains", &data.Domains)
@@ -161,7 +167,7 @@ func EnsureDockerCompose() bool {
 	changed = writeNginxConf(internalDir, data) || changed
 	changed = writeEntrypoint(internalDir, data) || changed
 	changed = writeEnvFile(internalDir, data) || changed
-	changed = writeInitDbSql(internalDir, data) || changed
+	changed = writeInitDbSQL(internalDir, data) || changed
 
 	src := "templates/docker/docker-compose.yml"
 	composeTemplate, err := fs.ReadFile(Templates, src)
@@ -195,6 +201,8 @@ func EnsureDockerCompose() bool {
 	return true
 }
 
+// GetBaseComposeArgs returns the base arguments to pass to docker compose,
+// including project name and compose file path.
 func GetBaseComposeArgs() []string {
 	projectName := config.GetProjectName()
 	internalDir := config.GetInternalDir()
@@ -202,6 +210,8 @@ func GetBaseComposeArgs() []string {
 	return []string{"-p", projectName, "-f", composeFile}
 }
 
+// RunComposeCommand runs docker compose with the provided arguments.
+// It is a variable to allow overriding in tests.
 var RunComposeCommand = func(args ...string) error {
 	composeCmd := GetComposeCommand()
 
@@ -314,7 +324,7 @@ func writeNginxConf(internalDir string, data any) bool {
 	return true
 }
 
-func writeInitDbSql(internalDir string, data any) bool {
+func writeInitDbSQL(internalDir string, data any) bool {
 	src := "templates/docker/init-db.sql"
 	content, err := fs.ReadFile(Templates, src)
 	if err != nil {

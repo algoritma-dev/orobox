@@ -1,3 +1,4 @@
+// Package cmd contains the CLI commands for Orobox.
 package cmd
 
 import (
@@ -16,7 +17,7 @@ var rootCmd = &cobra.Command{
 	Short:   "CLI tool for OroCommerce environment setup",
 	Long:    `Orobox is a CLI tool to quickly configure an isolated development environment for OroCommerce bundles.`,
 	Version: "0.0.1-dev",
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+	PersistentPreRun: func(cmd *cobra.Command, _ []string) {
 		if ConfigError != nil && cmd.Name() != "init" {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", ConfigError)
 			os.Exit(1)
@@ -24,6 +25,8 @@ var rootCmd = &cobra.Command{
 	},
 }
 
+// Execute adds all child commands to the root command and sets flags appropriately.
+// This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
 	err := rootCmd.Execute()
 	if err != nil {
@@ -37,6 +40,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is .orobox.yaml)")
 }
 
+// ConfigError contains the error if the configuration file is invalid.
 var ConfigError error
 
 func initConfig() {

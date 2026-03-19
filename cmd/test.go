@@ -1,3 +1,4 @@
+// Package cmd contains the CLI commands for Orobox.
 package cmd
 
 import (
@@ -14,7 +15,7 @@ import (
 var testCmd = &cobra.Command{
 	Use:   "test",
 	Short: "Run tests (PHPUnit)",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, args []string) {
 		fmt.Println("Running tests...")
 		runTestCommand()
 	},

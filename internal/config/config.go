@@ -1,3 +1,4 @@
+// Package config provides configuration management for Orobox.
 package config
 
 import (
@@ -11,12 +12,14 @@ import (
 	yamlv3 "gopkg.in/yaml.v3"
 )
 
+// DomainConfig represents the configuration for a domain.
 type DomainConfig struct {
 	Host string `yaml:"host" mapstructure:"host"`
 	Root string `yaml:"root" mapstructure:"root"`
 	Ssl  bool   `yaml:"ssl" mapstructure:"ssl"`
 }
 
+// ServicesConfig represents the configuration for various services.
 type ServicesConfig struct {
 	Postgres      any    `yaml:"postgres" mapstructure:"postgres"`
 	Redis         any    `yaml:"redis" mapstructure:"redis"`
@@ -28,6 +31,7 @@ type ServicesConfig struct {
 	Elasticsearch any    `yaml:"elasticsearch" mapstructure:"elasticsearch"`
 }
 
+// OroVersions defines the versions of components for a specific OroCommerce version.
 type OroVersions struct {
 	PHP           string
 	Postgres      string
@@ -38,6 +42,7 @@ type OroVersions struct {
 	Elasticsearch string
 }
 
+// GetVersionsForOro returns the component versions for a given OroCommerce version.
 func GetVersionsForOro(oroVersion string) OroVersions {
 	switch oroVersion {
 	case "7.0":
@@ -95,6 +100,7 @@ func GetVersionsForOro(oroVersion string) OroVersions {
 	}
 }
 
+// OroConfig is the main configuration structure for Orobox.
 type OroConfig struct {
 	Type       string         `yaml:"type" mapstructure:"type"`
 	Class      string         `yaml:"class" mapstructure:"class"`
@@ -104,11 +110,13 @@ type OroConfig struct {
 	Services   ServicesConfig `yaml:"services" mapstructure:"services"`
 }
 
-const (
-	OroRootDir       = "/var/www/oro"
-	CustomBundlePath = "/src/CustomBundle"
-)
+// OroRootDir is the base directory for OroCommerce in the container.
+const OroRootDir = "/var/www/oro"
 
+// CustomBundlePath is the base path for custom bundles.
+const CustomBundlePath = "/src/CustomBundle"
+
+// Validate checks if the configuration is valid.
 func (c *OroConfig) Validate() error {
 	if c.Namespace == "" {
 		return errors.New("config error: field 'namespace' is required (did you use 'bundle_namespace' by mistake?)")
@@ -127,6 +135,7 @@ func (c *OroConfig) Validate() error {
 	return nil
 }
 
+// ParseConfig parses a configuration from bytes.
 func ParseConfig(data []byte) (*OroConfig, error) {
 	var c OroConfig
 	decoder := yamlv3.NewDecoder(bytes.NewReader(data))
@@ -137,6 +146,7 @@ func ParseConfig(data []byte) (*OroConfig, error) {
 	return &c, nil
 }
 
+// GetNamespace returns the project namespace.
 func GetNamespace() string {
 	ns := viper.GetString("namespace")
 	if ns == "" {
@@ -145,11 +155,13 @@ func GetNamespace() string {
 	return ns
 }
 
+// GetBundlePath returns the relative path to the bundle.
 func GetBundlePath() string {
 	ns := GetNamespace()
 	return strings.ReplaceAll(ns, "\\", "/")
 }
 
+// GetHostBundlePath returns the absolute path to the bundle on the host.
 func GetHostBundlePath() string {
 	configFile := viper.ConfigFileUsed()
 	if configFile == "" {
@@ -160,12 +172,14 @@ func GetHostBundlePath() string {
 	return filepath.Dir(configFile)
 }
 
+// GetProjectName returns the name of the current project.
 func GetProjectName() string {
 	// The new config doesn't have "name", so we use the directory name
 	currDir, _ := os.Getwd()
 	return filepath.Base(currDir)
 }
 
+// GetInternalDir returns the internal directory for storing Orobox data.
 func GetInternalDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -175,6 +189,7 @@ func GetInternalDir() string {
 	return filepath.Join(home, ".config", "orobox", GetProjectName())
 }
 
+// FindPhpClass tries to find a PHP class in the project directory.
 func FindPhpClass(className string) (string, string, bool) {
 	// If the user provides a full namespace like Algoritma\Bundle\ShippyProBundle\AlgoritmaShippyProBundle
 	parts := strings.Split(className, "\\")

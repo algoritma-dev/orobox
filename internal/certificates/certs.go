@@ -1,3 +1,4 @@
+// Package certificates provides functions for managing SSL certificates.
 package certificates
 
 import (
@@ -10,6 +11,7 @@ import (
 	"orobox/internal/config"
 )
 
+// InstallSslCertificates installs the SSL certificates for the configured domains.
 func InstallSslCertificates() {
 	configPath := ".orobox.yaml"
 	data, err := os.ReadFile(configPath)

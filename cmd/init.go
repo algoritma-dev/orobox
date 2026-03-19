@@ -1,3 +1,4 @@
+// Package cmd contains the CLI commands for Orobox.
 package cmd
 
 import (
@@ -29,7 +30,7 @@ var (
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize the development environment",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, args []string) {
 		absPath, err := filepath.Abs(bundlePath)
 		if err != nil {
 			panic(err)
@@ -48,9 +49,7 @@ var initCmd = &cobra.Command{
 		generateConfig()
 
 		// Reload config after generation
-		if err := viper.ReadInConfig(); err != nil {
-			// Not a fatal error if it still doesn't exist
-		}
+		_ = viper.ReadInConfig()
 
 		certificates.InstallSslCertificates()
 

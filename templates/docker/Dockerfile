@@ -150,8 +150,8 @@ RUN wget -O /usr/local/bin/php-fpm-healthcheck https://raw.githubusercontent.com
     && apk add --no-cache fcgi
 
 # Expose ports
-EXPOSE {{.NginxHttpPort}}
-{{if .HasSsl}}EXPOSE {{.NginxHttpsPort}}{{end}}
+EXPOSE {{.NginxHTTPPort}}
+{{if .HasSsl}}EXPOSE {{.NginxHTTPSPort}}{{end}}
 
 # Entrypoint and default command
 ENTRYPOINT ["docker-entrypoint.sh"]

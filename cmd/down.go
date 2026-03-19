@@ -1,3 +1,4 @@
+// Package cmd contains the CLI commands for Orobox.
 package cmd
 
 import (
@@ -10,7 +11,7 @@ import (
 var downCmd = &cobra.Command{
 	Use:   "down",
 	Short: "Shut down the environment",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, args []string) {
 		if err := docker.RunComposeCommand("down"); err != nil {
 			fmt.Printf("Shut down failed: %v\n", err)
 			return

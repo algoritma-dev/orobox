@@ -1,3 +1,4 @@
+// Package cmd contains the CLI commands for Orobox.
 package cmd
 
 import (
@@ -12,7 +13,7 @@ var cleanBeforeUp bool
 var upCmd = &cobra.Command{
 	Use:   "up",
 	Short: "Start the development environment",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, args []string) {
 		if cleanBeforeUp {
 			fmt.Println("Cleaning up environment before starting...")
 			if err := docker.RunComposeCommand("down", "-v", "--remove-orphans"); err != nil {

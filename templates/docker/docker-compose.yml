@@ -16,9 +16,9 @@ services:
       - |
         echo "Application is running..."
         {{range .Domains -}}
-        echo "Listen on: {{if .Ssl}}https://{{.Host}}{{if ne $.NginxHttpsPort "443"}}:{{$.NginxHttpsPort}}{{end}}{{else}}http://{{.Host}}{{if ne $.NginxHttpPort "80"}}:{{$.NginxHttpPort}}{{end}}{{end}}/"
+        echo "Listen on: {{if .Ssl}}https://{{.Host}}{{if ne $.NginxHTTPSPort "443"}}:{{$.NginxHTTPSPort}}{{end}}{{else}}http://{{.Host}}{{if ne $.NginxHTTPPort "80"}}:{{$.NginxHTTPPort}}{{end}}{{end}}/"
         {{else -}}
-        echo "Listen on: $${ORO_APP_PROTOCOL}://$${ORO_APP_DOMAIN}{{if and (ne .NginxHttpPort "80") (ne .NginxHttpPort "443")}}:{{.NginxHttpPort}}{{end}}/"
+        echo "Listen on: $${ORO_APP_PROTOCOL}://$${ORO_APP_DOMAIN}{{if and (ne .NginxHTTPPort "80") (ne .NginxHTTPPort "443")}}:{{.NginxHTTPPort}}{{end}}/"
         {{end -}}
         exec tail -f /dev/null
     env_file: .env
@@ -48,16 +48,16 @@ services:
     env_file: .env
     restart: unless-stopped
     healthcheck:
-      test: "curl -If http://127.0.0.1:{{.NginxHttpPort}}/"
+      test: "curl -If http://127.0.0.1:{{.NginxHTTPPort}}/"
       interval: 15s
       timeout: 30s
       start_period: 15s
     ports:
-      - published: {{.NginxHttpPort}}
-        target: {{.NginxHttpPort}}
+      - published: {{.NginxHTTPPort}}
+        target: {{.NginxHTTPPort}}
       {{if .HasSsl -}}
-      - published: {{.NginxHttpsPort}}
-        target: {{.NginxHttpsPort}}
+      - published: {{.NginxHTTPSPort}}
+        target: {{.NginxHTTPSPort}}
       {{- end}}
     depends_on:
       "web-init":
