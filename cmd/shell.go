@@ -26,7 +26,7 @@ func init() {
 	rootCmd.AddCommand(shellCmd)
 }
 
-func runInteractiveShell(service string) {
+var runInteractiveShell = func(service string) {
 	composeCmd := docker.GetComposeCommand()
 	binary, err := exec.LookPath(composeCmd[0])
 	if err != nil {

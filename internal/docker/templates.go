@@ -1,5 +1,5 @@
 package docker
 
-import "embed"
+import "io/fs"
 
-var Templates embed.FS
+var Templates fs.FS

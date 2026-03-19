@@ -3,6 +3,7 @@ package docker
 import (
 	"bytes"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -163,7 +164,7 @@ func EnsureDockerCompose() bool {
 	changed = writeInitDbSql(internalDir, data) || changed
 
 	src := "templates/docker/docker-compose.yml"
-	composeTemplate, err := Templates.ReadFile(src)
+	composeTemplate, err := fs.ReadFile(Templates, src)
 	if err != nil {
 		fmt.Printf("Warning: could not read template %s: %v\n", src, err)
 		return changed
@@ -201,7 +202,7 @@ func GetBaseComposeArgs() []string {
 	return []string{"-p", projectName, "-f", composeFile}
 }
 
-func RunComposeCommand(args ...string) error {
+var RunComposeCommand = func(args ...string) error {
 	composeCmd := GetComposeCommand()
 
 	argsToRun := append(composeCmd[1:], GetBaseComposeArgs()...)
@@ -216,7 +217,7 @@ func RunComposeCommand(args ...string) error {
 
 func writeDockerfile(internalDir string, data any) bool {
 	src := "templates/docker/Dockerfile"
-	dockerfileContent, err := Templates.ReadFile(src)
+	dockerfileContent, err := fs.ReadFile(Templates, src)
 	if err != nil {
 		fmt.Printf("Warning: could not read template %s: %v\n", src, err)
 		return false
@@ -249,7 +250,7 @@ func writeDockerfile(internalDir string, data any) bool {
 
 func writeEnvFile(internalDir string, data any) bool {
 	src := "templates/docker/.env"
-	envContent, err := Templates.ReadFile(src)
+	envContent, err := fs.ReadFile(Templates, src)
 	if err != nil {
 		fmt.Printf("Warning: could not read template %s: %v\n", src, err)
 		return false
@@ -282,7 +283,7 @@ func writeEnvFile(internalDir string, data any) bool {
 
 func writeNginxConf(internalDir string, data any) bool {
 	src := "templates/docker/nginx.conf"
-	nginxContent, err := Templates.ReadFile(src)
+	nginxContent, err := fs.ReadFile(Templates, src)
 	if err != nil {
 		fmt.Printf("Warning: could not read template %s: %v\n", src, err)
 		return false
@@ -315,7 +316,7 @@ func writeNginxConf(internalDir string, data any) bool {
 
 func writeInitDbSql(internalDir string, data any) bool {
 	src := "templates/docker/init-db.sql"
-	content, err := Templates.ReadFile(src)
+	content, err := fs.ReadFile(Templates, src)
 	if err != nil {
 		fmt.Printf("Warning: could not read template %s: %v\n", src, err)
 		return false
@@ -348,7 +349,7 @@ func writeInitDbSql(internalDir string, data any) bool {
 
 func writeEntrypoint(internalDir string, data any) bool {
 	src := "templates/docker/docker-entrypoint.sh"
-	content, err := Templates.ReadFile(src)
+	content, err := fs.ReadFile(Templates, src)
 	if err != nil {
 		fmt.Printf("Warning: could not read template %s: %v\n", src, err)
 		return false

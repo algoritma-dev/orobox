@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,9 +19,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var bundlePath string
-var oroVersion string
-var bundleNamespace string
+var (
+	bundlePath      string
+	oroVersion      string
+	bundleNamespace string
+	stdin           io.Reader = os.Stdin
+)
 
 var initCmd = &cobra.Command{
 	Use:   "init",
@@ -85,7 +89,7 @@ func generateConfig() {
 	}
 
 	fmt.Println("Config file .orobox.yaml not found or invalid. Let's create it interactively.")
-	reader := bufio.NewReader(os.Stdin)
+	reader := bufio.NewReader(stdin)
 
 	bundleClass := utils.AskQuestion(reader, "Full bundle class (eg: Algoritma\\Bundle\\ShippyProBundle\\AlgoritmaShippyProBundle)", "")
 
