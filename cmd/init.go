@@ -30,7 +30,7 @@ var (
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize the development environment",
-	Run: func(_ *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, _ []string) {
 		absPath, err := filepath.Abs(bundlePath)
 		if err != nil {
 			panic(err)

@@ -15,7 +15,7 @@ import (
 var testCmd = &cobra.Command{
 	Use:   "test",
 	Short: "Run tests (PHPUnit)",
-	Run: func(_ *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, _ []string) {
 		fmt.Println("Running tests...")
 		runTestCommand()
 	},

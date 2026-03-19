@@ -13,7 +13,7 @@ var cleanBeforeUp bool
 var upCmd = &cobra.Command{
 	Use:   "up",
 	Short: "Start the development environment",
-	Run: func(_ *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, _ []string) {
 		if cleanBeforeUp {
 			fmt.Println("Cleaning up environment before starting...")
 			if err := docker.RunComposeCommand("down", "-v", "--remove-orphans"); err != nil {
