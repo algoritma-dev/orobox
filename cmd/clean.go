@@ -12,6 +12,7 @@ var cleanCmd = &cobra.Command{
 	Use:   "clean",
 	Short: "Remove all containers and volumes to start fresh",
 	Run: func(_ *cobra.Command, _ []string) {
+		docker.EnsureDockerCompose()
 		fmt.Println("Cleaning up environment (removing containers and volumes)...")
 		if err := docker.RunComposeCommand("down", "-v", "--remove-orphans"); err != nil {
 			fmt.Printf("Cleanup failed: %v\n", err)

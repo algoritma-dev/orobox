@@ -102,7 +102,7 @@ RUN apk add --no-cache --virtual .build-deps $PHPIZE_DEPS \
     && docker-php-ext-enable xdebug \
     && mv /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini.disabled \
     && apk del .build-deps \
-    && chown -R www-data:www-data /usr/local/etc/php/conf.d
+    && chmod -R 777 /usr/local/etc/php/conf.d
 
 # PHP Configuration
 RUN { \

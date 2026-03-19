@@ -16,6 +16,7 @@ var testCmd = &cobra.Command{
 	Use:   "test",
 	Short: "Run tests (PHPUnit)",
 	Run: func(_ *cobra.Command, _ []string) {
+		docker.EnsureDockerCompose()
 		fmt.Println("Running tests...")
 		runTestCommand()
 	},

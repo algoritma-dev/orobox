@@ -15,6 +15,7 @@ var shellCmd = &cobra.Command{
 	Short: "Interactive access to the container",
 	Args:  cobra.MaximumNArgs(1),
 	Run: func(_ *cobra.Command, args []string) {
+		docker.EnsureDockerCompose()
 		service := "application"
 		if len(args) > 0 {
 			service = args[0]

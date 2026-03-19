@@ -14,6 +14,15 @@ var upCmd = &cobra.Command{
 	Use:   "up",
 	Short: "Start the development environment",
 	Run: func(_ *cobra.Command, _ []string) {
+		dockerfileIsChanged := docker.EnsureDockerCompose()
+		if dockerfileIsChanged {
+			fmt.Println("Configuration changed, rebuilding containers...")
+			if err := docker.RunComposeCommand("build"); err != nil {
+				fmt.Printf("Build failed: %v\n", err)
+				return
+			}
+		}
+
 		if cleanBeforeUp {
 			fmt.Println("Cleaning up environment before starting...")
 			if err := docker.RunComposeCommand("down", "-v", "--remove-orphans"); err != nil {
