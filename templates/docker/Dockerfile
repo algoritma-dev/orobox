@@ -1,0 +1,158 @@
+# Dockerfile template for OroCommerce development
+ARG PHP_VERSION=8.1
+ARG NODE_VERSION=18
+ARG NPM_VERSION=10
+ARG MEMORY_LIMIT=2048M
+
+# Get Node from official image
+FROM node:${NODE_VERSION}-alpine AS node_image
+
+FROM php:${PHP_VERSION}-fpm-alpine
+
+ARG MEMORY_LIMIT
+
+# Install system dependencies
+RUN apk add --no-cache \
+    nginx \
+    jq \
+    chromium \
+    bash \
+    curl \
+    chromium-chromedriver \
+    postgresql-client \
+    postgresql-dev \
+    libpng-dev \
+    libjpeg-turbo-dev \
+    freetype-dev \
+    libwebp-dev \
+    libzip-dev \
+    icu-dev \
+    libxml2-dev \
+    tidyhtml-dev \
+    imap-dev \
+    krb5-dev \
+    openssl-dev \
+    jpegoptim \
+    pngquant \
+    optipng \
+    libjpeg-turbo \
+    libpng \
+    libwebp \
+    freetype \
+    libjpeg-turbo-utils \
+    git \
+    unzip \
+    libstdc++ \
+    libgcc \
+    ca-certificates
+
+# Install Composer
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+ENV COMPOSER_ALLOW_SUPERUSER=1
+
+# Install Node.js from official image
+COPY --from=node_image /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=node_image /usr/local/bin/node /usr/local/bin/node
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && npm install -g npm@${NPM_VERSION}
+
+# Install PHP extensions
+{{ if eq .PHPVersion "8.4" -}}
+RUN docker-php-source extract \
+    && mkdir -p /usr/src/php/ext/imap \
+    && curl -fsSL https://pecl.php.net/get/imap | tar xvz -C /usr/src/php/ext/imap --strip-components=1 \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
+    && docker-php-ext-configure imap --with-kerberos --with-imap-ssl \
+    && docker-php-ext-install -j$(nproc) \
+        gd \
+        pdo_pgsql \
+        intl \
+        zip \
+        opcache \
+        bcmath \
+        soap \
+        xml \
+        pcntl \
+        tidy \
+        imap \
+    && docker-php-source delete
+{{- else -}}
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
+    && docker-php-ext-configure imap --with-kerberos --with-imap-ssl \
+    && docker-php-ext-install -j$(nproc) \
+        gd \
+        pdo_pgsql \
+        intl \
+        zip \
+        opcache \
+        bcmath \
+        soap \
+        xml \
+        pcntl \
+        tidy \
+        imap
+{{- end }}
+
+# PHP Configuration
+RUN { \
+        echo "memory_limit=${MEMORY_LIMIT}"; \
+        echo 'upload_max_filesize=100M'; \
+        echo 'post_max_size=100M'; \
+        echo 'max_execution_time=600'; \
+        echo 'date.timezone=UTC'; \
+        echo 'short_open_tag=off'; \
+        echo 'intl.error_level=0'; \
+        echo "opcache.enable=1"; \
+        echo "opcache.enable_cli=1"; \
+        echo 'opcache.memory_consumption=256'; \
+        echo 'opcache.interned_strings_buffer=16'; \
+        echo 'opcache.max_accelerated_files=20000'; \
+        echo 'opcache.validate_timestamps=1'; \
+        echo 'opcache.revalidate_freq=0'; \
+        echo 'opcache.fast_shutdown=1'; \
+    } > /usr/local/etc/php/conf.d/oro-custom.ini
+
+# Configure Nginx
+COPY nginx.conf /etc/nginx/http.d/default.conf
+
+# Fix Nginx permissions to run as non-root
+RUN mkdir -p /var/lib/nginx/tmp /var/lib/nginx/logs /var/log/nginx /run/nginx \
+    && chown -R www-data:www-data /var/lib/nginx /var/log/nginx /run/nginx \
+    && sed -i 's/^#*user .*/user www-data;/' /etc/nginx/nginx.conf \
+    && ln -sf /dev/stdout /var/log/nginx/access.log \
+    && ln -sf /dev/stderr /var/log/nginx/error.log \
+    && ln -sf /dev/stderr /var/lib/nginx/logs/error.log
+
+# Set up working directory
+WORKDIR {{.OroRootDir}}
+
+# Install OroCommerce
+RUN composer create-project oro/commerce-crm-application . {{.OroVersion}} --no-interaction --prefer-dist \
+    && ./bin/simple-phpunit --version \
+    && chown -R www-data:www-data . \
+    && ln -sf /usr/bin/jpegoptim /usr/local/bin/jpegoptim \
+    && ln -sf /usr/bin/pngquant /usr/local/bin/pngquant \
+    && ln -sf /usr/bin/optipng /usr/local/bin/optipng \
+    && rm -f /usr/local/etc/php/conf.d/*phar* || true
+
+# Create required directories for nginx and tools
+RUN mkdir -p /opt/oro-nginx-tool /opt/oro-nginx/etc/sites-available \
+    && echo '{"properties": {"sites": {"propertyNames": {"pattern": ""}}}}' > /opt/oro-nginx-tool/variables.schema.json
+
+# Copy entrypoint script
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Install php-fpm-healthcheck
+RUN wget -O /usr/local/bin/php-fpm-healthcheck https://raw.githubusercontent.com/renatomefi/php-fpm-healthcheck/master/php-fpm-healthcheck \
+    && chmod +x /usr/local/bin/php-fpm-healthcheck \
+    && apk add --no-cache fcgi
+
+# Expose ports
+EXPOSE {{.NginxHttpPort}}
+{{if .HasSsl}}EXPOSE {{.NginxHttpsPort}}{{end}}
+
+# Entrypoint and default command
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["nginx"]
