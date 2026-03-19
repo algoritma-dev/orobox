@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"text/template"
 
-	"orobox/internal/config"
+	"github.com/algoritma-dev/orobox/internal/config"
 
 	"github.com/spf13/viper"
 )

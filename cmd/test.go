@@ -3,8 +3,8 @@ package cmd
 
 import (
 	"fmt"
-	"orobox/internal/config"
-	"orobox/internal/docker"
+	"github.com/algoritma-dev/orobox/internal/config"
+	"github.com/algoritma-dev/orobox/internal/docker"
 	"os"
 
 	"github.com/spf13/cobra"

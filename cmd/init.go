@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"orobox/internal/certificates"
-	"orobox/internal/config"
-	"orobox/internal/docker"
-	"orobox/internal/utils"
+	"github.com/algoritma-dev/orobox/internal/certificates"
+	"github.com/algoritma-dev/orobox/internal/config"
+	"github.com/algoritma-dev/orobox/internal/docker"
+	"github.com/algoritma-dev/orobox/internal/utils"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"

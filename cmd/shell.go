@@ -2,7 +2,7 @@
 package cmd
 
 import (
-	"orobox/internal/docker"
+	"github.com/algoritma-dev/orobox/internal/docker"
 	"os"
 	"os/exec"
 	"syscall"

@@ -3,8 +3,8 @@ package main
 
 import (
 	"embed"
-	"orobox/cmd"
-	"orobox/internal/docker"
+	"github.com/algoritma-dev/orobox/cmd"
+	"github.com/algoritma-dev/orobox/internal/docker"
 )
 
 //go:embed all:templates/*

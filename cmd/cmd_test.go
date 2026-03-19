@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"bytes"
-	"orobox/internal/docker"
+	"github.com/algoritma-dev/orobox/internal/docker"
 	"strings"
 	"testing"
 )

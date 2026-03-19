@@ -7,8 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/algoritma-dev/orobox/internal/config"
 	yamlv3 "gopkg.in/yaml.v3"
-	"orobox/internal/config"
 )
 
 // InstallSslCertificates installs the SSL certificates for the configured domains.

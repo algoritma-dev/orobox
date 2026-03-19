@@ -1,4 +1,4 @@
-module orobox
+module github.com/algoritma-dev/orobox
 
 go 1.25.0
 
