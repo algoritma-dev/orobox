@@ -149,10 +149,13 @@ func generateConfig() {
 			},
 		},
 		Services: config.ServicesConfig{
-			Postgres:      versions.Postgres,
-			Redis:         redis,
-			Mailpit:       mailpit,
-			PhpVersion:    versions.PHP,
+			Postgres: versions.Postgres,
+			Redis:    redis,
+			Mailpit:  mailpit,
+			Php: config.PhpConfig{
+				Version: versions.PHP,
+				Xdebug:  false,
+			},
 			NodeVersion:   versions.Node,
 			NpmVersion:    versions.NPM,
 			RabbitMQ:      rabbitmq,

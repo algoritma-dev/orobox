@@ -70,6 +70,7 @@ func EnsureDockerCompose() bool {
 		PhpFpmPort           string
 		HasSsl               bool
 		CertsPath            string
+		Xdebug               bool
 	}{
 		InternalDir:     internalDir,
 		OroRootDir:      config.OroRootDir,
@@ -117,7 +118,7 @@ func EnsureDockerCompose() bool {
 
 	versions := config.GetVersionsForOro(oroVersion)
 
-	data.PHPVersion = viper.GetString("services.php_version")
+	data.PHPVersion = viper.GetString("services.php.version")
 	if data.PHPVersion == "" {
 		data.PHPVersion = versions.PHP
 	}
@@ -161,6 +162,7 @@ func EnsureDockerCompose() bool {
 		data.RedisVersion = versions.Redis
 	}
 	data.Mailpit = viper.GetBool("services.mailpit")
+	data.Xdebug = viper.GetBool("services.php.xdebug")
 
 	changed := false
 	changed = writeDockerfile(internalDir, data) || changed

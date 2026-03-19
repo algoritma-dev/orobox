@@ -10,6 +10,17 @@ fi
 ORO_ROOT_DIR={{.OroRootDir}}
 cd ${ORO_ROOT_DIR}
 
+# Enable/Disable Xdebug
+if [ "$ORO_XDEBUG_ENABLED" = "true" ] || [ "$ORO_XDEBUG_ENABLED" = "1" ]; then
+    if [ -f /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini.disabled ]; then
+        mv /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini.disabled /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini
+    fi
+else
+    if [ -f /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini ]; then
+        mv /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini.disabled
+    fi
+fi
+
 case "$1" in
     nginx)
         if [ -n "$ORO_USER_RUNTIME" ]; then

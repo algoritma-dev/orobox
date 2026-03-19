@@ -37,7 +37,9 @@ services:
   postgres: "16.1-alpine"
   redis: "7.2-alpine"
   mailpit: true
-  php_version: "8.4"
+  php:
+    version: "8.4"
+    xdebug: true
   node_version: "22"
   npm_version: "10"
   rabbitmq: "3.12-management-alpine"

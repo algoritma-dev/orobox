@@ -12,11 +12,11 @@ func TestGetVersionsForOro(t *testing.T) {
 		version string
 		wantPHP string
 	}{
-		{"7.0", "8.5"},
+		{"7.0", "8.4"},
 		{"6.1", "8.4"},
 		{"6.0", "8.3"},
 		{"5.1", "8.2"},
-		{"7.1", "8.5"}, // fallback to 7.0
+		{"7.1", "8.4"}, // fallback to 7.0
 		{"6.2", "8.4"}, // fallback to 6.1
 		{"4.0", "8.2"}, // fallback to 5.1
 	}
@@ -108,6 +108,9 @@ domains:
     ssl: true
 services:
   mailpit: true
+  php:
+    version: "8.4"
+    xdebug: true
 `
 	config, err := ParseConfig([]byte(yamlData))
 	if err != nil {
@@ -125,6 +128,12 @@ services:
 	}
 	if !config.Services.Mailpit {
 		t.Errorf("Expected mailpit to be true")
+	}
+	if config.Services.Php.Version != "8.4" {
+		t.Errorf("Expected php version 8.4, got %s", config.Services.Php.Version)
+	}
+	if !config.Services.Php.Xdebug {
+		t.Errorf("Expected xdebug to be true")
 	}
 }
 

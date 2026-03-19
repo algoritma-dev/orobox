@@ -44,7 +44,8 @@ RUN apk add --no-cache \
     unzip \
     libstdc++ \
     libgcc \
-    ca-certificates
+    ca-certificates \
+    linux-headers
 
 # Install Composer
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
@@ -93,6 +94,15 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
         tidy \
         imap
 {{- end }}
+
+# Install Xdebug and PCOV
+RUN apk add --no-cache --virtual .build-deps $PHPIZE_DEPS \
+    && pecl install xdebug pcov \
+    && docker-php-ext-enable pcov \
+    && docker-php-ext-enable xdebug \
+    && mv /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini.disabled \
+    && apk del .build-deps \
+    && chown -R www-data:www-data /usr/local/etc/php/conf.d
 
 # PHP Configuration
 RUN { \
