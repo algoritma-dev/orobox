@@ -20,11 +20,11 @@ builds:
 
 archives:
   - id: archives
-    format: tar.gz
+    formats: ["tar.gz"]
     # use zip for windows archives
-    format_overrides:
+    formats_overrides:
       - goos: windows
-        format: zip
+        formats: ["zip"]
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
@@ -37,7 +37,7 @@ archives:
       - README.md
 
   - id: binaries
-    format: binary
+    formats: ["binary"]
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
