@@ -42,6 +42,9 @@ type OroVersions struct {
 	Elasticsearch string
 }
 
+// SupportedOroVersions is the list of supported OroCommerce versions.
+var SupportedOroVersions = []string{"7.0", "6.1", "6.0", "5.1"}
+
 // GetVersionsForOro returns the component versions for a given OroCommerce version.
 func GetVersionsForOro(oroVersion string) OroVersions {
 	switch oroVersion {

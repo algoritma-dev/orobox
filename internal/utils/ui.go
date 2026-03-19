@@ -32,3 +32,41 @@ func AskYesNo(reader *bufio.Reader, question string, defaultValue bool) bool {
 	}
 	return input == "y" || input == "yes"
 }
+
+// AskSelection asks a multiple choice question to the user and returns the selected value.
+func AskSelection(reader *bufio.Reader, question string, options []string, defaultValue string) string {
+	fmt.Printf("%s\n", question)
+	for i, option := range options {
+		fmt.Printf("  [%d] %s\n", i+1, option)
+	}
+
+	defaultIdx := -1
+	for i, option := range options {
+		if option == defaultValue {
+			defaultIdx = i + 1
+			break
+		}
+	}
+
+	if defaultIdx != -1 {
+		fmt.Printf("Selection [%d]: ", defaultIdx)
+	} else {
+		fmt.Printf("Selection: ")
+	}
+
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(input)
+
+	if input == "" && defaultIdx != -1 {
+		return defaultValue
+	}
+
+	var idx int
+	_, err := fmt.Sscanf(input, "%d", &idx)
+	if err != nil || idx < 1 || idx > len(options) {
+		fmt.Println("Invalid selection, please try again.")
+		return AskSelection(reader, question, options, defaultValue)
+	}
+
+	return options[idx-1]
+}

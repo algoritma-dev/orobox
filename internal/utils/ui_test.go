@@ -99,3 +99,48 @@ func TestAskYesNo(t *testing.T) {
 		})
 	}
 }
+
+func TestAskSelection(t *testing.T) {
+	options := []string{"7.0", "6.1", "6.0"}
+	tests := []struct {
+		name         string
+		input        string
+		defaultValue string
+		want         string
+	}{
+		{
+			name:         "valid selection 1",
+			input:        "1\n",
+			defaultValue: "6.1",
+			want:         "7.0",
+		},
+		{
+			name:         "valid selection 2",
+			input:        "2\n",
+			defaultValue: "7.0",
+			want:         "6.1",
+		},
+		{
+			name:         "empty input uses default",
+			input:        "\n",
+			defaultValue: "6.0",
+			want:         "6.0",
+		},
+		{
+			name:         "invalid then valid selection",
+			input:        "99\n3\n",
+			defaultValue: "7.0",
+			want:         "6.0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := bufio.NewReader(strings.NewReader(tt.input))
+			got := AskSelection(reader, "Select version", options, tt.defaultValue)
+			if got != tt.want {
+				t.Errorf("AskSelection() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

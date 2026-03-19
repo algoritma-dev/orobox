@@ -112,7 +112,7 @@ func generateConfig() {
 		}
 	}
 
-	version := utils.AskQuestion(reader, "OroCommerce version", oroVersion)
+	version := utils.AskSelection(reader, "OroCommerce version", config.SupportedOroVersions, oroVersion)
 	host := utils.AskQuestion(reader, "Main domain host", "localhost")
 	root := utils.AskQuestion(reader, "Main domain root", "public")
 	ssl := utils.AskYesNo(reader, "Enable SSL?", false)

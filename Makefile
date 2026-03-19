@@ -11,3 +11,5 @@ build:
 
 clean:
 	rm -f orobox
+
+pre-commit: lint test build

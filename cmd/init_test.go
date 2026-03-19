@@ -20,7 +20,7 @@ func TestGenerateConfig(t *testing.T) {
 
 	// Simulate interactive input:
 	// 1. Bundle class: Algoritma\Bundle\TestBundle\TestBundle
-	// 2. OroCommerce version: 7.0
+	// 2. OroCommerce version (selection 1 = 7.0)
 	// 3. Host: test.local
 	// 4. Root: public
 	// 5. SSL: n
@@ -28,7 +28,7 @@ func TestGenerateConfig(t *testing.T) {
 	// 7. Mailpit: y
 	// 8. RabbitMQ: y
 	// 9. Elasticsearch: y
-	input := "Algoritma\\Bundle\\TestBundle\\TestBundle\n7.0\ntest.local\npublic\nn\ny\ny\ny\ny\n"
+	input := "Algoritma\\Bundle\\TestBundle\\TestBundle\n1\ntest.local\npublic\nn\ny\ny\ny\ny\n"
 
 	oldStdin := stdin
 	stdin = strings.NewReader(input)
