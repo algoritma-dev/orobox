@@ -14,7 +14,7 @@ Before installing Orobox, ensure you have the following installed on your system
 To install Orobox, run the following command in your terminal:
 
 ```bash
-curl -sSL https://github.com/algoritma-dev/orobox/releases/latest/download/orobox -o ~/.local/bin/orobox && chmod +x ~/.local/bin/orobox && hash -r
+curl -sSL https://github.com/algoritma-dev/orobox/releases/download/0.0.1-dev/orobox -o ~/.local/bin/orobox && chmod +x ~/.local/bin/orobox && hash -r
 ```
 
 *Note: This command installs the `orobox` binary to your `~/.local/bin` directory. Ensure this directory is in your `PATH`.*
