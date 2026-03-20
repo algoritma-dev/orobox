@@ -84,6 +84,10 @@ services:
       - nginx:/opt/oro-nginx
       - public_storage:/var/www/oro/public/media:ro
       - private_storage:/var/www/oro/var/data:ro
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          mode: 1777
       {{if .HasSsl -}}
       - {{.CertsPath}}:/etc/nginx/certs:ro
       {{- end}}
@@ -133,6 +137,10 @@ services:
         condition: service_started
     volumes:
       - nginx:/opt/oro-nginx
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          mode: 1777
 
   php-fpm-app:
     image: orobox-app:{{.OroVersion}}-latest
