@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"fmt"
+
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
 	"github.com/spf13/viper"
@@ -45,6 +46,15 @@ var upCmd = &cobra.Command{
 		}
 
 		fmt.Println("\nOrobox is up and running!")
+
+		for _, url := range docker.GetApplicationURLs() {
+			fmt.Printf("- %s\n", url)
+		}
+
+		if viper.GetBool("services.mailpit") {
+			fmt.Println("\nMailpit is available at:")
+			fmt.Println("- http://localhost:8025")
+		}
 
 		if viper.GetBool("services.php.xdebug") {
 			fmt.Println("\nXdebug is ENABLED.")

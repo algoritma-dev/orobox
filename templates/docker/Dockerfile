@@ -174,25 +174,29 @@ RUN --mount=type=cache,target=/root/.composer/cache \
     until su postgres -s /bin/sh -c "pg_isready -q"; do sleep 1; done; \
     su postgres -s /bin/sh -c "psql --command \"CREATE USER oro_db_user WITH SUPERUSER PASSWORD 'oro_db_pass';\"" || { cat /tmp/pg.log; exit 1; }; \
     su postgres -s /bin/sh -c "createdb -O oro_db_user oro_db" || { cat /tmp/pg.log; exit 1; }; \
+    su postgres -s /bin/sh -c "psql -d oro_db -c 'CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"; CREATE EXTENSION IF NOT EXISTS \"pg_trgm\";'"; \
     su postgres -s /bin/sh -c "createdb -O oro_db_user oro_db_test" || { cat /tmp/pg.log; exit 1; }; \
+    su postgres -s /bin/sh -c "psql -d oro_db_test -c 'CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"; CREATE EXTENSION IF NOT EXISTS \"pg_trgm\";'"; \
     export ORO_DB_URL=postgresql://oro_db_user:oro_db_pass@127.0.0.1/oro_db; \
     export ORO_MQ_DSN=dbal: ORO_SEARCH_ENGINE_DSN=orm: ORO_SESSION_DSN=native:; \
     php bin/console oro:install --no-interaction --application-url={{with index .Domains 0}}http{{if .Ssl}}s{{end}}://{{.Host}}/{{end}} --organization-name=OroInc --user-name=admin --user-email=admin@example.com --user-firstname=John --user-lastname=Doe --user-password=admin --sample-data=y; \
     PGPASSWORD=oro_db_pass pg_dump -h 127.0.0.1 -U oro_db_user oro_db | gzip > /opt/oro_backups/oro_db_dev.sql.gz; \
-    export ORO_ENV=test ORO_DB_URL=postgresql://oro_db_user:oro_db_pass@127.0.0.1/oro_db_test; \
-    php bin/console oro:install --no-interaction; \
+    export ORO_DB_URL=postgresql://oro_db_user:oro_db_pass@127.0.0.1/oro_db_test; \
+    php bin/console --env=test oro:install --no-interaction; \
     PGPASSWORD=oro_db_pass pg_dump -h 127.0.0.1 -U oro_db_user oro_db_test | gzip > /opt/oro_backups/oro_db_test.sql.gz; \
     ls -lh /opt/oro_backups/; \
     [ -s /opt/oro_backups/oro_db_dev.sql.gz ] || { echo "Error: oro_db_dev.sql.gz is missing or empty"; exit 1; }; \
     [ -s /opt/oro_backups/oro_db_test.sql.gz ] || { echo "Error: oro_db_test.sql.gz is missing or empty"; exit 1; }; \
     su postgres -s /bin/sh -c "pg_ctl -D /var/lib/postgresql/data stop"; \
-    rm -f /tmp/pg.log; \
+    rm -rf /tmp/*; \
+    chmod 1777 /tmp; \
     apk del postgresql postgresql-contrib; \
     chown -R www-data:www-data .; \
     ln -sf /usr/bin/jpegoptim /usr/local/bin/jpegoptim; \
     ln -sf /usr/bin/pngquant /usr/local/bin/pngquant; \
     ln -sf /usr/bin/optipng /usr/local/bin/optipng; \
-    rm -f /usr/local/etc/php/conf.d/*phar* || true
+    rm -f /usr/local/etc/php/conf.d/*phar* || true \
+    unset ORO_DB_URL ORO_MQ_DSN ORO_SEARCH_ENGINE_DSN ORO_SESSION_DSN
 
 # Create required directories for nginx and tools
 RUN mkdir -p /opt/oro-nginx-tool /opt/oro-nginx/etc/sites-available \

@@ -35,6 +35,51 @@ func GetComposeCommand() []string {
 	return memoizedComposeCmd
 }
 
+// GetNginxPorts returns the configured HTTP and HTTPS ports for Nginx.
+func GetNginxPorts() (httpPort string, httpsPort string) {
+	httpPort = viper.GetString("nginx_http_port")
+	if httpPort == "" {
+		httpPort = os.Getenv("ORO_NGINX_HTTP_PORT")
+	}
+	if httpPort == "" {
+		httpPort = "8080"
+	}
+
+	httpsPort = viper.GetString("nginx_https_port")
+	if httpsPort == "" {
+		httpsPort = os.Getenv("ORO_NGINX_HTTPS_PORT")
+	}
+	if httpsPort == "" {
+		httpsPort = "8443"
+	}
+	return
+}
+
+// GetApplicationURLs returns the list of URLs where the application is reachable.
+func GetApplicationURLs() []string {
+	var domains []config.DomainConfig
+	_ = viper.UnmarshalKey("domains", &domains)
+
+	httpPort, httpsPort := GetNginxPorts()
+
+	urls := make([]string, 0, len(domains))
+	for _, d := range domains {
+		protocol := "http"
+		port := httpPort
+		if d.Ssl {
+			protocol = "https"
+			port = httpsPort
+		}
+
+		url := fmt.Sprintf("%s://%s", protocol, d.Host)
+		if (protocol == "http" && port != "80") || (protocol == "https" && port != "443") {
+			url += ":" + port
+		}
+		urls = append(urls, url)
+	}
+	return urls
+}
+
 // EnsureDockerCompose renders and writes all docker-related files under the
 // internal directory. It returns true if any file content changed.
 func EnsureDockerCompose() bool {
@@ -80,21 +125,7 @@ func EnsureDockerCompose() bool {
 		PhpFpmPort:      "9000",
 	}
 
-	data.NginxHTTPPort = viper.GetString("nginx_http_port")
-	if data.NginxHTTPPort == "" {
-		data.NginxHTTPPort = os.Getenv("ORO_NGINX_HTTP_PORT")
-	}
-	if data.NginxHTTPPort == "" {
-		data.NginxHTTPPort = "8080"
-	}
-
-	data.NginxHTTPSPort = viper.GetString("nginx_https_port")
-	if data.NginxHTTPSPort == "" {
-		data.NginxHTTPSPort = os.Getenv("ORO_NGINX_HTTPS_PORT")
-	}
-	if data.NginxHTTPSPort == "" {
-		data.NginxHTTPSPort = "8443"
-	}
+	data.NginxHTTPPort, data.NginxHTTPSPort = GetNginxPorts()
 
 	_ = viper.UnmarshalKey("domains", &data.Domains)
 	for _, domain := range data.Domains {

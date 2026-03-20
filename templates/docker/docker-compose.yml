@@ -28,6 +28,12 @@ services:
       - oro_app:/var/www/oro
       - {{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}
       - cache:/var/www/oro/var/cache
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          mode: 1777
+    tmpfs:
+      - /run
     depends_on:
       "web":
         condition: service_started
@@ -153,7 +159,6 @@ services:
       ORO_ENV: ${ORO_ENV:-dev}
       ORO_LOG_PATH: php://stderr
     tmpfs:
-      - /tmp
       - /run
     depends_on:
       {{if .Postgres -}}
@@ -186,6 +191,10 @@ services:
       - maintenance_folder:${ORO_MAINTENANCE_LOCK_FOLDER:-/var/www/oro/var/maintenance}
       - public_storage:/var/www/oro/public/media
       - private_storage:/var/www/oro/var/data
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          mode: 1777
 
   ws:
     image: orobox-app:{{.OroVersion}}-latest
@@ -209,7 +218,6 @@ services:
       ORO_LOG_PATH: php://stderr
       ORO_XDEBUG_ENABLED: "false"
     tmpfs:
-      - /tmp
       - /run
     depends_on:
       "php-fpm-app":
@@ -221,6 +229,10 @@ services:
       - maintenance_folder:${ORO_MAINTENANCE_LOCK_FOLDER:-/var/www/oro/var/maintenance}
       - public_storage:/var/www/oro/public/media
       - private_storage:/var/www/oro/var/data
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          mode: 1777
 
   consumer:
     image: orobox-app:{{.OroVersion}}-latest
@@ -244,7 +256,6 @@ services:
       ORO_LOG_PATH: php://stderr
       ORO_XDEBUG_ENABLED: ${ORO_CONSUMER_XDEBUG_ENABLED:-false}
     tmpfs:
-      - /tmp
       - /run
     depends_on:
       "php-fpm-app":
@@ -256,6 +267,10 @@ services:
       - maintenance_folder:${ORO_MAINTENANCE_LOCK_FOLDER:-/var/www/oro/var/maintenance}
       - public_storage:/var/www/oro/public/media
       - private_storage:/var/www/oro/var/data
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          mode: 1777
 
   cron:
     image: orobox-app:{{.OroVersion}}-latest
@@ -280,9 +295,8 @@ services:
       ORO_ENV: ${ORO_ENV:-dev}
       ORO_LOG_PATH: php://stderr
       ORO_XDEBUG_ENABLED: ${ORO_CRON_XDEBUG_ENABLED:-false}
-    depends_on:
-      "php-fpm-app":
-        condition: service_healthy
+    tmpfs:
+      - /run
     volumes:
       - oro_app:/var/www/oro
       - {{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}
@@ -291,6 +305,17 @@ services:
       - maintenance_folder:${ORO_MAINTENANCE_LOCK_FOLDER:-/var/www/oro/var/maintenance}
       - public_storage:/var/www/oro/public/media
       - private_storage:/var/www/oro/var/data
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          mode: 1777
+    depends_on:
+      "php-fpm-app":
+        condition: service_healthy
+    {{- if .Postgres}}
+      "db":
+        condition: service_healthy
+    {{- end}}
 
   restore:
     image: orobox-app:{{.OroVersion}}-latest
@@ -310,6 +335,8 @@ services:
     environment:
       ORO_ENV: ${ORO_ENV:-dev}
       ORO_XDEBUG_ENABLED: "false"
+    tmpfs:
+      - /run
     depends_on:
       {{if .Postgres -}}
       "db":
@@ -327,6 +354,10 @@ services:
       - cache:/var/www/oro/var/cache
       - public_storage:/var/www/oro/public/media
       - private_storage:/var/www/oro/var/data
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          mode: 1777
 
   install:
     image: orobox-app:{{.OroVersion}}-latest
@@ -346,6 +377,8 @@ services:
     environment:
       ORO_SAMPLE_DATA: ${ORO_SAMPLE_DATA:-y}
       ORO_XDEBUG_ENABLED: ${ORO_INSTALL_XDEBUG_ENABLED:-false}
+    tmpfs:
+      - /run
     depends_on:
       {{if .Postgres -}}
       "db":
@@ -373,12 +406,18 @@ services:
       - cache:/var/www/oro/var/cache
       - public_storage:/var/www/oro/public/media
       - private_storage:/var/www/oro/var/data
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          mode: 1777
 
   {{if .Postgres}}
   db:
     image: postgres:{{.PostgresVersion}}
     labels:
       com.symfony.server.service-prefix: ORO_DB
+    ports:
+      - "5432:5432"
     environment:
       POSTGRES_DB: ${ORO_DB_NAME:-oro_db}
       POSTGRES_USER: ${ORO_DB_USER:-oro_db_user}
@@ -429,6 +468,12 @@ services:
         soft: -1
         hard: -1
   {{end}}
+  gotenberg:
+    image: gotenberg/gotenberg:8.23.2
+    ports: [ "3000" ]
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://127.0.0.1:3000/health" ]
+    restart: on-failure
 
 volumes:
   oro_app:
