@@ -88,17 +88,72 @@ Accesses a container interactively (default: php).
 orobox shell
 ```
 
-### 5. Run Tests (`test`)
+### 5. View Logs (`logs`)
+Views logs from different services in the development environment. At least one flag must be specified.
+```bash
+orobox logs --app
+```
+Options:
+- `--nginx`: Nginx logs.
+- `--php`: PHP logs.
+- `--app`: Symfony/OroCommerce logs.
+- `--consumer`: Consumer logs.
+- `--cron`: Cron logs.
+- `--ws`: WS logs.
+
+### 6. Symfony Console (`console`)
+Runs Symfony commands in the application container.
+```bash
+orobox console cache:clear
+```
+
+### 7. Run Tests (`test`)
 Runs PHPUnit tests within the configured environment.
 ```bash
 orobox test
 ```
 
-### 6. Fresh Start (`clean`)
+### 8. Fresh Start (`clean`)
 Removes all associated containers and volumes to start fresh.
 ```bash
 orobox clean
 ```
+
+## Debugging with Xdebug
+
+Orobox comes with Xdebug pre-installed but disabled by default to maintain performance.
+
+### 1. Enabling Xdebug
+To enable Xdebug for your environment, set `xdebug: true` under `services.php` in your `.orobox.yaml` file:
+
+```yaml
+services:
+  php:
+    xdebug: true
+```
+
+After changing this setting, run `orobox up` to apply the configuration.
+
+### 2. Xdebug for CLI, Consumers, and Cron
+By default, enabling Xdebug in `.orobox.yaml` activates it for FPM (web requests) and interactive CLI commands (e.g., `orobox console`). 
+
+To debug background processes, you can manually set these variables in your `.env` file:
+- `ORO_CONSUMER_XDEBUG_ENABLED=true`: For Message Queue consumers.
+- `ORO_CRON_XDEBUG_ENABLED=true`: For Cron jobs.
+
+After updating the `.env` file, restart the environment with `orobox up`.
+
+### 3. PHPStorm Configuration
+To debug with PHPStorm:
+1.  **Listen for Debug Connections**: Ensure the 'Phone' icon (Start Listening for PHP Debug Connections) is ON.
+2.  **Server Configuration**: Go to `Settings -> PHP -> Servers` and add a new server:
+    - **Host**: Your domain (default: `oro.demo` or your custom domain from `.orobox.yaml`).
+    - **Port**: `80` (or `443` if using SSL).
+    - **Debugger**: Xdebug.
+3.  **Path Mappings**: Enable "Use path mappings" and configure:
+    - **Local Path**: The root folder of your bundle on your host machine.
+    - **Remote Path**: `/var/www/oro/src/<BundleNamespace>` (e.g., `/var/www/oro/src/MyVendor/Bundle/MyBundle`).
+4.  **Xdebug Port**: Ensure the port in `Settings -> PHP -> Debug` is set to `9003`.
 
 ## Internal Structure
 The Orobox environment typically includes:

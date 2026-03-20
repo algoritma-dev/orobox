@@ -143,6 +143,33 @@ func TestShellCommand(t *testing.T) {
 	}
 }
 
+func TestConsoleCommand(t *testing.T) {
+	oldRun := runConsole
+	defer func() { runConsole = oldRun }()
+
+	var capturedArgs []string
+	runConsole = func(args []string) {
+		capturedArgs = args
+	}
+
+	expectedArgs := []string{"cache:clear", "--no-warmup"}
+	rootCmd.SetArgs(append([]string{"console"}, expectedArgs...))
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("rootCmd.Execute() failed: %v", err)
+	}
+
+	if len(capturedArgs) != len(expectedArgs) {
+		t.Fatalf("Expected %v args, got %v", len(expectedArgs), len(capturedArgs))
+	}
+
+	for i := range expectedArgs {
+		if capturedArgs[i] != expectedArgs[i] {
+			t.Errorf("Expected arg %d to be %s, got %s", i, expectedArgs[i], capturedArgs[i])
+		}
+	}
+}
+
 func TestLogsCommand(t *testing.T) {
 	oldRun := docker.RunComposeCommand
 	defer func() { docker.RunComposeCommand = oldRun }()
