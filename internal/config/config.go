@@ -56,7 +56,7 @@ func GetVersionsForOro(oroVersion string) OroVersions {
 	switch oroVersion {
 	case "7.0":
 		return OroVersions{
-			PHP:           "8.4",
+			PHP:           "8.5",
 			Postgres:      "17.6-alpine",
 			Redis:         "7.4-alpine",
 			Node:          "22",

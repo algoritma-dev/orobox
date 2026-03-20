@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"github.com/algoritma-dev/orobox/internal/docker"
+	"github.com/spf13/viper"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -51,11 +52,11 @@ func TestUpCommand(t *testing.T) {
 		return
 	}
 
-	if len(calls[0]) < 2 || calls[0][1] != "install" {
-		t.Errorf("Expected call to be install, got %v", calls[0])
+	if len(calls[0]) < 3 || calls[0][0] != "run" || calls[0][2] != "restore" {
+		t.Errorf("Expected call to be run --rm restore, got %v", calls[0])
 	}
-	if len(calls[1]) < 2 || calls[1][1] != "application" {
-		t.Errorf("Expected call to be application, got %v", calls[1])
+	if len(calls[1]) < 3 || calls[1][0] != "up" || calls[1][2] != "application" {
+		t.Errorf("Expected call to be up -d application, got %v", calls[1])
 	}
 }
 
@@ -118,8 +119,8 @@ func TestTestCommand(t *testing.T) {
 		t.Fatalf("rootCmd.Execute() failed: %v", err)
 	}
 
-	if capturedArgs[0] != "exec" || !contains(capturedArgs, "application") {
-		t.Errorf("Expected exec application, got %v", capturedArgs)
+	if capturedArgs[0] != "exec" || !contains(capturedArgs, "application") || !contains(capturedArgs, "APP_ENV=test") || !contains(capturedArgs, "ORO_ENV=test") || !contains(capturedArgs, "ORO_DB_NAME=oro_db_test") {
+		t.Errorf("Expected exec application with test environment, got %v", capturedArgs)
 	}
 }
 
@@ -243,6 +244,37 @@ func TestLogsCommand(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestTestCommandBundle(t *testing.T) {
+	oldRun := docker.RunComposeCommand
+	defer func() { docker.RunComposeCommand = oldRun }()
+
+	var capturedArgs []string
+	docker.RunComposeCommand = func(args ...string) error {
+		capturedArgs = args
+		return nil
+	}
+
+	viper.Set("type", "bundle")
+	viper.Set("namespace", "MyTestBundle")
+	defer func() {
+		viper.Set("type", nil)
+		viper.Set("namespace", nil)
+	}()
+
+	rootCmd.SetArgs([]string{"test"})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("rootCmd.Execute() failed: %v", err)
+	}
+
+	if !contains(capturedArgs, "simple-phpunit") || !contains(capturedArgs, "--configuration=src/MyTestBundle") {
+		t.Errorf("Expected simple-phpunit with configuration, got %v", capturedArgs)
+	}
+	if !contains(capturedArgs, "APP_ENV=test") || !contains(capturedArgs, "ORO_ENV=test") || !contains(capturedArgs, "ORO_DB_NAME=oro_db_test") {
+		t.Errorf("Expected test environment, got %v", capturedArgs)
 	}
 }
 

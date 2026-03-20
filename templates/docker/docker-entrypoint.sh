@@ -52,7 +52,7 @@ case "$1" in
         # Wait for DB to be ready
         if [ -n "$ORO_DB_HOST" ]; then
             echo "Waiting for database ${ORO_DB_HOST}:${ORO_DB_PORT:-5432}..."
-            until nc -z ${ORO_DB_HOST} ${ORO_DB_PORT:-5432}; do
+            until pg_isready -h ${ORO_DB_HOST} -p ${ORO_DB_PORT:-5432} -U ${ORO_DB_USER:-oro_db_user} > /dev/null 2>&1; do
                 sleep 1
             done
             echo "Database is up!"
@@ -87,6 +87,48 @@ case "$1" in
             [ -f var/logs/dev.log ] && tail -n 50 var/logs/dev.log
             exit $STATUS
         fi
+        exit 0
+        ;;
+    restore)
+        # Wait for DB to be ready
+        if [ -n "$ORO_DB_HOST" ]; then
+            echo "Waiting for database ${ORO_DB_HOST}:${ORO_DB_PORT:-5432}..."
+            until pg_isready -h ${ORO_DB_HOST} -p ${ORO_DB_PORT:-5432} -U ${ORO_DB_USER:-oro_db_user} > /dev/null 2>&1; do
+                sleep 1
+            done
+            echo "Database is up!"
+        fi
+
+        check_and_restore() {
+            local db_name="$1"
+            local backup_file="$2"
+            echo "Checking database $db_name..."
+            if [ -f "$backup_file" ]; then
+                local table_count=$(PGPASSWORD=$ORO_DB_ROOT_PASSWORD psql -h $ORO_DB_HOST -p ${ORO_DB_PORT:-5432} -U $ORO_DB_ROOT_USER -d $db_name -t -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';" | tr -d '[:space:]' || echo "0")
+                echo "Found $table_count tables in $db_name"
+                if [ "$table_count" = "0" ] || [ -z "$table_count" ]; then
+                    echo "Restoring $db_name from $backup_file..."
+                    if gunzip -c "$backup_file" | PGPASSWORD=$ORO_DB_ROOT_PASSWORD psql -h $ORO_DB_HOST -p ${ORO_DB_PORT:-5432} -U $ORO_DB_ROOT_USER -d $db_name > /tmp/restore_$db_name.log 2>&1; then
+                        echo "Restore of $db_name completed."
+                    else
+                        echo "Error: Restore of $db_name failed. See /tmp/restore_$db_name.log"
+                        cat /tmp/restore_$db_name.log
+                        exit 1
+                    fi
+                else
+                    echo "Database $db_name already contains data. Skipping restore."
+                fi
+            else
+                echo "Warning: Backup file $backup_file not found. Skipping restore for $db_name."
+            fi
+        }
+
+        [ -n "$ORO_DB_NAME" ] && check_and_restore "$ORO_DB_NAME" "/opt/oro_backups/oro_db_dev.sql.gz"
+        [ -n "$ORO_DB_NAME_TEST" ] && check_and_restore "$ORO_DB_NAME_TEST" "/opt/oro_backups/oro_db_test.sql.gz"
+
+        echo "Ensuring schema is up to date (this may take a few minutes)..."
+        php bin/console oro:platform:update --force --no-interaction --env=${ORO_ENV:-prod}
+        echo "Bootstrap completed successfully!"
         exit 0
         ;;
     nginx-init)

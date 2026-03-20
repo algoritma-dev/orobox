@@ -12,11 +12,11 @@ func TestGetVersionsForOro(t *testing.T) {
 		version string
 		wantPHP string
 	}{
-		{"7.0", "8.4"},
+		{"7.0", "8.5"},
 		{"6.1", "8.4"},
 		{"6.0", "8.3"},
 		{"5.1", "8.2"},
-		{"7.1", "8.4"}, // fallback to 7.0
+		{"7.1", "8.5"}, // fallback to 7.0
 		{"6.2", "8.4"}, // fallback to 6.1
 		{"4.0", "8.2"}, // fallback to 5.1
 	}

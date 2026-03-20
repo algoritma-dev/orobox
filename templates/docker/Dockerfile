@@ -9,6 +9,9 @@ FROM node:${NODE_VERSION}-alpine AS node_image
 
 FROM php:${PHP_VERSION}-fpm-alpine
 
+ARG PHP_VERSION
+ARG NODE_VERSION
+ARG NPM_VERSION
 ARG MEMORY_LIMIT
 
 # Install system dependencies
@@ -54,8 +57,8 @@ ENV COMPOSER_ALLOW_SUPERUSER=1
 # Install Node.js from official image
 COPY --from=node_image /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=node_image /usr/local/bin/node /usr/local/bin/node
-RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
-    && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
     && npm install -g npm@${NPM_VERSION}
 
 # Install PHP extensions
@@ -156,14 +159,40 @@ RUN mkdir -p /var/lib/nginx/tmp /var/lib/nginx/logs /var/log/nginx /run/nginx \
 # Set up working directory
 WORKDIR {{.OroRootDir}}
 
-# Install OroCommerce
-RUN composer create-project oro/commerce-crm-application . {{.OroVersion}} --no-interaction --prefer-dist \
-    && ./bin/simple-phpunit --version \
-    && chown -R www-data:www-data . \
-    && ln -sf /usr/bin/jpegoptim /usr/local/bin/jpegoptim \
-    && ln -sf /usr/bin/pngquant /usr/local/bin/pngquant \
-    && ln -sf /usr/bin/optipng /usr/local/bin/optipng \
-    && rm -f /usr/local/etc/php/conf.d/*phar* || true
+# Install OroCommerce and create database dumps for development and testing
+RUN --mount=type=cache,target=/root/.composer/cache \
+    --mount=type=tmpfs,target=/var/lib/postgresql/data \
+    set -e; \
+    mkdir -p /opt/oro_backups && chmod 777 /opt/oro_backups; \
+    composer create-project oro/commerce-crm-application . {{.OroVersion}} --no-interaction --prefer-dist; \
+    ./bin/simple-phpunit --version; \
+    apk add --no-cache postgresql postgresql-contrib; \
+    mkdir -p /run/postgresql && chown -R postgres:postgres /run/postgresql; \
+    chown -R postgres:postgres /var/lib/postgresql/data; \
+    su postgres -s /bin/sh -c "initdb -D /var/lib/postgresql/data"; \
+    su postgres -s /bin/sh -c "pg_ctl -D /var/lib/postgresql/data -l /tmp/pg.log start"; \
+    until su postgres -s /bin/sh -c "pg_isready -q"; do sleep 1; done; \
+    su postgres -s /bin/sh -c "psql --command \"CREATE USER oro_db_user WITH SUPERUSER PASSWORD 'oro_db_pass';\"" || { cat /tmp/pg.log; exit 1; }; \
+    su postgres -s /bin/sh -c "createdb -O oro_db_user oro_db" || { cat /tmp/pg.log; exit 1; }; \
+    su postgres -s /bin/sh -c "createdb -O oro_db_user oro_db_test" || { cat /tmp/pg.log; exit 1; }; \
+    export ORO_DB_URL=postgresql://oro_db_user:oro_db_pass@127.0.0.1/oro_db; \
+    export ORO_MQ_DSN=dbal: ORO_SEARCH_ENGINE_DSN=orm: ORO_SESSION_DSN=native:; \
+    php bin/console oro:install --no-interaction --application-url={{with index .Domains 0}}http{{if .Ssl}}s{{end}}://{{.Host}}/{{end}} --organization-name=OroInc --user-name=admin --user-email=admin@example.com --user-firstname=John --user-lastname=Doe --user-password=admin --sample-data=y; \
+    PGPASSWORD=oro_db_pass pg_dump -h 127.0.0.1 -U oro_db_user oro_db | gzip > /opt/oro_backups/oro_db_dev.sql.gz; \
+    export ORO_ENV=test ORO_DB_URL=postgresql://oro_db_user:oro_db_pass@127.0.0.1/oro_db_test; \
+    php bin/console oro:install --no-interaction; \
+    PGPASSWORD=oro_db_pass pg_dump -h 127.0.0.1 -U oro_db_user oro_db_test | gzip > /opt/oro_backups/oro_db_test.sql.gz; \
+    ls -lh /opt/oro_backups/; \
+    [ -s /opt/oro_backups/oro_db_dev.sql.gz ] || { echo "Error: oro_db_dev.sql.gz is missing or empty"; exit 1; }; \
+    [ -s /opt/oro_backups/oro_db_test.sql.gz ] || { echo "Error: oro_db_test.sql.gz is missing or empty"; exit 1; }; \
+    su postgres -s /bin/sh -c "pg_ctl -D /var/lib/postgresql/data stop"; \
+    rm -f /tmp/pg.log; \
+    apk del postgresql postgresql-contrib; \
+    chown -R www-data:www-data .; \
+    ln -sf /usr/bin/jpegoptim /usr/local/bin/jpegoptim; \
+    ln -sf /usr/bin/pngquant /usr/local/bin/pngquant; \
+    ln -sf /usr/bin/optipng /usr/local/bin/optipng; \
+    rm -f /usr/local/etc/php/conf.d/*phar* || true
 
 # Create required directories for nginx and tools
 RUN mkdir -p /opt/oro-nginx-tool /opt/oro-nginx/etc/sites-available \

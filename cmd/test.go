@@ -3,9 +3,10 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
-	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -34,6 +35,11 @@ func runTestCommand() {
 	if !isTTY() {
 		args = append(args, "-T")
 	}
+
+	// Set test environment
+	args = append(args, "-e", "APP_ENV=test")
+	args = append(args, "-e", "ORO_ENV=test")
+	args = append(args, "-e", "ORO_DB_NAME=oro_db_test")
 
 	args = append(args, "application")
 
