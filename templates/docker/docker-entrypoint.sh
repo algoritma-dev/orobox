@@ -110,6 +110,9 @@ case "$1" in
                     echo "Restoring $db_name from $backup_file..."
                     if gunzip -c "$backup_file" | PGPASSWORD=$ORO_DB_ROOT_PASSWORD psql -h $ORO_DB_HOST -p ${ORO_DB_PORT:-5432} -U $ORO_DB_ROOT_USER -d $db_name > /tmp/restore_$db_name.log 2>&1; then
                         echo "Restore of $db_name completed."
+
+                        echo "Ensuring schema is up to date (this may take a few minutes)..."
+                        php bin/console oro:platform:update --force --no-interaction --env=${ORO_ENV:-prod}
                     else
                         echo "Error: Restore of $db_name failed. See /tmp/restore_$db_name.log"
                         cat /tmp/restore_$db_name.log
@@ -126,9 +129,6 @@ case "$1" in
         [ -n "$ORO_DB_NAME" ] && check_and_restore "$ORO_DB_NAME" "/opt/oro_backups/oro_db_dev.sql.gz"
         [ -n "$ORO_DB_NAME_TEST" ] && check_and_restore "$ORO_DB_NAME_TEST" "/opt/oro_backups/oro_db_test.sql.gz"
 
-        echo "Ensuring schema is up to date (this may take a few minutes)..."
-        php bin/console oro:platform:update --force --no-interaction --env=${ORO_ENV:-prod}
-        echo "Bootstrap completed successfully!"
         exit 0
         ;;
     nginx-init)
