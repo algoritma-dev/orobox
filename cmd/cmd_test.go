@@ -143,6 +143,82 @@ func TestShellCommand(t *testing.T) {
 	}
 }
 
+func TestLogsCommand(t *testing.T) {
+	oldRun := docker.RunComposeCommand
+	defer func() { docker.RunComposeCommand = oldRun }()
+
+	var capturedArgs []string
+	docker.RunComposeCommand = func(args ...string) error {
+		capturedArgs = args
+		return nil
+	}
+
+	tests := []struct {
+		name     string
+		args     []string
+		expected []string
+	}{
+		{
+			"nginx logs",
+			[]string{"logs", "--nginx"},
+			[]string{"logs", "-f", "web"},
+		},
+		{
+			"php logs",
+			[]string{"logs", "--php"},
+			[]string{"logs", "-f", "php-fpm-app"},
+		},
+		{
+			"app logs",
+			[]string{"logs", "--app"},
+			[]string{"logs", "-f", "application", "php-fpm-app"},
+		},
+		{
+			"multiple logs",
+			[]string{"logs", "--nginx", "--php"},
+			[]string{"logs", "-f", "web", "php-fpm-app"},
+		},
+		{
+			"consumer logs",
+			[]string{"logs", "--consumer"},
+			[]string{"logs", "-f", "consumer"},
+		},
+		{
+			"cron logs",
+			[]string{"logs", "--cron"},
+			[]string{"logs", "-f", "cron"},
+		},
+		{
+			"ws logs",
+			[]string{"logs", "--ws"},
+			[]string{"logs", "-f", "ws"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			capturedArgs = nil
+			rootCmd.SetArgs(tt.args)
+			err := rootCmd.Execute()
+			if err != nil {
+				t.Fatalf("rootCmd.Execute() failed: %v", err)
+			}
+
+			if len(capturedArgs) != len(tt.expected) {
+				t.Errorf("Expected %v, got %v", tt.expected, capturedArgs)
+				return
+			}
+
+			for i := range tt.expected {
+				if capturedArgs[i] != tt.expected[i] {
+					t.Errorf("Expected %v, got %v", tt.expected, capturedArgs)
+					break
+				}
+			}
+		})
+	}
+}
+
 func contains(slice []string, item string) bool {
 	for _, s := range slice {
 		if strings.Contains(s, item) {
