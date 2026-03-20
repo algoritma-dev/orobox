@@ -28,12 +28,6 @@ services:
       - oro_app:/var/www/oro
       - {{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}
       - cache:/var/www/oro/var/cache
-      - type: tmpfs
-        target: /tmp
-        tmpfs:
-          mode: 1777
-    tmpfs:
-      - /run
     depends_on:
       "web":
         condition: service_started
@@ -84,10 +78,6 @@ services:
       - nginx:/opt/oro-nginx
       - public_storage:/var/www/oro/public/media:ro
       - private_storage:/var/www/oro/var/data:ro
-      - type: tmpfs
-        target: /tmp
-        tmpfs:
-          mode: 1777
       {{if .HasSsl -}}
       - {{.CertsPath}}:/etc/nginx/certs:ro
       {{- end}}
@@ -137,10 +127,6 @@ services:
         condition: service_started
     volumes:
       - nginx:/opt/oro-nginx
-      - type: tmpfs
-        target: /tmp
-        tmpfs:
-          mode: 1777
 
   php-fpm-app:
     image: orobox-app:{{.OroVersion}}-latest
@@ -166,8 +152,6 @@ services:
     environment:
       ORO_ENV: ${ORO_ENV:-dev}
       ORO_LOG_PATH: php://stderr
-    tmpfs:
-      - /run
     depends_on:
       {{if .Postgres -}}
       "db":
@@ -199,10 +183,6 @@ services:
       - maintenance_folder:${ORO_MAINTENANCE_LOCK_FOLDER:-/var/www/oro/var/maintenance}
       - public_storage:/var/www/oro/public/media
       - private_storage:/var/www/oro/var/data
-      - type: tmpfs
-        target: /tmp
-        tmpfs:
-          mode: 1777
 
   ws:
     image: orobox-app:{{.OroVersion}}-latest
@@ -225,8 +205,6 @@ services:
       ORO_ENV: ${ORO_ENV:-dev}
       ORO_LOG_PATH: php://stderr
       ORO_XDEBUG_ENABLED: "false"
-    tmpfs:
-      - /run
     depends_on:
       "php-fpm-app":
         condition: service_healthy
@@ -237,10 +215,6 @@ services:
       - maintenance_folder:${ORO_MAINTENANCE_LOCK_FOLDER:-/var/www/oro/var/maintenance}
       - public_storage:/var/www/oro/public/media
       - private_storage:/var/www/oro/var/data
-      - type: tmpfs
-        target: /tmp
-        tmpfs:
-          mode: 1777
 
   consumer:
     image: orobox-app:{{.OroVersion}}-latest
@@ -263,8 +237,6 @@ services:
       ORO_ENV: ${ORO_ENV:-dev}
       ORO_LOG_PATH: php://stderr
       ORO_XDEBUG_ENABLED: ${ORO_CONSUMER_XDEBUG_ENABLED:-false}
-    tmpfs:
-      - /run
     depends_on:
       "php-fpm-app":
         condition: service_healthy
@@ -275,10 +247,6 @@ services:
       - maintenance_folder:${ORO_MAINTENANCE_LOCK_FOLDER:-/var/www/oro/var/maintenance}
       - public_storage:/var/www/oro/public/media
       - private_storage:/var/www/oro/var/data
-      - type: tmpfs
-        target: /tmp
-        tmpfs:
-          mode: 1777
 
   cron:
     image: orobox-app:{{.OroVersion}}-latest
@@ -303,8 +271,6 @@ services:
       ORO_ENV: ${ORO_ENV:-dev}
       ORO_LOG_PATH: php://stderr
       ORO_XDEBUG_ENABLED: ${ORO_CRON_XDEBUG_ENABLED:-false}
-    tmpfs:
-      - /run
     volumes:
       - oro_app:/var/www/oro
       - {{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}
@@ -313,10 +279,6 @@ services:
       - maintenance_folder:${ORO_MAINTENANCE_LOCK_FOLDER:-/var/www/oro/var/maintenance}
       - public_storage:/var/www/oro/public/media
       - private_storage:/var/www/oro/var/data
-      - type: tmpfs
-        target: /tmp
-        tmpfs:
-          mode: 1777
     depends_on:
       "php-fpm-app":
         condition: service_healthy
@@ -343,8 +305,6 @@ services:
     environment:
       ORO_ENV: ${ORO_ENV:-dev}
       ORO_XDEBUG_ENABLED: "false"
-    tmpfs:
-      - /run
     depends_on:
       {{if .Postgres -}}
       "db":
@@ -362,10 +322,6 @@ services:
       - cache:/var/www/oro/var/cache
       - public_storage:/var/www/oro/public/media
       - private_storage:/var/www/oro/var/data
-      - type: tmpfs
-        target: /tmp
-        tmpfs:
-          mode: 1777
 
   install:
     image: orobox-app:{{.OroVersion}}-latest
@@ -385,8 +341,6 @@ services:
     environment:
       ORO_SAMPLE_DATA: ${ORO_SAMPLE_DATA:-y}
       ORO_XDEBUG_ENABLED: ${ORO_INSTALL_XDEBUG_ENABLED:-false}
-    tmpfs:
-      - /run
     depends_on:
       {{if .Postgres -}}
       "db":
@@ -414,10 +368,6 @@ services:
       - cache:/var/www/oro/var/cache
       - public_storage:/var/www/oro/public/media
       - private_storage:/var/www/oro/var/data
-      - type: tmpfs
-        target: /tmp
-        tmpfs:
-          mode: 1777
 
   {{if .Postgres}}
   db:

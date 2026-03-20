@@ -21,11 +21,6 @@ else
     fi
 fi
 
-# Ensure /tmp is world-writable
-if [ "$(id -u)" = "0" ]; then
-    chmod 1777 /tmp
-fi
-
 case "$1" in
     nginx)
         if [ -n "$ORO_USER_RUNTIME" ]; then

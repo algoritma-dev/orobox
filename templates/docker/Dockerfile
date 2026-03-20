@@ -53,7 +53,6 @@ RUN apk add --no-cache \
 # Install Composer
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 ENV COMPOSER_ALLOW_SUPERUSER=1
-ENV TMPDIR=/tmp
 
 # Install Node.js from official image
 COPY --from=node_image /usr/local/lib/node_modules /usr/local/lib/node_modules
@@ -134,9 +133,6 @@ RUN { \
         echo 'opcache.validate_timestamps=1'; \
         echo 'opcache.revalidate_freq=0'; \
         echo 'opcache.fast_shutdown=1'; \
-        echo 'sys_temp_dir=/tmp'; \
-        echo 'upload_tmp_dir=/tmp'; \
-        echo 'open_basedir='; \
     } > /usr/local/etc/php/conf.d/oro-custom.ini
 
 # Increase FPM workers for better debug experience
@@ -193,7 +189,6 @@ RUN --mount=type=cache,target=/root/.composer/cache \
     [ -s /opt/oro_backups/oro_db_test.sql.gz ] || { echo "Error: oro_db_test.sql.gz is missing or empty"; exit 1; }; \
     su postgres -s /bin/sh -c "pg_ctl -D /var/lib/postgresql/data stop"; \
     rm -rf /tmp/*; \
-    chmod 1777 /tmp; \
     apk del postgresql postgresql-contrib; \
     chown -R www-data:www-data .; \
     ln -sf /usr/bin/jpegoptim /usr/local/bin/jpegoptim; \
