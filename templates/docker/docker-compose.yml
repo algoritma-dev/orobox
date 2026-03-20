@@ -22,6 +22,8 @@ services:
         {{end -}}
         exec tail -f /dev/null
     env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - oro_app:/var/www/oro
       - {{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}
@@ -44,8 +46,12 @@ services:
         NODE_VERSION: {{.NodeVersion}}
         NPM_VERSION: {{.NpmVersion}}
         MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2048M}
+    environment:
+      ORO_XDEBUG_ENABLED: "false"
     command: nginx
     env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     healthcheck:
       test: "curl -If http://127.0.0.1:{{.NginxHTTPPort}}/"
@@ -88,6 +94,8 @@ services:
         MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2048M}
     command: -- true
     env_file: .env
+    environment:
+      ORO_XDEBUG_ENABLED: "false"
     volumes:
       - oro_app:/var/www/oro
  
@@ -108,6 +116,10 @@ services:
         echo "$$(jq '.properties.sites.propertyNames.pattern = ".*"' /opt/oro-nginx-tool/variables.schema.json 2>/dev/null || echo "{}")" > /opt/oro-nginx-tool/variables.schema.json 2>/dev/null || true
         /usr/local/bin/docker-entrypoint.sh nginx-init && sed -i '/gridfs/d; /mongo/d' /opt/oro-nginx/etc/sites-available/*.conf || true
     env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      ORO_XDEBUG_ENABLED: "false"
     depends_on:
       "php-fpm-app":
         condition: service_healthy
@@ -128,6 +140,8 @@ services:
         MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2048M}
     command: php-fpm
     env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     user: ${ORO_USER_RUNTIME:-www-data}
     healthcheck:
@@ -184,12 +198,15 @@ services:
         MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2048M}
     command: websocket
     env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     user: ${ORO_USER_RUNTIME:-www-data}
     init: true
     environment:
       ORO_ENV: ${ORO_ENV:-dev}
       ORO_LOG_PATH: php://stderr
+      ORO_XDEBUG_ENABLED: "false"
     tmpfs:
       - /tmp
     depends_on:
@@ -215,12 +232,15 @@ services:
         MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2048M}
     command: consumer
     env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     user: ${ORO_USER_RUNTIME:-www-data}
     init: true
     environment:
       ORO_ENV: ${ORO_ENV:-dev}
       ORO_LOG_PATH: php://stderr
+      ORO_XDEBUG_ENABLED: ${ORO_CONSUMER_XDEBUG_ENABLED:-false}
     tmpfs:
       - /tmp
     depends_on:
@@ -246,6 +266,8 @@ services:
         MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2048M}
     command: cron
     env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     ulimits:
       nofile:
@@ -254,6 +276,7 @@ services:
     environment:
       ORO_ENV: ${ORO_ENV:-dev}
       ORO_LOG_PATH: php://stderr
+      ORO_XDEBUG_ENABLED: ${ORO_CRON_XDEBUG_ENABLED:-false}
     depends_on:
       "php-fpm-app":
         condition: service_healthy
@@ -277,10 +300,13 @@ services:
         NPM_VERSION: {{.NpmVersion}}
         MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2048M}
     command: install ${ORO_INSTALL_OPTIONS}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     user: ${ORO_USER_RUNTIME:-www-data}
     env_file: .env
     environment:
       ORO_SAMPLE_DATA: ${ORO_SAMPLE_DATA:-y}
+      ORO_XDEBUG_ENABLED: ${ORO_INSTALL_XDEBUG_ENABLED:-false}
     depends_on:
       {{if .Postgres -}}
       "db":

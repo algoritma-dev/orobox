@@ -100,6 +100,15 @@ RUN apk add --no-cache --virtual .build-deps $PHPIZE_DEPS \
     && pecl install xdebug pcov \
     && docker-php-ext-enable pcov \
     && docker-php-ext-enable xdebug \
+    && echo "xdebug.mode=develop,debug" >> /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini \
+    && echo "xdebug.max_nesting_level=500" >> /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini \
+    && echo "xdebug.client_host=host.docker.internal" >> /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini \
+    && echo "xdebug.client_port=9003" >> /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini \
+    && echo "xdebug.discover_client_host=no" >> /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini \
+    && echo "xdebug.start_with_request=yes" >> /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini \
+    && echo "xdebug.idekey=PHPSTORM" >> /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini \
+    && echo "xdebug.log=/tmp/xdebug.log" >> /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini \
+    && echo "xdebug.connect_timeout_ms=200" >> /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini \
     && mv /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini.disabled \
     && apk del .build-deps \
     && chmod -R 777 /usr/local/etc/php/conf.d
@@ -113,8 +122,8 @@ RUN { \
         echo 'date.timezone=UTC'; \
         echo 'short_open_tag=off'; \
         echo 'intl.error_level=0'; \
-        echo "opcache.enable=1"; \
-        echo "opcache.enable_cli=1"; \
+        echo "opcache.enable=0"; \
+        echo "opcache.enable_cli=0"; \
         echo 'opcache.memory_consumption=256'; \
         echo 'opcache.interned_strings_buffer=16'; \
         echo 'opcache.max_accelerated_files=20000'; \
@@ -122,6 +131,16 @@ RUN { \
         echo 'opcache.revalidate_freq=0'; \
         echo 'opcache.fast_shutdown=1'; \
     } > /usr/local/etc/php/conf.d/oro-custom.ini
+
+# Increase FPM workers for better debug experience
+RUN { \
+        echo '[www]'; \
+        echo 'pm = dynamic'; \
+        echo 'pm.max_children = 20'; \
+        echo 'pm.start_servers = 5'; \
+        echo 'pm.min_spare_servers = 3'; \
+        echo 'pm.max_spare_servers = 10'; \
+    } > /usr/local/etc/php-fpm.d/z-oro-fpm.conf
 
 # Configure Nginx
 COPY nginx.conf /etc/nginx/http.d/default.conf

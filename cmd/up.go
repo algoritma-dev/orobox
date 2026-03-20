@@ -3,7 +3,9 @@ package cmd
 
 import (
 	"fmt"
+	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
+	"github.com/spf13/viper"
 
 	"github.com/spf13/cobra"
 )
@@ -42,6 +44,21 @@ var upCmd = &cobra.Command{
 		if err := docker.RunComposeCommand(append(upArgs, "application")...); err != nil {
 			fmt.Printf("Bootstrap failed: %v\n", err)
 			return
+		}
+
+		fmt.Println("\nOrobox is up and running!")
+
+		if viper.GetBool("services.php.xdebug") {
+			fmt.Println("\nXdebug is ENABLED.")
+			fmt.Println("To debug in PhpStorm:")
+			fmt.Println("1. Ensure the 'Phone' icon (Listener) is ON.")
+			fmt.Println("2. Configure Path Mappings in Settings -> PHP -> Servers:")
+			fmt.Println("   - Host: oro.demo (or your custom domain)")
+			fmt.Printf("   - Local Path: %s\n", config.GetHostBundlePath())
+			fmt.Printf("     Remote Path: /var/www/oro/src/%s\n", config.GetBundlePath())
+			fmt.Println("\nTo debug background processes, set in your .env:")
+			fmt.Println("   - ORO_CONSUMER_XDEBUG_ENABLED=true (for message queue)")
+			fmt.Println("   - ORO_CRON_XDEBUG_ENABLED=true (for cron jobs)")
 		}
 	},
 }
