@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-# Load environment variables from .env if it exists
-if [ -f .env ]; then
+# Load environment variables from .env if it exists and we are not in test mode
+if [ -f .env ] && [ "$ORO_ENV" != "test" ] && [ "$APP_ENV" != "test" ]; then
     export $(grep -v '^#' .env | xargs)
 fi
 
@@ -90,6 +90,12 @@ case "$1" in
         exit 0
         ;;
     restore)
+        # Restore assets if backup exists
+        if [ -f "/opt/oro_backups/oro_assets.tar.gz" ]; then
+            echo "Restoring assets from /opt/oro_backups/oro_assets.tar.gz..."
+            tar -xzf /opt/oro_backups/oro_assets.tar.gz -C .
+        fi
+
         # Wait for DB to be ready
         if [ -n "$ORO_DB_HOST" ]; then
             echo "Waiting for database ${ORO_DB_HOST}:${ORO_DB_PORT:-5432}..."
@@ -102,6 +108,7 @@ case "$1" in
         check_and_restore() {
             local db_name="$1"
             local backup_file="$2"
+            local run_update="${3:-false}"
             echo "Checking database $db_name..."
             if [ -f "$backup_file" ]; then
                 local table_count=$(PGPASSWORD=$ORO_DB_ROOT_PASSWORD psql -h $ORO_DB_HOST -p ${ORO_DB_PORT:-5432} -U $ORO_DB_ROOT_USER -d $db_name -t -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';" | tr -d '[:space:]' || echo "0")
@@ -111,8 +118,10 @@ case "$1" in
                     if gunzip -c "$backup_file" | PGPASSWORD=$ORO_DB_ROOT_PASSWORD psql -h $ORO_DB_HOST -p ${ORO_DB_PORT:-5432} -U $ORO_DB_ROOT_USER -d $db_name > /tmp/restore_$db_name.log 2>&1; then
                         echo "Restore of $db_name completed."
 
-                        echo "Ensuring schema is up to date (this may take a few minutes)..."
-                        php bin/console oro:platform:update --force --no-interaction --env=${ORO_ENV:-prod}
+                        if [ "$run_update" = "true" ]; then
+                            echo "Ensuring schema is up to date (this may take a few minutes)..."
+                            php bin/console oro:platform:update --force --no-interaction --env=${ORO_ENV:-prod}
+                        fi
                     else
                         echo "Error: Restore of $db_name failed. See /tmp/restore_$db_name.log"
                         cat /tmp/restore_$db_name.log
@@ -126,8 +135,8 @@ case "$1" in
             fi
         }
 
-        [ -n "$ORO_DB_NAME" ] && check_and_restore "$ORO_DB_NAME" "/opt/oro_backups/oro_db_dev.sql.gz"
-        [ -n "$ORO_DB_NAME_TEST" ] && check_and_restore "$ORO_DB_NAME_TEST" "/opt/oro_backups/oro_db_test.sql.gz"
+        [ -n "$ORO_DB_NAME" ] && check_and_restore "$ORO_DB_NAME" "/opt/oro_backups/oro_db_dev.sql.gz" "true"
+        [ -n "$ORO_DB_NAME_TEST" ] && check_and_restore "$ORO_DB_NAME_TEST" "/opt/oro_backups/oro_db_test.sql.gz" "false"
 
         exit 0
         ;;

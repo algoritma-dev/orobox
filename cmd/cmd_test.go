@@ -13,6 +13,7 @@ func init() {
 	docker.Templates = fstest.MapFS{
 		"templates/docker/Dockerfile":           &fstest.MapFile{Data: []byte("FROM php:{{.PHPVersion}}-fpm")},
 		"templates/docker/.env":                 &fstest.MapFile{Data: []byte("ORO_VERSION={{.OroVersion}}")},
+		"templates/docker/.env.test":            &fstest.MapFile{Data: []byte("ORO_VERSION={{.OroVersion}}")},
 		"templates/docker/nginx.conf":           &fstest.MapFile{Data: []byte("server { listen 80; }")},
 		"templates/docker/init-db.sql":          &fstest.MapFile{Data: []byte("CREATE DATABASE oro;")},
 		"templates/docker/docker-entrypoint.sh": &fstest.MapFile{Data: []byte("#!/bin/bash")},
@@ -55,8 +56,8 @@ func TestUpCommand(t *testing.T) {
 	if len(calls[0]) < 3 || calls[0][0] != "run" || calls[0][2] != "restore" {
 		t.Errorf("Expected call to be run --rm restore, got %v", calls[0])
 	}
-	if len(calls[1]) < 3 || calls[1][0] != "up" || calls[1][2] != "application" {
-		t.Errorf("Expected call to be up -d application, got %v", calls[1])
+	if len(calls[1]) < 4 || calls[1][0] != "up" || calls[1][2] != "application" || calls[1][3] != "application_test" {
+		t.Errorf("Expected call to be up -d application application_test, got %v", calls[1])
 	}
 }
 
@@ -119,8 +120,8 @@ func TestTestCommand(t *testing.T) {
 		t.Fatalf("rootCmd.Execute() failed: %v", err)
 	}
 
-	if capturedArgs[0] != "exec" || !contains(capturedArgs, "application") || !contains(capturedArgs, "APP_ENV=test") || !contains(capturedArgs, "ORO_ENV=test") || !contains(capturedArgs, "ORO_DB_NAME=oro_db_test") {
-		t.Errorf("Expected exec application with test environment, got %v", capturedArgs)
+	if capturedArgs[0] != "exec" || !contains(capturedArgs, "application_test") || !contains(capturedArgs, "APP_ENV=test") || !contains(capturedArgs, "ORO_ENV=test") || !contains(capturedArgs, "ORO_DB_NAME=oro_db_test") {
+		t.Errorf("Expected exec application_test with test environment, got %v", capturedArgs)
 	}
 }
 

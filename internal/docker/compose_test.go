@@ -11,6 +11,7 @@ func init() {
 	Templates = fstest.MapFS{
 		"templates/docker/Dockerfile":           &fstest.MapFile{Data: []byte("FROM php:{{.PHPVersion}}-fpm")},
 		"templates/docker/.env":                 &fstest.MapFile{Data: []byte("ORO_VERSION={{.OroVersion}}")},
+		"templates/docker/.env.test":            &fstest.MapFile{Data: []byte("ORO_VERSION={{.OroVersion}}")},
 		"templates/docker/nginx.conf":           &fstest.MapFile{Data: []byte("server { listen 80; }")},
 		"templates/docker/init-db.sql":          &fstest.MapFile{Data: []byte("CREATE DATABASE oro;")},
 		"templates/docker/docker-entrypoint.sh": &fstest.MapFile{Data: []byte("#!/bin/bash")},
@@ -64,11 +65,18 @@ func TestWriteFiles(t *testing.T) {
 	})
 
 	t.Run("writeEnvFile", func(t *testing.T) {
-		if !writeEnvFile(tmpDir, data) {
-			t.Errorf("writeEnvFile failed")
+		if !writeEnvFile("templates/docker/.env", tmpDir, data) {
+			t.Errorf("writeEnvFile .env failed")
 		}
 		if _, err := os.Stat(filepath.Join(tmpDir, ".env")); os.IsNotExist(err) {
 			t.Errorf(".env file was not created")
+		}
+
+		if !writeEnvFile("templates/docker/.env.test", tmpDir, data) {
+			t.Errorf("writeEnvFile .env.test failed")
+		}
+		if _, err := os.Stat(filepath.Join(tmpDir, ".env.test")); os.IsNotExist(err) {
+			t.Errorf(".env.test file was not created")
 		}
 	})
 

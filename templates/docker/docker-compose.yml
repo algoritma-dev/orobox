@@ -36,6 +36,42 @@ services:
       "cron":
         condition: service_started
 
+  application_test:
+    image: orobox-app:{{.OroVersion}}-latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PHP_VERSION: {{.PHPVersion}}
+        NODE_VERSION: {{.NodeVersion}}
+        NPM_VERSION: {{.NpmVersion}}
+        MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2048M}
+    command:
+      - bash
+      - -c
+      - |
+        echo "Test application is running..."
+        exec tail -f /dev/null
+    env_file:
+      - .env
+      - .env.test
+    environment:
+      ORO_ENV: test
+      ORO_XDEBUG_ENABLED: "false"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - oro_app:/var/www/oro
+      - {{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}
+      - cache:/var/www/oro/var/cache
+    depends_on:
+      "web":
+        condition: service_started
+      "consumer":
+        condition: service_started
+      "cron":
+        condition: service_started
+
   web:
     image: orobox-app:{{.OroVersion}}-latest
     build:

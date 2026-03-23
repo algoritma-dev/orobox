@@ -199,7 +199,8 @@ func EnsureDockerCompose() bool {
 	changed = writeDockerfile(internalDir, data) || changed
 	changed = writeNginxConf(internalDir, data) || changed
 	changed = writeEntrypoint(internalDir, data) || changed
-	changed = writeEnvFile(internalDir, data) || changed
+	changed = writeEnvFile("templates/docker/.env", internalDir, data) || changed
+	changed = writeEnvFile("templates/docker/.env.test", internalDir, data) || changed
 	changed = writeInitDbSQL(internalDir, data) || changed
 
 	src := "templates/docker/docker-compose.yml"
@@ -291,11 +292,10 @@ func writeDockerfile(internalDir string, data any) bool {
 	return true
 }
 
-func writeEnvFile(internalDir string, data any) bool {
-	src := "templates/docker/.env"
-	envContent, err := fs.ReadFile(Templates, src)
+func writeEnvFile(path string, internalDir string, data any) bool {
+	envContent, err := fs.ReadFile(Templates, path)
 	if err != nil {
-		fmt.Printf("Warning: could not read template %s: %v\n", src, err)
+		fmt.Printf("Warning: could not read template %s: %v\n", path, err)
 		return false
 	}
 
@@ -310,7 +310,7 @@ func writeEnvFile(internalDir string, data any) bool {
 		panic(err)
 	}
 
-	dest := filepath.Join(internalDir, ".env")
+	dest := filepath.Join(internalDir, filepath.Base(path))
 	oldContent, err := os.ReadFile(dest)
 	if err == nil && bytes.Equal(oldContent, buf.Bytes()) {
 		return false

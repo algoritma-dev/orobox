@@ -41,7 +41,7 @@ func runTestCommand() {
 	args = append(args, "-e", "ORO_ENV=test")
 	args = append(args, "-e", "ORO_DB_NAME=oro_db_test")
 
-	args = append(args, "application")
+	args = append(args, "application_test")
 
 	if viper.GetString("type") == "bundle" {
 		bundlePath := "src/" + config.GetBundlePath()

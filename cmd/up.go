@@ -40,7 +40,7 @@ var upCmd = &cobra.Command{
 			fmt.Printf("Bootstrap failed: %v\n", err)
 			return
 		}
-		if err := docker.RunComposeCommand("up", "-d", "application"); err != nil {
+		if err := docker.RunComposeCommand("up", "-d", "application", "application_test"); err != nil {
 			fmt.Printf("Bootstrap failed: %v\n", err)
 			return
 		}
