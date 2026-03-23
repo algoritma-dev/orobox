@@ -2,18 +2,19 @@ package cmd
 
 import (
 	"bytes"
-	"github.com/algoritma-dev/orobox/internal/docker"
-	"github.com/spf13/viper"
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/algoritma-dev/orobox/internal/docker"
+	"github.com/spf13/viper"
 )
 
 func init() {
 	docker.Templates = fstest.MapFS{
 		"templates/docker/Dockerfile":           &fstest.MapFile{Data: []byte("FROM php:{{.PHPVersion}}-fpm")},
-		"templates/docker/.env":                 &fstest.MapFile{Data: []byte("ORO_VERSION={{.OroVersion}}")},
-		"templates/docker/.env.test":            &fstest.MapFile{Data: []byte("ORO_VERSION={{.OroVersion}}")},
+		"templates/docker/.env":                 &fstest.MapFile{Data: []byte("ORO_VERSION={{.OroVersion}}\n")},
+		"templates/docker/.env.test":            &fstest.MapFile{Data: []byte("ORO_VERSION={{.OroVersion}}\n")},
 		"templates/docker/nginx.conf":           &fstest.MapFile{Data: []byte("server { listen 80; }")},
 		"templates/docker/init-db.sql":          &fstest.MapFile{Data: []byte("CREATE DATABASE oro;")},
 		"templates/docker/docker-entrypoint.sh": &fstest.MapFile{Data: []byte("#!/bin/bash")},
@@ -41,23 +42,23 @@ func TestUpCommand(t *testing.T) {
 		t.Fatalf("rootCmd.Execute() failed: %v", err)
 	}
 
-	if len(calls) == 3 {
-		if calls[0][0] != "build" {
-			t.Errorf("Expected first call to be build, got %v", calls[0])
-		}
+	if len(calls) > 0 && calls[0][0] == "build" {
 		calls = calls[1:]
 	}
 
-	if len(calls) != 2 {
-		t.Errorf("Expected 2 more calls to RunComposeCommand, got %d", len(calls))
+	if len(calls) != 3 {
+		t.Errorf("Expected 3 more calls to RunComposeCommand (restore, restore_test, up), got %d: %v", len(calls), calls)
 		return
 	}
 
 	if len(calls[0]) < 3 || calls[0][0] != "run" || calls[0][2] != "restore" {
 		t.Errorf("Expected call to be run --rm restore, got %v", calls[0])
 	}
-	if len(calls[1]) < 4 || calls[1][0] != "up" || calls[1][2] != "application" || calls[1][3] != "application_test" {
-		t.Errorf("Expected call to be up -d application application_test, got %v", calls[1])
+	if len(calls[1]) < 3 || calls[1][0] != "run" || calls[1][2] != "restore_test" {
+		t.Errorf("Expected call to be run --rm restore_test, got %v", calls[1])
+	}
+	if len(calls[2]) < 4 || calls[2][0] != "up" || !contains(calls[2], "application") || !contains(calls[2], "application_test") {
+		t.Errorf("Expected call to be up -d application application_test, got %v", calls[2])
 	}
 }
 

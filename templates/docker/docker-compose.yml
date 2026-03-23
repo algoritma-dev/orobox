@@ -359,6 +359,44 @@ services:
       - public_storage:/var/www/oro/public/media
       - private_storage:/var/www/oro/var/data
 
+  restore_test:
+    image: orobox-app:{{.OroVersion}}-latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PHP_VERSION: {{.PHPVersion}}
+        NODE_VERSION: {{.NodeVersion}}
+        NPM_VERSION: {{.NpmVersion}}
+        MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2048M}
+    command: restore
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    user: ${ORO_USER_RUNTIME:-www-data}
+    env_file:
+      - .env
+      - .env.test
+    environment:
+      ORO_ENV: test
+      ORO_XDEBUG_ENABLED: "false"
+    depends_on:
+      {{if .Postgres -}}
+      "db":
+        condition: service_healthy
+      {{- end}}
+      {{if .Mailpit -}}
+      "mail":
+        condition: service_started
+      {{- end}}
+      "volume-init":
+        condition: service_completed_successfully
+    volumes:
+      - oro_app:/var/www/oro
+      - {{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}
+      - cache:/var/www/oro/var/cache
+      - public_storage:/var/www/oro/public/media
+      - private_storage:/var/www/oro/var/data
+
   install:
     image: orobox-app:{{.OroVersion}}-latest
     build:

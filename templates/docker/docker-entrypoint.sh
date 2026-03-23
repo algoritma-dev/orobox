@@ -1,11 +1,6 @@
 #!/bin/bash
 set -e
 
-# Load environment variables from .env if it exists and we are not in test mode
-if [ -f .env ] && [ "$ORO_ENV" != "test" ] && [ "$APP_ENV" != "test" ]; then
-    export $(grep -v '^#' .env | xargs)
-fi
-
 # Ensure OroRootDir is set
 ORO_ROOT_DIR={{.OroRootDir}}
 cd ${ORO_ROOT_DIR}
@@ -120,7 +115,7 @@ case "$1" in
 
                         if [ "$run_update" = "true" ]; then
                             echo "Ensuring schema is up to date (this may take a few minutes)..."
-                            php bin/console oro:platform:update --force --no-interaction --env=${ORO_ENV:-prod}
+                            php bin/console oro:platform:update --force --no-interaction --env=${ORO_ENV:-dev}
                         fi
                     else
                         echo "Error: Restore of $db_name failed. See /tmp/restore_$db_name.log"
@@ -135,8 +130,11 @@ case "$1" in
             fi
         }
 
-        [ -n "$ORO_DB_NAME" ] && check_and_restore "$ORO_DB_NAME" "/opt/oro_backups/oro_db_dev.sql.gz" "true"
-        [ -n "$ORO_DB_NAME_TEST" ] && check_and_restore "$ORO_DB_NAME_TEST" "/opt/oro_backups/oro_db_test.sql.gz" "false"
+        if [ "$ORO_ENV" = "test" ]; then
+            [ -n "$ORO_DB_NAME_TEST" ] && check_and_restore "$ORO_DB_NAME_TEST" "/opt/oro_backups/oro_db_test.sql.gz" "true"
+        else
+            [ -n "$ORO_DB_NAME" ] && check_and_restore "$ORO_DB_NAME" "/opt/oro_backups/oro_db_dev.sql.gz" "true"
+        fi
 
         exit 0
         ;;
