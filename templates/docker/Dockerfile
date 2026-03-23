@@ -182,7 +182,7 @@ RUN --mount=type=cache,target=/root/.composer/cache \
     php bin/console oro:install --no-interaction --application-url={{with index .Domains 0}}http{{if .Ssl}}s{{end}}://{{.Host}}/{{end}} --organization-name=OroInc --user-name=admin --user-email=admin@example.com --user-firstname=John --user-lastname=Doe --user-password=admin --sample-data=y; \
     PGPASSWORD=oro_db_pass pg_dump -h 127.0.0.1 -U oro_db_user oro_db | gzip > /opt/oro_backups/oro_db_dev.sql.gz; \
     export ORO_DB_URL=postgresql://oro_db_user:oro_db_pass@127.0.0.1/oro_db_test; \
-    php bin/console --env=test oro:install --no-interaction; \
+    php bin/console --env=test oro:install --no-interaction --application-url=http://localhost/ --organization-name=OroInc --user-name=admin --user-email=admin@example.com --user-firstname=John --user-lastname=Doe --user-password=admin --sample-data=n --language=en --formatting-code=en_US --skip-translations; \
     PGPASSWORD=oro_db_pass pg_dump -h 127.0.0.1 -U oro_db_user oro_db_test | gzip > /opt/oro_backups/oro_db_test.sql.gz; \
     ls -lh /opt/oro_backups/; \
     [ -s /opt/oro_backups/oro_db_dev.sql.gz ] || { echo "Error: oro_db_dev.sql.gz is missing or empty"; exit 1; }; \
