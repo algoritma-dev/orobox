@@ -114,6 +114,7 @@ type OroConfig struct {
 	Type       string         `yaml:"type" mapstructure:"type"`
 	Class      string         `yaml:"class" mapstructure:"class"`
 	Namespace  string         `yaml:"namespace" mapstructure:"namespace"`
+	BundleName string         `yaml:"bundle_name" mapstructure:"bundle_name"`
 	OroVersion string         `yaml:"oro_version" mapstructure:"oro_version"`
 	Domains    []DomainConfig `yaml:"domains" mapstructure:"domains"`
 	Services   ServicesConfig `yaml:"services" mapstructure:"services"`
@@ -168,6 +169,33 @@ func GetNamespace() string {
 func GetBundlePath() string {
 	ns := GetNamespace()
 	return strings.ReplaceAll(ns, "\\", "/")
+}
+
+// GetBundleName returns the name of the bundle.
+func GetBundleName() string {
+	bn := viper.GetString("bundle_name")
+	if bn != "" {
+		return bn
+	}
+	// Try to guess from namespace
+	ns := GetNamespace()
+	if ns == "CustomBundle" {
+		return "CustomBundle"
+	}
+	// Remove "Bundle" if present and join
+	parts := strings.Split(ns, "\\")
+	var result []string
+	for _, part := range parts {
+		if part != "Bundle" {
+			result = append(result, part)
+		}
+	}
+	// Ensure it ends with "Bundle" if it doesn't already
+	name := strings.Join(result, "")
+	if !strings.HasSuffix(name, "Bundle") {
+		name += "Bundle"
+	}
+	return name
 }
 
 // GetHostBundlePath returns the absolute path to the bundle on the host.

@@ -108,6 +108,7 @@ func EnsureDockerCompose() bool {
 		OroRootDir           string
 		CustomBundle         string
 		BundleNamespace      string
+		BundleName           string
 		Domains              []config.DomainConfig
 		MemoryLimit          string
 		NginxHTTPPort        string
@@ -121,6 +122,7 @@ func EnsureDockerCompose() bool {
 		OroRootDir:      config.OroRootDir,
 		CustomBundle:    config.CustomBundlePath,
 		BundleNamespace: config.GetBundlePath(),
+		BundleName:      config.GetBundleName(),
 		MemoryLimit:     "2048M", // Default
 		PhpFpmPort:      "9000",
 	}
