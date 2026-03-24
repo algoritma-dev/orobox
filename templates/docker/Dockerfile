@@ -182,7 +182,7 @@ RUN --mount=type=cache,target=/root/.composer/cache \
     PGPASSWORD=oro_db_pass pg_dump -h 127.0.0.1 -U oro_db_user oro_db | gzip > /opt/oro_backups/oro_db_dev.sql.gz; \
     mkdir -p var/{data,cache}; \
     chown -R www-data:www-data var; \
-    tar -czf /opt/oro_backups/oro_assets.tar.gz var/data/; \
+    tar -czf /opt/oro_backups/oro_assets.tar.gz var/data/ public/media/; \
     ls -lh /opt/oro_backups/; \
     [ -s /opt/oro_backups/oro_db_dev.sql.gz ] || { echo "Error: oro_db_dev.sql.gz is missing or empty"; exit 1; }; \
     su postgres -s /bin/sh -c "pg_ctl -D /var/lib/postgresql/data stop"; \
