@@ -111,7 +111,7 @@ func GetVersionsForOro(oroVersion string) OroVersions {
 
 // OroConfig is the main configuration structure for Orobox.
 type OroConfig struct {
-	Type       string         `yaml:"type" mapstructure:"type"`
+	Type       string         `yaml:"type" mapstructure:"type" default:"bundle"`
 	Class      string         `yaml:"class" mapstructure:"class"`
 	Namespace  string         `yaml:"namespace" mapstructure:"namespace"`
 	BundleName string         `yaml:"bundle_name" mapstructure:"bundle_name"`
@@ -119,6 +119,12 @@ type OroConfig struct {
 	Domains    []DomainConfig `yaml:"domains" mapstructure:"domains"`
 	Services   ServicesConfig `yaml:"services" mapstructure:"services"`
 }
+
+const (
+	InstallTypeBundle  = "bundle"
+	InstallTypeProject = "project"
+	InstallTypeDemo    = "demo"
+)
 
 // OroRootDir is the base directory for OroCommerce in the container.
 const OroRootDir = "/var/www/oro"
@@ -128,9 +134,16 @@ const CustomBundlePath = "/src/CustomBundle"
 
 // Validate checks if the configuration is valid.
 func (c *OroConfig) Validate() error {
-	if c.Namespace == "" {
-		return errors.New("config error: field 'namespace' is required (did you use 'bundle_namespace' by mistake?)")
+	if c.Type == "" {
+		c.Type = InstallTypeBundle
 	}
+
+	if c.Type == InstallTypeBundle {
+		if c.Namespace == "" {
+			return errors.New("config error: field 'namespace' is required (did you use 'bundle_namespace' by mistake?)")
+		}
+	}
+
 	if c.OroVersion == "" {
 		return errors.New("config error: field 'oro_version' is required")
 	}

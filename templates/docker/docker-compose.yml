@@ -14,28 +14,15 @@ x-templates:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-  volumes-app: &volumes-app
+  volumes-oro: &volumes-oro
+    {{if eq .Type "project" -}}
+    - "{{.BundlePath}}:/var/www/oro"
+    {{- else -}}
     - "oro_app:/var/www/oro"
+    {{if eq .Type "bundle" -}}
     - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
-    - "cache:/var/www/oro/var/cache"
-
-  volumes-worker: &volumes-worker
-    - "oro_app:/var/www/oro"
-    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
-    - "cache:/var/www/oro/var/cache"
-    - "public_storage:/var/www/oro/public/media"
-    - "private_storage:/var/www/oro/var/data"
-
-  volumes-full-worker: &volumes-full-worker
-    - "oro_app:/var/www/oro"
-    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
-    - "cache:/var/www/oro/var/cache"
-    - "public_storage:/var/www/oro/public/media"
-    - "private_storage:/var/www/oro/var/data"
-
-  volumes-setup: &volumes-setup
-    - "oro_app:/var/www/oro"
-    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
+    {{- end}}
+    {{- end}}
     - "cache:/var/www/oro/var/cache"
     - "public_storage:/var/www/oro/public/media"
     - "private_storage:/var/www/oro/var/data"
@@ -54,7 +41,7 @@ services:
         echo "Listen on: $${ORO_APP_PROTOCOL}://$${ORO_APP_DOMAIN}{{if and (ne .NginxHTTPPort "80") (ne .NginxHTTPPort "443")}}:{{.NginxHTTPPort}}{{end}}/"
         {{end -}}
         exec tail -f /dev/null
-    volumes: *volumes-app
+    volumes: *volumes-oro
     depends_on:
       "web":
         condition: service_started
@@ -67,6 +54,7 @@ services:
     <<: *oro-app
     environment:
       ORO_XDEBUG_ENABLED: "false"
+      ORO_ENV: {{if eq .Type "demo"}}prod{{else}}${ORO_ENV:-dev}{{end}}
     command: nginx
     restart: unless-stopped
     healthcheck:
@@ -89,8 +77,14 @@ services:
     tmpfs:
       - /opt/oro-nginx
     volumes:
+      {{if eq .Type "project" -}}
+      - "{{.BundlePath}}:/var/www/oro"
+      {{- else -}}
       - "oro_app:/var/www/oro"
+      {{if eq .Type "bundle" -}}
       - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
+      {{- end}}
+      {{- end}}
       - "cache:/var/www/oro/var/cache:ro"
       - "public_storage:/var/www/oro/public/media:ro"
       - "private_storage:/var/www/oro/var/data:ro"
@@ -135,7 +129,7 @@ services:
       timeout: 30s
       start_period: 15s
     environment:
-      ORO_ENV: ${ORO_ENV:-dev}
+      ORO_ENV: {{if eq .Type "demo"}}prod{{else}}${ORO_ENV:-dev}{{end}}
       ORO_LOG_PATH: php://stderr
     depends_on:
       {{if .Postgres -}}
@@ -160,13 +154,7 @@ services:
       "elasticsearch":
         condition: service_started
       {{- end}}
-    volumes:
-      - "{{.BundlePath}}/src:/var/www/oro/src"
-      - "oro_app:/var/www/oro"
-      - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
-      - "cache:/var/www/oro/var/cache"
-      - "public_storage:/var/www/oro/public/media"
-      - "private_storage:/var/www/oro/var/data"
+    volumes: *volumes-oro
 
   ws:
     <<: *oro-app
@@ -175,13 +163,13 @@ services:
     user: ${ORO_USER_RUNTIME:-www-data}
     init: true
     environment:
-      ORO_ENV: ${ORO_ENV:-dev}
+      ORO_ENV: {{if eq .Type "demo"}}prod{{else}}${ORO_ENV:-dev}{{end}}
       ORO_LOG_PATH: php://stderr
       ORO_XDEBUG_ENABLED: "false"
     depends_on:
       "php-fpm-app":
         condition: service_healthy
-    volumes: *volumes-worker
+    volumes: *volumes-oro
 
   consumer:
     <<: *oro-app
@@ -190,13 +178,13 @@ services:
     user: ${ORO_USER_RUNTIME:-www-data}
     init: true
     environment:
-      ORO_ENV: ${ORO_ENV:-dev}
+      ORO_ENV: {{if eq .Type "demo"}}prod{{else}}${ORO_ENV:-dev}{{end}}
       ORO_LOG_PATH: php://stderr
       ORO_XDEBUG_ENABLED: ${ORO_CONSUMER_XDEBUG_ENABLED:-false}
     depends_on:
       "php-fpm-app":
         condition: service_healthy
-    volumes: *volumes-worker
+    volumes: *volumes-oro
 
   cron:
     <<: *oro-app
@@ -207,17 +195,17 @@ services:
         soft: 1024
         hard: 1048576
     environment:
-      ORO_ENV: ${ORO_ENV:-dev}
+      ORO_ENV: {{if eq .Type "demo"}}prod{{else}}${ORO_ENV:-dev}{{end}}
       ORO_LOG_PATH: php://stderr
       ORO_XDEBUG_ENABLED: ${ORO_CRON_XDEBUG_ENABLED:-false}
-    volumes: *volumes-full-worker
+    volumes: *volumes-oro
     depends_on:
       "php-fpm-app":
         condition: service_healthy
-    {{- if .Postgres}}
+      {{- if .Postgres}}
       "db":
         condition: service_healthy
-    {{- end}}
+      {{- end}}
 
   {{if .Postgres}}
   db:
@@ -261,11 +249,13 @@ services:
   {{end}}
   {{if .RabbitMQ}}
   rabbitmq:
-    image: "rabbitmq:{{.RabbitMQVersion}}-management"
+    image: {{if eq .Type "demo"}}"rabbitmq:{{.RabbitMQVersion}}"{{else}}"rabbitmq:{{.RabbitMQVersion}}-management"{{end}}
     hostname: rabbitmq
     restart: unless-stopped
+    {{if ne .Type "demo" -}}
     ports:
       - "15672:15672"
+    {{- end}}
     environment:
       RABBITMQ_DEFAULT_USER: ${ORO_RABBITMQ_USER:-guest}
       RABBITMQ_DEFAULT_PASS: ${ORO_RABBITMQ_PASS:-guest}
@@ -304,7 +294,7 @@ services:
       - db
   {{end}}
 
-  {{if .Elasticsearch}}
+  {{if and .Elasticsearch (ne .Type "demo")}}
   kibana:
     image: "kibana:{{.ElasticsearchVersion}}"
     ports:

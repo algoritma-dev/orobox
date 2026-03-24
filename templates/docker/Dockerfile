@@ -45,8 +45,11 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
 {{- end }}
 
 # Install Xdebug and PCOV
-RUN pecl install xdebug pcov \
-    && docker-php-ext-enable pcov xdebug
+RUN if [ "{{.Type}}" != "demo" ]; then \
+        pecl install xdebug pcov && docker-php-ext-enable pcov xdebug; \
+    else \
+        pecl install pcov && docker-php-ext-enable pcov; \
+    fi
 
 # Stage 2: Final runtime image
 FROM php:${PHP_VERSION}-fpm-alpine
@@ -104,17 +107,19 @@ COPY --from=builder /usr/local/etc/php/conf.d /usr/local/etc/php/conf.d
 
 # Configure PHP, Xdebug and FPM
 RUN { \
-        echo "xdebug.mode=develop,debug"; \
-        echo "xdebug.max_nesting_level=500"; \
-        echo "xdebug.client_host=host.docker.internal"; \
-        echo "xdebug.client_port=9003"; \
-        echo "xdebug.discover_client_host=no"; \
-        echo "xdebug.start_with_request=yes"; \
-        echo "xdebug.idekey=PHPSTORM"; \
-        echo "xdebug.log=/tmp/xdebug.log"; \
-        echo "xdebug.connect_timeout_ms=200"; \
+        if [ "{{.Type}}" != "demo" ]; then \
+            echo "xdebug.mode=develop,debug"; \
+            echo "xdebug.max_nesting_level=500"; \
+            echo "xdebug.client_host=host.docker.internal"; \
+            echo "xdebug.client_port=9003"; \
+            echo "xdebug.discover_client_host=no"; \
+            echo "xdebug.start_with_request=yes"; \
+            echo "xdebug.idekey=PHPSTORM"; \
+            echo "xdebug.log=/tmp/xdebug.log"; \
+            echo "xdebug.connect_timeout_ms=200"; \
+        fi \
     } > /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini \
-    && mv /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini.disabled \
+    && if [ "{{.Type}}" != "demo" ]; then mv /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini.disabled; fi \
     && { \
         echo "memory_limit=${MEMORY_LIMIT}"; \
         echo 'upload_max_filesize=100M'; \
@@ -123,12 +128,12 @@ RUN { \
         echo 'date.timezone=UTC'; \
         echo 'short_open_tag=off'; \
         echo 'intl.error_level=0'; \
-        echo "opcache.enable=0"; \
-        echo "opcache.enable_cli=0"; \
+        echo "opcache.enable={{if eq .Type "demo"}}1{{else}}0{{end}}"; \
+        echo "opcache.enable_cli={{if eq .Type "demo"}}1{{else}}0{{end}}"; \
         echo 'opcache.memory_consumption=256'; \
         echo 'opcache.interned_strings_buffer=16'; \
         echo 'opcache.max_accelerated_files=20000'; \
-        echo 'opcache.validate_timestamps=1'; \
+        echo 'opcache.validate_timestamps={{if eq .Type "demo"}}0{{else}}1{{end}}'; \
         echo 'opcache.revalidate_freq=0'; \
         echo 'opcache.fast_shutdown=1'; \
     } > /usr/local/etc/php/conf.d/oro-custom.ini \

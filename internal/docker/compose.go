@@ -90,6 +90,7 @@ func EnsureDockerCompose() bool {
 	}
 
 	data := struct {
+		Type                 string
 		OroVersion           string
 		PHPVersion           string
 		NodeVersion          string
@@ -118,6 +119,7 @@ func EnsureDockerCompose() bool {
 		CertsPath            string
 		Xdebug               bool
 	}{
+		Type:            viper.GetString("type"),
 		InternalDir:     internalDir,
 		OroRootDir:      config.OroRootDir,
 		CustomBundle:    config.CustomBundlePath,

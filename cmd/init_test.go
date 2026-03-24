@@ -19,16 +19,17 @@ func TestGenerateConfig(t *testing.T) {
 	defer os.Chdir(origWd)
 
 	// Simulate interactive input:
-	// 1. Bundle class: Algoritma\Bundle\TestBundle\TestBundle
-	// 2. OroCommerce version (selection 1 = 7.0)
-	// 3. Host: test.local
-	// 4. Root: public
-	// 5. SSL: n
-	// 6. Redis: y
-	// 7. Mailpit: y
-	// 8. RabbitMQ: y
-	// 9. Elasticsearch: y
-	input := "Algoritma\\Bundle\\TestBundle\\TestBundle\n1\ntest.local\npublic\nn\ny\ny\ny\ny\n"
+	// 1. Installation type (selection 1 = bundle)
+	// 2. Bundle class: Algoritma\Bundle\TestBundle\TestBundle
+	// 3. OroCommerce version (selection 1 = 7.0)
+	// 4. Host: test.local
+	// 5. Root: public
+	// 6. SSL: n
+	// 7. Redis: y
+	// 8. Mailpit: y
+	// 9. RabbitMQ: y
+	// 10. Elasticsearch: y
+	input := "1\nAlgoritma\\Bundle\\TestBundle\\TestBundle\n1\ntest.local\npublic\nn\ny\ny\ny\ny\n"
 
 	oldStdin := stdin
 	stdin = strings.NewReader(input)
@@ -80,6 +81,7 @@ func TestValidateConfig(t *testing.T) {
 
 	// Test valid file
 	validYaml := `
+type: bundle
 namespace: MyNamespace
 oro_version: "6.1"
 domains:

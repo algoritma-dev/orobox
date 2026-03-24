@@ -14,8 +14,14 @@ x-templates:
       - "host.docker.internal:host-gateway"
 
   volumes-setup: &volumes-setup
+    {{if eq .Type "project" -}}
+    - "{{.BundlePath}}:/var/www/oro"
+    {{- else -}}
     - "oro_app:/var/www/oro"
+    {{if eq .Type "bundle" -}}
     - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
+    {{- end}}
+    {{- end}}
     - "cache:/var/www/oro/var/cache"
     - "public_storage:/var/www/oro/public/media"
     - "private_storage:/var/www/oro/var/data"

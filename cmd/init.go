@@ -24,6 +24,7 @@ var (
 	bundlePath      string
 	oroVersion      string
 	bundleNamespace string
+	installType     string
 	stdin           io.Reader = os.Stdin
 )
 
@@ -72,6 +73,7 @@ func init() {
 	initCmd.Flags().StringVarP(&bundlePath, "bundle-path", "b", ".", "Bundle path")
 	initCmd.Flags().StringVarP(&oroVersion, "oro-version", "v", "6.1", "OroCommerce version")
 	initCmd.Flags().StringVarP(&bundleNamespace, "bundle-namespace", "n", "", "Bundle namespace")
+	initCmd.Flags().StringVarP(&installType, "type", "t", "bundle", "Installation type (bundle, project, demo)")
 }
 
 func generateConfig() {
@@ -90,25 +92,29 @@ func generateConfig() {
 	fmt.Println("Config file .orobox.yaml not found or invalid. Let's create it interactively.")
 	reader := bufio.NewReader(stdin)
 
-	bundleClass := utils.AskQuestion(reader, "Full bundle class (eg: Algoritma\\Bundle\\ShippyProBundle\\AlgoritmaShippyProBundle)", "")
+	typeOfInstall := utils.AskSelection(reader, "Installation type", []string{config.InstallTypeBundle, config.InstallTypeProject, config.InstallTypeDemo}, installType)
 
 	var className, namespace string
-	if bundleClass != "" {
-		var found bool
-		className, namespace, found = config.FindPhpClass(bundleClass)
-		if !found {
-			fmt.Printf("Warning: PHP class for %s not found in current directory or subdirectories.\n", bundleClass)
-			// Manual parsing if not found
-			lastSlash := strings.LastIndex(bundleClass, "\\")
-			if lastSlash != -1 {
-				className = bundleClass[lastSlash+1:]
-				namespace = bundleClass[:lastSlash]
+	if typeOfInstall == config.InstallTypeBundle {
+		bundleClass := utils.AskQuestion(reader, "Full bundle class (eg: Algoritma\\Bundle\\ShippyProBundle\\AlgoritmaShippyProBundle)", "")
+
+		if bundleClass != "" {
+			var found bool
+			className, namespace, found = config.FindPhpClass(bundleClass)
+			if !found {
+				fmt.Printf("Warning: PHP class for %s not found in current directory or subdirectories.\n", bundleClass)
+				// Manual parsing if not found
+				lastSlash := strings.LastIndex(bundleClass, "\\")
+				if lastSlash != -1 {
+					className = bundleClass[lastSlash+1:]
+					namespace = bundleClass[:lastSlash]
+				} else {
+					className = bundleClass
+					namespace = ""
+				}
 			} else {
-				className = bundleClass
-				namespace = ""
+				fmt.Printf("Found class %s in namespace %s\n", className, namespace)
 			}
-		} else {
-			fmt.Printf("Found class %s in namespace %s\n", className, namespace)
 		}
 	}
 
@@ -116,8 +122,14 @@ func generateConfig() {
 	host := utils.AskQuestion(reader, "Main domain host", "oro.demo")
 	root := utils.AskQuestion(reader, "Main domain root", "public")
 	ssl := utils.AskYesNo(reader, "Enable SSL?", false)
+
+	isDemo := typeOfInstall == config.InstallTypeDemo
+
 	redisEnabled := utils.AskYesNo(reader, "Enable Redis?", true)
-	mailpit := utils.AskYesNo(reader, "Enable Mailpit?", true)
+	mailpit := false
+	if !isDemo {
+		mailpit = utils.AskYesNo(reader, "Enable Mailpit?", true)
+	}
 	rabbitmqEnabled := utils.AskYesNo(reader, "Enable RabbitMQ?", true)
 	elasticsearchEnabled := utils.AskYesNo(reader, "Enable Elasticsearch?", true)
 
@@ -137,7 +149,7 @@ func generateConfig() {
 	}
 
 	conf := config.OroConfig{
-		Type:       "bundle",
+		Type:       typeOfInstall,
 		Class:      className,
 		Namespace:  namespace,
 		OroVersion: version,
@@ -154,7 +166,7 @@ func generateConfig() {
 			Mailpit:  mailpit,
 			Php: config.PhpConfig{
 				Version: versions.PHP,
-				Xdebug:  false,
+				Xdebug:  !isDemo,
 			},
 			NodeVersion:   versions.Node,
 			NpmVersion:    versions.NPM,
