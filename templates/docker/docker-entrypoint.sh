@@ -181,6 +181,10 @@ case "$1" in
             [ -n "$ORO_DB_NAME" ] && check_and_restore "$ORO_DB_NAME" "/opt/oro_backups/oro_db_dev.sql.gz" "true"
         fi
 
+        if [ "$ORO_ENV" = "prod" ]; then
+          php bin/console cache:clear --no-debug
+        fi
+
         exit 0
         ;;
     nginx-init)
