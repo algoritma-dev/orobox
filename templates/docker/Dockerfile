@@ -7,22 +7,14 @@ ARG MEMORY_LIMIT=2048M
 # Get Node from official image
 FROM node:${NODE_VERSION}-alpine AS node_image
 
-FROM php:${PHP_VERSION}-fpm-alpine
+# Stage 1: Build PHP extensions
+FROM php:${PHP_VERSION}-fpm-alpine AS builder
 
 ARG PHP_VERSION
-ARG NODE_VERSION
-ARG NPM_VERSION
-ARG MEMORY_LIMIT
 
-# Install system dependencies
+# Build-time dependencies
 RUN apk add --no-cache \
-    nginx \
-    jq \
-    chromium \
-    bash \
-    curl \
-    chromium-chromedriver \
-    postgresql-client \
+    $PHPIZE_DEPS \
     postgresql-dev \
     libpng-dev \
     libjpeg-turbo-dev \
@@ -35,20 +27,65 @@ RUN apk add --no-cache \
     imap-dev \
     krb5-dev \
     openssl-dev \
+    linux-headers
+
+# Install PHP extensions
+{{ if eq .PHPVersion "8.4" -}}
+RUN docker-php-source extract \
+    && mkdir -p /usr/src/php/ext/imap \
+    && curl -fsSL https://pecl.php.net/get/imap | tar xvz -C /usr/src/php/ext/imap --strip-components=1 \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
+    && docker-php-ext-configure imap --with-kerberos --with-imap-ssl \
+    && docker-php-ext-install -j$(nproc) gd pdo_pgsql intl zip opcache bcmath soap xml pcntl tidy imap \
+    && docker-php-source delete
+{{- else -}}
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
+    && docker-php-ext-configure imap --with-kerberos --with-imap-ssl \
+    && docker-php-ext-install -j$(nproc) gd pdo_pgsql intl zip opcache bcmath soap xml pcntl tidy imap
+{{- end }}
+
+# Install Xdebug and PCOV
+RUN pecl install xdebug pcov \
+    && docker-php-ext-enable pcov xdebug
+
+# Stage 2: Final runtime image
+FROM php:${PHP_VERSION}-fpm-alpine
+
+ARG PHP_VERSION
+ARG NODE_VERSION
+ARG NPM_VERSION
+ARG MEMORY_LIMIT
+
+# Runtime system dependencies
+RUN apk add --no-cache \
+    nginx \
+    jq \
+    chromium \
+    bash \
+    curl \
+    chromium-chromedriver \
+    postgresql-client \
+    libpng \
+    libjpeg-turbo \
+    freetype \
+    libwebp \
+    libzip \
+    icu-libs \
+    libxml2 \
+    tidyhtml-libs \
+    imap \
+    krb5-libs \
+    openssl \
     jpegoptim \
     pngquant \
     optipng \
-    libjpeg-turbo \
-    libpng \
-    libwebp \
-    freetype \
     libjpeg-turbo-utils \
     git \
     unzip \
     libstdc++ \
     libgcc \
     ca-certificates \
-    linux-headers
+    fcgi
 
 # Install Composer
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
@@ -61,63 +98,24 @@ RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
     && npm install -g npm@${NPM_VERSION}
 
-# Install PHP extensions
-{{ if eq .PHPVersion "8.4" -}}
-RUN docker-php-source extract \
-    && mkdir -p /usr/src/php/ext/imap \
-    && curl -fsSL https://pecl.php.net/get/imap | tar xvz -C /usr/src/php/ext/imap --strip-components=1 \
-    && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
-    && docker-php-ext-configure imap --with-kerberos --with-imap-ssl \
-    && docker-php-ext-install -j$(nproc) \
-        gd \
-        pdo_pgsql \
-        intl \
-        zip \
-        opcache \
-        bcmath \
-        soap \
-        xml \
-        pcntl \
-        tidy \
-        imap \
-    && docker-php-source delete
-{{- else -}}
-RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
-    && docker-php-ext-configure imap --with-kerberos --with-imap-ssl \
-    && docker-php-ext-install -j$(nproc) \
-        gd \
-        pdo_pgsql \
-        intl \
-        zip \
-        opcache \
-        bcmath \
-        soap \
-        xml \
-        pcntl \
-        tidy \
-        imap
-{{- end }}
+# Copy PHP extensions from builder
+COPY --from=builder /usr/local/lib/php/extensions /usr/local/lib/php/extensions
+COPY --from=builder /usr/local/etc/php/conf.d /usr/local/etc/php/conf.d
 
-# Install Xdebug and PCOV
-RUN apk add --no-cache --virtual .build-deps $PHPIZE_DEPS \
-    && pecl install xdebug pcov \
-    && docker-php-ext-enable pcov \
-    && docker-php-ext-enable xdebug \
-    && echo "xdebug.mode=develop,debug" >> /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini \
-    && echo "xdebug.max_nesting_level=500" >> /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini \
-    && echo "xdebug.client_host=host.docker.internal" >> /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini \
-    && echo "xdebug.client_port=9003" >> /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini \
-    && echo "xdebug.discover_client_host=no" >> /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini \
-    && echo "xdebug.start_with_request=yes" >> /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini \
-    && echo "xdebug.idekey=PHPSTORM" >> /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini \
-    && echo "xdebug.log=/tmp/xdebug.log" >> /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini \
-    && echo "xdebug.connect_timeout_ms=200" >> /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini \
-    && mv /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini.disabled \
-    && apk del .build-deps \
-    && chmod -R 777 /usr/local/etc/php/conf.d
-
-# PHP Configuration
+# Configure PHP, Xdebug and FPM
 RUN { \
+        echo "xdebug.mode=develop,debug"; \
+        echo "xdebug.max_nesting_level=500"; \
+        echo "xdebug.client_host=host.docker.internal"; \
+        echo "xdebug.client_port=9003"; \
+        echo "xdebug.discover_client_host=no"; \
+        echo "xdebug.start_with_request=yes"; \
+        echo "xdebug.idekey=PHPSTORM"; \
+        echo "xdebug.log=/tmp/xdebug.log"; \
+        echo "xdebug.connect_timeout_ms=200"; \
+    } > /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini \
+    && mv /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini.disabled \
+    && { \
         echo "memory_limit=${MEMORY_LIMIT}"; \
         echo 'upload_max_filesize=100M'; \
         echo 'post_max_size=100M'; \
@@ -133,22 +131,19 @@ RUN { \
         echo 'opcache.validate_timestamps=1'; \
         echo 'opcache.revalidate_freq=0'; \
         echo 'opcache.fast_shutdown=1'; \
-    } > /usr/local/etc/php/conf.d/oro-custom.ini
-
-# Increase FPM workers for better debug experience
-RUN { \
+    } > /usr/local/etc/php/conf.d/oro-custom.ini \
+    && { \
         echo '[www]'; \
         echo 'pm = dynamic'; \
         echo 'pm.max_children = 20'; \
         echo 'pm.start_servers = 5'; \
         echo 'pm.min_spare_servers = 3'; \
         echo 'pm.max_spare_servers = 10'; \
-    } > /usr/local/etc/php-fpm.d/z-oro-fpm.conf
+    } > /usr/local/etc/php-fpm.d/z-oro-fpm.conf \
+    && chmod -R 777 /usr/local/etc/php/conf.d
 
 # Configure Nginx
 COPY nginx.conf /etc/nginx/http.d/default.conf
-
-# Fix Nginx permissions to run as non-root
 RUN mkdir -p /var/lib/nginx/tmp /var/lib/nginx/logs /var/log/nginx /run/nginx \
     && chown -R www-data:www-data /var/lib/nginx /var/log/nginx /run/nginx \
     && sed -i 's/^#*user .*/user www-data;/' /etc/nginx/nginx.conf \
@@ -159,7 +154,7 @@ RUN mkdir -p /var/lib/nginx/tmp /var/lib/nginx/logs /var/log/nginx /run/nginx \
 # Set up working directory
 WORKDIR {{.OroRootDir}}
 
-# Install OroCommerce and create database dumps for development and testing
+# Install OroCommerce and create database dumps
 RUN --mount=type=cache,target=/root/.composer/cache \
     --mount=type=tmpfs,target=/var/lib/postgresql/data \
     set -e; \
@@ -172,8 +167,8 @@ RUN --mount=type=cache,target=/root/.composer/cache \
     su postgres -s /bin/sh -c "initdb -D /var/lib/postgresql/data"; \
     su postgres -s /bin/sh -c "pg_ctl -D /var/lib/postgresql/data -l /tmp/pg.log start"; \
     until su postgres -s /bin/sh -c "pg_isready -q"; do sleep 1; done; \
-    su postgres -s /bin/sh -c "psql -d postgres --command \"CREATE USER oro_db_user WITH SUPERUSER PASSWORD 'oro_db_pass';\"" || { cat /tmp/pg.log; exit 1; }; \
-    su postgres -s /bin/sh -c "createdb -O oro_db_user oro_db" || { cat /tmp/pg.log; exit 1; }; \
+    su postgres -s /bin/sh -c "psql -d postgres --command \"CREATE USER oro_db_user WITH SUPERUSER PASSWORD 'oro_db_pass';\""; \
+    su postgres -s /bin/sh -c "createdb -O oro_db_user oro_db"; \
     su postgres -s /bin/sh -c "psql -d oro_db -c 'CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"; CREATE EXTENSION IF NOT EXISTS \"pg_trgm\";'"; \
     export ORO_DB_URL=postgresql://oro_db_user:oro_db_pass@127.0.0.1/oro_db; \
     export ORO_MQ_DSN=dbal: ORO_SEARCH_ENGINE_DSN=orm: ORO_SESSION_DSN=native:; \
@@ -183,27 +178,26 @@ RUN --mount=type=cache,target=/root/.composer/cache \
     ls -lh /opt/oro_backups/; \
     [ -s /opt/oro_backups/oro_db_dev.sql.gz ] || { echo "Error: oro_db_dev.sql.gz is missing or empty"; exit 1; }; \
     su postgres -s /bin/sh -c "pg_ctl -D /var/lib/postgresql/data stop"; \
-    rm -rf /tmp/*; \
     apk del postgresql postgresql-contrib; \
+    rm -rf var/cache/* var/data/* var/logs/* /tmp/* /run/postgresql/*; \
     chown -R www-data:www-data .; \
     ln -sf /usr/bin/jpegoptim /usr/local/bin/jpegoptim; \
     ln -sf /usr/bin/pngquant /usr/local/bin/pngquant; \
     ln -sf /usr/bin/optipng /usr/local/bin/optipng; \
-    rm -f /usr/local/etc/php/conf.d/*phar* || true \
+    rm -f /usr/local/etc/php/conf.d/*phar* || true; \
     unset ORO_DB_URL ORO_MQ_DSN ORO_SEARCH_ENGINE_DSN ORO_SESSION_DSN
 
 # Create required directories for nginx and tools
 RUN mkdir -p /opt/oro-nginx-tool /opt/oro-nginx/etc/sites-available \
     && echo '{"properties": {"sites": {"propertyNames": {"pattern": ""}}}}' > /opt/oro-nginx-tool/variables.schema.json
 
-# Copy entrypoint scriptdsads
+# Copy entrypoint script
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Install php-fpm-healthcheck
 RUN wget -O /usr/local/bin/php-fpm-healthcheck https://raw.githubusercontent.com/renatomefi/php-fpm-healthcheck/master/php-fpm-healthcheck \
-    && chmod +x /usr/local/bin/php-fpm-healthcheck \
-    && apk add --no-cache fcgi
+    && chmod +x /usr/local/bin/php-fpm-healthcheck
 
 # Expose ports
 EXPOSE {{.NginxHTTPPort}}
