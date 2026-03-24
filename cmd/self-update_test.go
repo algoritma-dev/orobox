@@ -38,7 +38,7 @@ func TestFindBestAsset(t *testing.T) {
 	})
 
 	t.Run("MatchX86_64ForAMD64", func(t *testing.T) {
-		r_x86_64 := &release{
+		rX86_64 := &release{
 			Assets: []struct {
 				Name               string `json:"name"`
 				BrowserDownloadURL string `json:"browser_download_url"`
@@ -49,7 +49,7 @@ func TestFindBestAsset(t *testing.T) {
 		}
 
 		if runtime.GOOS == "linux" && runtime.GOARCH == "amd64" {
-			url, name := findBestAsset(r_x86_64)
+			url, name := findBestAsset(rX86_64)
 			if url != "url-linux-x86_64" {
 				t.Errorf("expected url-linux-x86_64, got %s (name: %s)", url, name)
 			}
@@ -57,7 +57,7 @@ func TestFindBestAsset(t *testing.T) {
 	})
 
 	t.Run("IgnoreArchives", func(t *testing.T) {
-		r_archives := &release{
+		rArchives := &release{
 			Assets: []struct {
 				Name               string `json:"name"`
 				BrowserDownloadURL string `json:"browser_download_url"`
@@ -66,7 +66,7 @@ func TestFindBestAsset(t *testing.T) {
 				{Name: "orobox_Linux_x86_64.zip", BrowserDownloadURL: "url-linux-zip"},
 			},
 		}
-		url, _ := findBestAsset(r_archives)
+		url, _ := findBestAsset(rArchives)
 		if url != "" {
 			t.Errorf("expected no binary found (all archives), got %s", url)
 		}

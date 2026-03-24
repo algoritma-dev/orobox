@@ -29,7 +29,7 @@ var httpClient = &http.Client{
 var selfUpdateCmd = &cobra.Command{
 	Use:   "self-update",
 	Short: "Update orobox to the latest version",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, args []string) error {
 		fmt.Printf("Current version: %s\n", Version)
 		fmt.Println("Checking for updates...")
 

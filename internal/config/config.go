@@ -116,6 +116,7 @@ type OroConfig struct {
 	Services   ServicesConfig `yaml:"services" mapstructure:"services"`
 }
 
+// Install types for OroCommerce.
 const (
 	InstallTypeBundle  = "bundle"
 	InstallTypeProject = "project"
