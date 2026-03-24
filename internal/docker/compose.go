@@ -153,36 +153,19 @@ func EnsureDockerCompose() bool {
 
 	versions := config.GetVersionsForOro(oroVersion)
 
-	data.PHPVersion = viper.GetString("services.php.version")
-	if data.PHPVersion == "" {
-		data.PHPVersion = versions.PHP
-	}
-
-	data.NodeVersion = viper.GetString("services.node_version")
-	if data.NodeVersion == "" {
-		data.NodeVersion = versions.Node
-	}
-
-	data.NpmVersion = viper.GetString("services.npm_version")
-	if data.NpmVersion == "" {
-		data.NpmVersion = versions.NPM
-	}
-
-	data.PostgresVersion = viper.GetString("services.postgres")
-	if data.PostgresVersion == "" || data.PostgresVersion == "true" {
-		data.PostgresVersion = versions.Postgres
-	}
+	data.PHPVersion = versions.PHP
+	data.NodeVersion = versions.Node
+	data.NpmVersion = versions.NPM
+	data.PostgresVersion = versions.Postgres
 	data.Postgres = true
 
-	data.RabbitMQVersion = viper.GetString("services.rabbitmq")
-	data.RabbitMQ = data.RabbitMQVersion != "" && data.RabbitMQVersion != "false"
-	if data.RabbitMQ && data.RabbitMQVersion == "true" {
+	data.RabbitMQ = viper.GetBool("services.rabbitmq")
+	if data.RabbitMQ {
 		data.RabbitMQVersion = versions.RabbitMQ
 	}
 
-	data.ElasticsearchVersion = viper.GetString("services.elasticsearch")
-	data.Elasticsearch = data.ElasticsearchVersion != "" && data.ElasticsearchVersion != "false"
-	if data.Elasticsearch && data.ElasticsearchVersion == "true" {
+	data.Elasticsearch = viper.GetBool("services.elasticsearch")
+	if data.Elasticsearch {
 		data.ElasticsearchVersion = versions.Elasticsearch
 	}
 
@@ -191,9 +174,8 @@ func EnsureDockerCompose() bool {
 		absBundlePath = config.GetHostBundlePath()
 	}
 	data.BundlePath = absBundlePath
-	data.RedisVersion = viper.GetString("services.redis")
-	data.Redis = data.RedisVersion != "" && data.RedisVersion != "false"
-	if data.Redis && data.RedisVersion == "true" {
+	data.Redis = viper.GetBool("services.redis")
+	if data.Redis {
 		data.RedisVersion = versions.Redis
 	}
 	data.Mailpit = viper.GetBool("services.mailpit")

@@ -109,7 +109,6 @@ domains:
 services:
   mailpit: true
   php:
-    version: "8.4"
     xdebug: true
 `
 	config, err := ParseConfig([]byte(yamlData))
@@ -128,9 +127,6 @@ services:
 	}
 	if !config.Services.Mailpit {
 		t.Errorf("Expected mailpit to be true")
-	}
-	if config.Services.Php.Version != "8.4" {
-		t.Errorf("Expected php version 8.4, got %s", config.Services.Php.Version)
 	}
 	if !config.Services.Php.Xdebug {
 		t.Errorf("Expected xdebug to be true")

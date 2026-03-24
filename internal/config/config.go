@@ -21,20 +21,16 @@ type DomainConfig struct {
 
 // PhpConfig represents the configuration for PHP.
 type PhpConfig struct {
-	Version string `yaml:"version" mapstructure:"version"`
-	Xdebug  bool   `yaml:"xdebug" mapstructure:"xdebug"`
+	Xdebug bool `yaml:"xdebug" mapstructure:"xdebug"`
 }
 
 // ServicesConfig represents the configuration for various services.
 type ServicesConfig struct {
-	Postgres      any       `yaml:"postgres" mapstructure:"postgres"`
-	Redis         any       `yaml:"redis" mapstructure:"redis"`
+	Redis         bool      `yaml:"redis" mapstructure:"redis"`
 	Mailpit       bool      `yaml:"mailpit" mapstructure:"mailpit"`
 	Php           PhpConfig `yaml:"php" mapstructure:"php"`
-	NodeVersion   string    `yaml:"node_version" mapstructure:"node_version"`
-	NpmVersion    string    `yaml:"npm_version" mapstructure:"npm_version"`
-	RabbitMQ      any       `yaml:"rabbitmq" mapstructure:"rabbitmq"`
-	Elasticsearch any       `yaml:"elasticsearch" mapstructure:"elasticsearch"`
+	RabbitMQ      bool      `yaml:"rabbitmq" mapstructure:"rabbitmq"`
+	Elasticsearch bool      `yaml:"elasticsearch" mapstructure:"elasticsearch"`
 }
 
 // OroVersions defines the versions of components for a specific OroCommerce version.

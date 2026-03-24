@@ -133,21 +133,6 @@ func generateConfig() {
 	rabbitmqEnabled := utils.AskYesNo(reader, "Enable RabbitMQ?", true)
 	elasticsearchEnabled := utils.AskYesNo(reader, "Enable Elasticsearch?", true)
 
-	versions := config.GetVersionsForOro(version)
-
-	var redis any = false
-	if redisEnabled {
-		redis = versions.Redis
-	}
-	var rabbitmq any = false
-	if rabbitmqEnabled {
-		rabbitmq = versions.RabbitMQ
-	}
-	var elasticsearch any = false
-	if elasticsearchEnabled {
-		elasticsearch = versions.Elasticsearch
-	}
-
 	conf := config.OroConfig{
 		Type:       typeOfInstall,
 		Class:      className,
@@ -161,17 +146,13 @@ func generateConfig() {
 			},
 		},
 		Services: config.ServicesConfig{
-			Postgres: versions.Postgres,
-			Redis:    redis,
-			Mailpit:  mailpit,
+			Redis:   redisEnabled,
+			Mailpit: mailpit,
 			Php: config.PhpConfig{
-				Version: versions.PHP,
-				Xdebug:  !isDemo,
+				Xdebug: !isDemo,
 			},
-			NodeVersion:   versions.Node,
-			NpmVersion:    versions.NPM,
-			RabbitMQ:      rabbitmq,
-			Elasticsearch: elasticsearch,
+			RabbitMQ:      rabbitmqEnabled,
+			Elasticsearch: elasticsearchEnabled,
 		},
 	}
 

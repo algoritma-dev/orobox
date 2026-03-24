@@ -29,7 +29,17 @@ type: bundle # Can be: bundle, project, demo
 class: MyBundle
 namespace: MyVendor\Bundle\MyBundle
 oro_version: "6.1"
-...
+domains:
+  - host: oro.demo
+    root: public
+    ssl: false
+services:
+  redis: true
+  mailpit: true
+  php:
+    xdebug: true
+  rabbitmq: true
+  elasticsearch: false
 ```
 
 ### Configuration Fields
@@ -39,7 +49,17 @@ oro_version: "6.1"
     - `demo`: Environment similar to production (`ORO_ENV=prod`). Xdebug, Mailpit, and other dev tools are disabled.
 - `class`: (Only for `type: bundle`) Name of the bundle class.
 - `namespace`: (Only for `type: bundle`) PHP namespace of the bundle.
-- `oro_version`: OroCommerce version (e.g., "6.1", "5.1").
+- `oro_version`: OroCommerce version (e.g., "7.0", "6.1", "6.0", "5.1").
+- `domains`: List of domains for the environment.
+- `services`: Configuration for optional services and tools:
+    - `redis`: (bool) Enable/disable Redis.
+    - `mailpit`: (bool) Enable/disable Mailpit.
+    - `rabbitmq`: (bool) Enable/disable RabbitMQ.
+    - `elasticsearch`: (bool) Enable/disable Elasticsearch/OpenSearch.
+    - `php`:
+        - `xdebug`: (bool) Enable/disable Xdebug.
+
+*Note: Versions of PHP, PostgreSQL, Node.js, and other components are automatically determined by the `oro_version` setting and cannot be changed manually.*
 
 ### Global Flags
 These options can be used with any command:
