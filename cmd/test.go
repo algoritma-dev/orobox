@@ -28,7 +28,6 @@ func init() {
 }
 
 func runTestCommand() {
-	fmt.Println("Preparing test environment...")
 	// Ensure application_test container is running
 	if err := docker.RunComposeCommand("up", "-d", "application_test"); err != nil {
 		fmt.Printf("Warning: failed to ensure application_test is running: %v\n", err)

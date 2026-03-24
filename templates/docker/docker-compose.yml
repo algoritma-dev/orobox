@@ -1,15 +1,51 @@
 
-services:
-  application:
-    image: orobox-app:{{.OroVersion}}-latest
+x-templates:
+  oro-app: &oro-app
+    image: "orobox-app:{{.OroVersion}}-latest"
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        PHP_VERSION: {{.PHPVersion}}
-        NODE_VERSION: {{.NodeVersion}}
-        NPM_VERSION: {{.NpmVersion}}
-        MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2048M}
+        PHP_VERSION: "{{.PHPVersion}}"
+        NODE_VERSION: "{{.NodeVersion}}"
+        NPM_VERSION: "{{.NpmVersion}}"
+        MEMORY_LIMIT: "${PHP_MEMORY_LIMIT:-2048M}"
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  volumes-app: &volumes-app
+    - "oro_app:/var/www/oro"
+    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
+    - "cache:/var/www/oro/var/cache"
+
+  volumes-worker: &volumes-worker
+    - "oro_app:/var/www/oro"
+    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
+    - "cache:/var/www/oro/var/cache"
+    - "maintenance_folder:${ORO_MAINTENANCE_LOCK_FOLDER:-/var/www/oro/var/maintenance}"
+    - "public_storage:/var/www/oro/public/media"
+    - "private_storage:/var/www/oro/var/data"
+
+  volumes-full-worker: &volumes-full-worker
+    - "oro_app:/var/www/oro"
+    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
+    - "cache:/var/www/oro/var/cache"
+    - "multihost_operation_folder:${ORO_MULTIHOST_OPERATION_FOLDER:-/var/www/oro/var/multihost}"
+    - "maintenance_folder:${ORO_MAINTENANCE_LOCK_FOLDER:-/var/www/oro/var/maintenance}"
+    - "public_storage:/var/www/oro/public/media"
+    - "private_storage:/var/www/oro/var/data"
+
+  volumes-setup: &volumes-setup
+    - "oro_app:/var/www/oro"
+    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
+    - "cache:/var/www/oro/var/cache"
+    - "public_storage:/var/www/oro/public/media"
+    - "private_storage:/var/www/oro/var/data"
+
+services:
+  application:
+    <<: *oro-app
     command:
       - bash
       - -c
@@ -21,13 +57,7 @@ services:
         echo "Listen on: $${ORO_APP_PROTOCOL}://$${ORO_APP_DOMAIN}{{if and (ne .NginxHTTPPort "80") (ne .NginxHTTPPort "443")}}:{{.NginxHTTPPort}}{{end}}/"
         {{end -}}
         exec tail -f /dev/null
-    env_file: .env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - oro_app:/var/www/oro
-      - {{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}
-      - cache:/var/www/oro/var/cache
+    volumes: *volumes-app
     depends_on:
       "web":
         condition: service_started
@@ -37,15 +67,7 @@ services:
         condition: service_started
 
   application_test:
-    image: orobox-app:{{.OroVersion}}-latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        PHP_VERSION: {{.PHPVersion}}
-        NODE_VERSION: {{.NodeVersion}}
-        NPM_VERSION: {{.NpmVersion}}
-        MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2048M}
+    <<: *oro-app
     command:
       - bash
       - -c
@@ -58,36 +80,13 @@ services:
     environment:
       ORO_ENV: test
       ORO_XDEBUG_ENABLED: "false"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - oro_app:/var/www/oro
-      - {{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}
-      - cache:/var/www/oro/var/cache
-    depends_on:
-      "web":
-        condition: service_started
-      "consumer":
-        condition: service_started
-      "cron":
-        condition: service_started
+    volumes: *volumes-app
 
   web:
-    image: orobox-app:{{.OroVersion}}-latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        PHP_VERSION: {{.PHPVersion}}
-        NODE_VERSION: {{.NodeVersion}}
-        NPM_VERSION: {{.NpmVersion}}
-        MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2048M}
+    <<: *oro-app
     environment:
       ORO_XDEBUG_ENABLED: "false"
     command: nginx
-    env_file: .env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     healthcheck:
       test: "curl -If http://127.0.0.1:{{.NginxHTTPPort}}/"
@@ -95,11 +94,11 @@ services:
       timeout: 30s
       start_period: 15s
     ports:
-      - published: {{.NginxHTTPPort}}
-        target: {{.NginxHTTPPort}}
+      - published: "{{.NginxHTTPPort}}"
+        target: "{{.NginxHTTPPort}}"
       {{if .HasSsl -}}
-      - published: {{.NginxHTTPSPort}}
-        target: {{.NginxHTTPSPort}}
+      - published: "{{.NginxHTTPSPort}}"
+        target: "{{.NginxHTTPSPort}}"
       {{- end}}
     depends_on:
       "web-init":
@@ -107,53 +106,33 @@ services:
       "php-fpm-app":
         condition: service_healthy
     volumes:
-      - oro_app:/var/www/oro
-      - {{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}
-      - cache:/var/www/oro/var/cache:ro
-      - maintenance_folder:${ORO_MAINTENANCE_LOCK_FOLDER:-/var/www/oro/var/maintenance}
-      - nginx:/opt/oro-nginx
-      - public_storage:/var/www/oro/public/media:ro
-      - private_storage:/var/www/oro/var/data:ro
+      - "oro_app:/var/www/oro"
+      - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
+      - "cache:/var/www/oro/var/cache:ro"
+      - "maintenance_folder:${ORO_MAINTENANCE_LOCK_FOLDER:-/var/www/oro/var/maintenance}"
+      - "nginx:/opt/oro-nginx"
+      - "public_storage:/var/www/oro/public/media:ro"
+      - "private_storage:/var/www/oro/var/data:ro"
       {{if .HasSsl -}}
-      - {{.CertsPath}}:/etc/nginx/certs:ro
+      - "{{.CertsPath}}:/etc/nginx/certs:ro"
       {{- end}}
 
   volume-init:
-    image: orobox-app:{{.OroVersion}}-latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        PHP_VERSION: {{.PHPVersion}}
-        NODE_VERSION: {{.NodeVersion}}
-        NPM_VERSION: {{.NpmVersion}}
-        MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2048M}
+    <<: *oro-app
     command: -- true
-    env_file: .env
     environment:
       ORO_XDEBUG_ENABLED: "false"
     volumes:
-      - oro_app:/var/www/oro
- 
+      - "oro_app:/var/www/oro"
+
   web-init:
-    image: orobox-app:{{.OroVersion}}-latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        PHP_VERSION: {{.PHPVersion}}
-        NODE_VERSION: {{.NodeVersion}}
-        NPM_VERSION: {{.NpmVersion}}
-        MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2048M}
+    <<: *oro-app
     command:
       - bash
       - -c
       - |
         echo "$$(jq '.properties.sites.propertyNames.pattern = ".*"' /opt/oro-nginx-tool/variables.schema.json 2>/dev/null || echo "{}")" > /opt/oro-nginx-tool/variables.schema.json 2>/dev/null || true
         /usr/local/bin/docker-entrypoint.sh nginx-init && sed -i '/gridfs/d; /mongo/d' /opt/oro-nginx/etc/sites-available/*.conf || true
-    env_file: .env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     environment:
       ORO_XDEBUG_ENABLED: "false"
     depends_on:
@@ -162,22 +141,11 @@ services:
       "ws":
         condition: service_started
     volumes:
-      - nginx:/opt/oro-nginx
+      - "nginx:/opt/oro-nginx"
 
   php-fpm-app:
-    image: orobox-app:{{.OroVersion}}-latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        PHP_VERSION: {{.PHPVersion}}
-        NODE_VERSION: {{.NodeVersion}}
-        NPM_VERSION: {{.NpmVersion}}
-        MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2048M}
+    <<: *oro-app
     command: php-fpm
-    env_file: .env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     user: ${ORO_USER_RUNTIME:-www-data}
     healthcheck:
@@ -211,29 +179,11 @@ services:
       "elasticsearch":
         condition: service_started
       {{- end}}
-    volumes:
-      - oro_app:/var/www/oro
-      - {{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}
-      - cache:/var/www/oro/var/cache
-      - multihost_operation_folder:${ORO_MULTIHOST_OPERATION_FOLDER:-/var/www/oro/var/multihost}
-      - maintenance_folder:${ORO_MAINTENANCE_LOCK_FOLDER:-/var/www/oro/var/maintenance}
-      - public_storage:/var/www/oro/public/media
-      - private_storage:/var/www/oro/var/data
+    volumes: *volumes-full-worker
 
   ws:
-    image: orobox-app:{{.OroVersion}}-latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        PHP_VERSION: {{.PHPVersion}}
-        NODE_VERSION: {{.NodeVersion}}
-        NPM_VERSION: {{.NpmVersion}}
-        MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2048M}
+    <<: *oro-app
     command: websocket
-    env_file: .env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     user: ${ORO_USER_RUNTIME:-www-data}
     init: true
@@ -244,28 +194,11 @@ services:
     depends_on:
       "php-fpm-app":
         condition: service_healthy
-    volumes:
-      - oro_app:/var/www/oro
-      - {{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}
-      - cache:/var/www/oro/var/cache
-      - maintenance_folder:${ORO_MAINTENANCE_LOCK_FOLDER:-/var/www/oro/var/maintenance}
-      - public_storage:/var/www/oro/public/media
-      - private_storage:/var/www/oro/var/data
+    volumes: *volumes-worker
 
   consumer:
-    image: orobox-app:{{.OroVersion}}-latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        PHP_VERSION: {{.PHPVersion}}
-        NODE_VERSION: {{.NodeVersion}}
-        NPM_VERSION: {{.NpmVersion}}
-        MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2048M}
+    <<: *oro-app
     command: consumer
-    env_file: .env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     user: ${ORO_USER_RUNTIME:-www-data}
     init: true
@@ -276,28 +209,11 @@ services:
     depends_on:
       "php-fpm-app":
         condition: service_healthy
-    volumes:
-      - oro_app:/var/www/oro
-      - {{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}
-      - cache:/var/www/oro/var/cache
-      - maintenance_folder:${ORO_MAINTENANCE_LOCK_FOLDER:-/var/www/oro/var/maintenance}
-      - public_storage:/var/www/oro/public/media
-      - private_storage:/var/www/oro/var/data
+    volumes: *volumes-worker
 
   cron:
-    image: orobox-app:{{.OroVersion}}-latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        PHP_VERSION: {{.PHPVersion}}
-        NODE_VERSION: {{.NodeVersion}}
-        NPM_VERSION: {{.NpmVersion}}
-        MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2048M}
+    <<: *oro-app
     command: cron
-    env_file: .env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     ulimits:
       nofile:
@@ -307,14 +223,7 @@ services:
       ORO_ENV: ${ORO_ENV:-dev}
       ORO_LOG_PATH: php://stderr
       ORO_XDEBUG_ENABLED: ${ORO_CRON_XDEBUG_ENABLED:-false}
-    volumes:
-      - oro_app:/var/www/oro
-      - {{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}
-      - cache:/var/www/oro/var/cache
-      - multihost_operation_folder:${ORO_MULTIHOST_OPERATION_FOLDER:-/var/www/oro/var/multihost}
-      - maintenance_folder:${ORO_MAINTENANCE_LOCK_FOLDER:-/var/www/oro/var/maintenance}
-      - public_storage:/var/www/oro/public/media
-      - private_storage:/var/www/oro/var/data
+    volumes: *volumes-full-worker
     depends_on:
       "php-fpm-app":
         condition: service_healthy
@@ -324,20 +233,9 @@ services:
     {{- end}}
 
   restore:
-    image: orobox-app:{{.OroVersion}}-latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        PHP_VERSION: {{.PHPVersion}}
-        NODE_VERSION: {{.NodeVersion}}
-        NPM_VERSION: {{.NpmVersion}}
-        MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2048M}
+    <<: *oro-app
     command: restore
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     user: ${ORO_USER_RUNTIME:-www-data}
-    env_file: .env
     environment:
       ORO_ENV: ${ORO_ENV:-dev}
       ORO_XDEBUG_ENABLED: "false"
@@ -352,28 +250,12 @@ services:
       {{- end}}
       "volume-init":
         condition: service_completed_successfully
-    volumes:
-      - oro_app:/var/www/oro
-      - {{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}
-      - cache:/var/www/oro/var/cache
-      - public_storage:/var/www/oro/public/media
-      - private_storage:/var/www/oro/var/data
+    volumes: *volumes-setup
 
   install:
-    image: orobox-app:{{.OroVersion}}-latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        PHP_VERSION: {{.PHPVersion}}
-        NODE_VERSION: {{.NodeVersion}}
-        NPM_VERSION: {{.NpmVersion}}
-        MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2048M}
+    <<: *oro-app
     command: install ${ORO_INSTALL_OPTIONS}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     user: ${ORO_USER_RUNTIME:-www-data}
-    env_file: .env
     environment:
       ORO_SAMPLE_DATA: ${ORO_SAMPLE_DATA:-y}
       ORO_XDEBUG_ENABLED: ${ORO_INSTALL_XDEBUG_ENABLED:-false}
@@ -398,16 +280,11 @@ services:
       "elasticsearch":
         condition: service_started
       {{- end}}
-    volumes:
-      - oro_app:/var/www/oro
-      - {{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}
-      - cache:/var/www/oro/var/cache
-      - public_storage:/var/www/oro/public/media
-      - private_storage:/var/www/oro/var/data
+    volumes: *volumes-setup
 
   {{if .Postgres}}
   db:
-    image: postgres:{{.PostgresVersion}}
+    image: "postgres:{{.PostgresVersion}}"
     labels:
       com.symfony.server.service-prefix: ORO_DB
     ports:
@@ -426,7 +303,7 @@ services:
   {{end}}
   {{if .Redis}}
   redis:
-    image: redis:{{.RedisVersion}}
+    image: "redis:{{.RedisVersion}}"
     hostname: redis
     restart: unless-stopped
   {{end}}
@@ -441,7 +318,7 @@ services:
   {{end}}
   {{if .RabbitMQ}}
   rabbitmq:
-    image: rabbitmq:{{.RabbitMQVersion}}
+    image: "rabbitmq:{{.RabbitMQVersion}}"
     hostname: rabbitmq
     restart: unless-stopped
     environment:
@@ -450,7 +327,7 @@ services:
   {{end}}
   {{if .Elasticsearch}}
   elasticsearch:
-    image: elasticsearch:{{.ElasticsearchVersion}}
+    image: "elasticsearch:{{.ElasticsearchVersion}}"
     hostname: elasticsearch
     restart: unless-stopped
     environment:
