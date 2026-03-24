@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"fmt"
+
 	"github.com/algoritma-dev/orobox/internal/docker"
 	"github.com/spf13/cobra"
 )
@@ -31,7 +32,7 @@ var logsCmd = &cobra.Command{
 			services = append(services, "php-fpm-app")
 		}
 		if logsApp {
-			// Per OroCommerce/Symfony, includiamo i servizi principali che eseguono codice PHP
+			// For OroCommerce/Symfony, we include the main services running PHP code
 			services = append(services, "application", "php-fpm-app")
 		}
 		if logsConsumer {
