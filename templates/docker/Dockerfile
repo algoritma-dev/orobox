@@ -76,7 +76,7 @@ RUN apk add --no-cache \
     icu-libs \
     libxml2 \
     tidyhtml-libs \
-    imap \
+    c-client \
     krb5-libs \
     openssl \
     jpegoptim \
