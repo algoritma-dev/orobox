@@ -205,14 +205,22 @@ func EnsureDockerCompose() bool {
 	changed = writeEnvFile("templates/docker/.env.test", internalDir, data) || changed
 	changed = writeInitDbSQL(internalDir, data) || changed
 
-	src := "templates/docker/docker-compose.yml"
+	changed = writeComposeFile(internalDir, "docker-compose.yml", data) || changed
+	changed = writeComposeFile(internalDir, "docker-compose.setup.yml", data) || changed
+	changed = writeComposeFile(internalDir, "docker-compose.test.yml", data) || changed
+
+	return changed
+}
+
+func writeComposeFile(internalDir string, filename string, data any) bool {
+	src := filepath.Join("templates/docker", filename)
 	composeTemplate, err := fs.ReadFile(Templates, src)
 	if err != nil {
 		fmt.Printf("Warning: could not read template %s: %v\n", src, err)
-		return changed
+		return false
 	}
 
-	tmpl, err := template.New("compose").Parse(string(composeTemplate))
+	tmpl, err := template.New(filename).Parse(string(composeTemplate))
 	if err != nil {
 		panic(err)
 	}
@@ -223,13 +231,13 @@ func EnsureDockerCompose() bool {
 		panic(err)
 	}
 
-	composeFile := filepath.Join(internalDir, "docker-compose.yml")
-	oldContent, err := os.ReadFile(composeFile)
+	dest := filepath.Join(internalDir, filename)
+	oldContent, err := os.ReadFile(dest)
 	if err == nil && bytes.Equal(oldContent, buf.Bytes()) {
-		return changed
+		return false
 	}
 
-	err = os.WriteFile(composeFile, buf.Bytes(), 0644)
+	err = os.WriteFile(dest, buf.Bytes(), 0644)
 	if err != nil {
 		panic(err)
 	}
@@ -243,7 +251,19 @@ func GetBaseComposeArgs() []string {
 	projectName := config.GetProjectName()
 	internalDir := config.GetInternalDir()
 	composeFile := filepath.Join(internalDir, "docker-compose.yml")
-	return []string{"-p", projectName, "-f", composeFile}
+	args := []string{"-p", projectName, "-f", composeFile}
+
+	// Add setup and test files if they exist
+	setupFile := filepath.Join(internalDir, "docker-compose.setup.yml")
+	if _, err := os.Stat(setupFile); err == nil {
+		args = append(args, "-f", setupFile)
+	}
+	testFile := filepath.Join(internalDir, "docker-compose.test.yml")
+	if _, err := os.Stat(testFile); err == nil {
+		args = append(args, "-f", testFile)
+	}
+
+	return args
 }
 
 // RunComposeCommand runs docker compose with the provided arguments.

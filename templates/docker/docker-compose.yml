@@ -23,7 +23,6 @@ x-templates:
     - "oro_app:/var/www/oro"
     - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
     - "cache:/var/www/oro/var/cache"
-    - "maintenance_folder:${ORO_MAINTENANCE_LOCK_FOLDER:-/var/www/oro/var/maintenance}"
     - "public_storage:/var/www/oro/public/media"
     - "private_storage:/var/www/oro/var/data"
 
@@ -31,8 +30,6 @@ x-templates:
     - "oro_app:/var/www/oro"
     - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
     - "cache:/var/www/oro/var/cache"
-    - "multihost_operation_folder:${ORO_MULTIHOST_OPERATION_FOLDER:-/var/www/oro/var/multihost}"
-    - "maintenance_folder:${ORO_MAINTENANCE_LOCK_FOLDER:-/var/www/oro/var/maintenance}"
     - "public_storage:/var/www/oro/public/media"
     - "private_storage:/var/www/oro/var/data"
 
@@ -66,22 +63,6 @@ services:
       "cron":
         condition: service_started
 
-  application_test:
-    <<: *oro-app
-    command:
-      - bash
-      - -c
-      - |
-        echo "Test application is running..."
-        exec tail -f /dev/null
-    env_file:
-      - .env
-      - .env.test
-    environment:
-      ORO_ENV: test
-      ORO_XDEBUG_ENABLED: "false"
-    volumes: *volumes-app
-
   web:
     <<: *oro-app
     environment:
@@ -105,12 +86,12 @@ services:
         condition: service_completed_successfully
       "php-fpm-app":
         condition: service_healthy
+    tmpfs:
+      - /opt/oro-nginx
     volumes:
       - "oro_app:/var/www/oro"
       - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
       - "cache:/var/www/oro/var/cache:ro"
-      - "maintenance_folder:${ORO_MAINTENANCE_LOCK_FOLDER:-/var/www/oro/var/maintenance}"
-      - "nginx:/opt/oro-nginx"
       - "public_storage:/var/www/oro/public/media:ro"
       - "private_storage:/var/www/oro/var/data:ro"
       {{if .HasSsl -}}
@@ -140,8 +121,8 @@ services:
         condition: service_healthy
       "ws":
         condition: service_started
-    volumes:
-      - "nginx:/opt/oro-nginx"
+    tmpfs:
+      - /opt/oro-nginx
 
   php-fpm-app:
     <<: *oro-app
@@ -169,7 +150,7 @@ services:
         condition: service_completed_successfully
       {{if .Redis -}}
       "redis":
-        condition: service_started
+        condition: service_healthy
       {{- end}}
       {{if .RabbitMQ -}}
       "rabbitmq":
@@ -179,7 +160,13 @@ services:
       "elasticsearch":
         condition: service_started
       {{- end}}
-    volumes: *volumes-full-worker
+    volumes:
+      - "{{.BundlePath}}/src:/var/www/oro/src"
+      - "oro_app:/var/www/oro"
+      - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
+      - "cache:/var/www/oro/var/cache"
+      - "public_storage:/var/www/oro/public/media"
+      - "private_storage:/var/www/oro/var/data"
 
   ws:
     <<: *oro-app
@@ -232,56 +219,6 @@ services:
         condition: service_healthy
     {{- end}}
 
-  restore:
-    <<: *oro-app
-    command: restore
-    user: ${ORO_USER_RUNTIME:-www-data}
-    environment:
-      ORO_ENV: ${ORO_ENV:-dev}
-      ORO_XDEBUG_ENABLED: "false"
-    depends_on:
-      {{if .Postgres -}}
-      "db":
-        condition: service_healthy
-      {{- end}}
-      {{if .Mailpit -}}
-      "mail":
-        condition: service_started
-      {{- end}}
-      "volume-init":
-        condition: service_completed_successfully
-    volumes: *volumes-setup
-
-  install:
-    <<: *oro-app
-    command: install ${ORO_INSTALL_OPTIONS}
-    user: ${ORO_USER_RUNTIME:-www-data}
-    environment:
-      ORO_SAMPLE_DATA: ${ORO_SAMPLE_DATA:-y}
-      ORO_XDEBUG_ENABLED: ${ORO_INSTALL_XDEBUG_ENABLED:-false}
-    depends_on:
-      {{if .Postgres -}}
-      "db":
-        condition: service_healthy
-      {{- end}}
-      {{if .Mailpit -}}
-      "mail":
-        condition: service_started
-      {{- end}}
-      {{if .Redis -}}
-      "redis":
-        condition: service_started
-      {{- end}}
-      {{if .RabbitMQ -}}
-      "rabbitmq":
-        condition: service_started
-      {{- end}}
-      {{if .Elasticsearch -}}
-      "elasticsearch":
-        condition: service_started
-      {{- end}}
-    volumes: *volumes-setup
-
   {{if .Postgres}}
   db:
     image: "postgres:{{.PostgresVersion}}"
@@ -300,11 +237,17 @@ services:
     restart: unless-stopped
     volumes:
       - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+      - pg_data:/var/lib/postgresql/data
   {{end}}
   {{if .Redis}}
   redis:
     image: "redis:{{.RedisVersion}}"
     hostname: redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
   {{end}}
   {{if .Mailpit}}
@@ -318,9 +261,11 @@ services:
   {{end}}
   {{if .RabbitMQ}}
   rabbitmq:
-    image: "rabbitmq:{{.RabbitMQVersion}}"
+    image: "rabbitmq:{{.RabbitMQVersion}}-management"
     hostname: rabbitmq
     restart: unless-stopped
+    ports:
+      - "15672:15672"
     environment:
       RABBITMQ_DEFAULT_USER: ${ORO_RABBITMQ_USER:-guest}
       RABBITMQ_DEFAULT_PASS: ${ORO_RABBITMQ_PASS:-guest}
@@ -338,19 +283,43 @@ services:
       memlock:
         soft: -1
         hard: -1
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
   {{end}}
   gotenberg:
     image: gotenberg/gotenberg:8.23.2
-    ports: [ "3000" ]
+    ports:
+      - "3000:3000"
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://127.0.0.1:3000/health" ]
     restart: on-failure
 
+  {{if .Postgres}}
+  adminer:
+    image: adminer
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    depends_on:
+      - db
+  {{end}}
+
+  {{if .Elasticsearch}}
+  kibana:
+    image: "kibana:{{.ElasticsearchVersion}}"
+    ports:
+      - "5601:5601"
+    restart: unless-stopped
+    depends_on:
+      - elasticsearch
+    environment:
+      ELASTICSEARCH_HOSTS: "http://elasticsearch:9200"
+  {{end}}
+
 volumes:
   oro_app:
   cache:
-  multihost_operation_folder:
-  maintenance_folder:
-  nginx:
   public_storage:
   private_storage:
+  pg_data:
+  es_data:

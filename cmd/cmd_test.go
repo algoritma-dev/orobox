@@ -12,13 +12,15 @@ import (
 
 func init() {
 	docker.Templates = fstest.MapFS{
-		"templates/docker/Dockerfile":           &fstest.MapFile{Data: []byte("FROM php:{{.PHPVersion}}-fpm")},
-		"templates/docker/.env":                 &fstest.MapFile{Data: []byte("ORO_VERSION={{.OroVersion}}\n")},
-		"templates/docker/.env.test":            &fstest.MapFile{Data: []byte("ORO_VERSION={{.OroVersion}}\n")},
-		"templates/docker/nginx.conf":           &fstest.MapFile{Data: []byte("server { listen 80; }")},
-		"templates/docker/init-db.sql":          &fstest.MapFile{Data: []byte("CREATE DATABASE oro;")},
-		"templates/docker/docker-entrypoint.sh": &fstest.MapFile{Data: []byte("#!/bin/bash")},
-		"templates/docker/docker-compose.yml":   &fstest.MapFile{Data: []byte("version: '3'")},
+		"templates/docker/Dockerfile":               &fstest.MapFile{Data: []byte("FROM php:{{.PHPVersion}}-fpm")},
+		"templates/docker/.env":                     &fstest.MapFile{Data: []byte("ORO_VERSION={{.OroVersion}}\n")},
+		"templates/docker/.env.test":                &fstest.MapFile{Data: []byte("ORO_VERSION={{.OroVersion}}\n")},
+		"templates/docker/nginx.conf":               &fstest.MapFile{Data: []byte("server { listen 80; }")},
+		"templates/docker/init-db.sql":              &fstest.MapFile{Data: []byte("CREATE DATABASE oro;")},
+		"templates/docker/docker-entrypoint.sh":     &fstest.MapFile{Data: []byte("#!/bin/bash")},
+		"templates/docker/docker-compose.yml":       &fstest.MapFile{Data: []byte("version: '3'")},
+		"templates/docker/docker-compose.setup.yml": &fstest.MapFile{Data: []byte("version: '3'")},
+		"templates/docker/docker-compose.test.yml":  &fstest.MapFile{Data: []byte("version: '3'")},
 	}
 }
 

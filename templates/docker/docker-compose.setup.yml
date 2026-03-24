@@ -1,0 +1,72 @@
+x-templates:
+  oro-app: &oro-app
+    image: "orobox-app:{{.OroVersion}}-latest"
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PHP_VERSION: "{{.PHPVersion}}"
+        NODE_VERSION: "{{.NodeVersion}}"
+        NPM_VERSION: "{{.NpmVersion}}"
+        MEMORY_LIMIT: "${PHP_MEMORY_LIMIT:-2048M}"
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  volumes-setup: &volumes-setup
+    - "oro_app:/var/www/oro"
+    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
+    - "cache:/var/www/oro/var/cache"
+    - "public_storage:/var/www/oro/public/media"
+    - "private_storage:/var/www/oro/var/data"
+
+services:
+  restore:
+    <<: *oro-app
+    command: restore
+    user: ${ORO_USER_RUNTIME:-www-data}
+    environment:
+      ORO_ENV: ${ORO_ENV:-dev}
+      ORO_XDEBUG_ENABLED: "false"
+    depends_on:
+      {{if .Postgres -}}
+      "db":
+        condition: service_healthy
+      {{- end}}
+      {{if .Mailpit -}}
+      "mail":
+        condition: service_started
+      {{- end}}
+      "volume-init":
+        condition: service_completed_successfully
+    volumes: *volumes-setup
+
+  install:
+    <<: *oro-app
+    command: install ${ORO_INSTALL_OPTIONS}
+    user: ${ORO_USER_RUNTIME:-www-data}
+    environment:
+      ORO_SAMPLE_DATA: ${ORO_SAMPLE_DATA:-y}
+      ORO_XDEBUG_ENABLED: ${ORO_INSTALL_XDEBUG_ENABLED:-false}
+    depends_on:
+      {{if .Postgres -}}
+      "db":
+        condition: service_healthy
+      {{- end}}
+      {{if .Mailpit -}}
+      "mail":
+        condition: service_started
+      {{- end}}
+      {{if .Redis -}}
+      "redis":
+        condition: service_healthy
+      {{- end}}
+      {{if .RabbitMQ -}}
+      "rabbitmq":
+        condition: service_started
+      {{- end}}
+      {{if .Elasticsearch -}}
+      "elasticsearch":
+        condition: service_started
+      {{- end}}
+    volumes: *volumes-setup

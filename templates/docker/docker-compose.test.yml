@@ -1,0 +1,36 @@
+x-templates:
+  oro-app: &oro-app
+    image: "orobox-app:{{.OroVersion}}-latest"
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PHP_VERSION: "{{.PHPVersion}}"
+        NODE_VERSION: "{{.NodeVersion}}"
+        NPM_VERSION: "{{.NpmVersion}}"
+        MEMORY_LIMIT: "${PHP_MEMORY_LIMIT:-2048M}"
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  volumes-app: &volumes-app
+    - "oro_app:/var/www/oro"
+    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
+    - "cache:/var/www/oro/var/cache"
+
+services:
+  application_test:
+    <<: *oro-app
+    command:
+      - bash
+      - -c
+      - |
+        echo "Test application is running..."
+        exec tail -f /dev/null
+    env_file:
+      - .env
+      - .env.test
+    environment:
+      ORO_ENV: test
+      ORO_XDEBUG_ENABLED: "false"
+    volumes: *volumes-app
