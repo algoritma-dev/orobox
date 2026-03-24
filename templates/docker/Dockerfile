@@ -108,6 +108,7 @@ COPY --from=builder /usr/local/etc/php/conf.d /usr/local/etc/php/conf.d
 # Configure PHP, Xdebug and FPM
 RUN { \
         if [ "{{.Type}}" != "demo" ]; then \
+            echo "zend_extension=xdebug"; \
             echo "xdebug.mode=develop,debug"; \
             echo "xdebug.max_nesting_level=500"; \
             echo "xdebug.client_host=host.docker.internal"; \
