@@ -188,6 +188,7 @@ RUN --mount=type=cache,target=/root/.composer/cache \
     apk del postgresql postgresql-contrib; \
     rm -rf var/cache/* var/data/* var/logs/* /tmp/* /run/postgresql/*; \
     chown -R www-data:www-data .; \
+    tar -czf /opt/oro_backups/oro_project_full.tar.gz .; \
     ln -sf /usr/bin/jpegoptim /usr/local/bin/jpegoptim; \
     ln -sf /usr/bin/pngquant /usr/local/bin/pngquant; \
     ln -sf /usr/bin/optipng /usr/local/bin/optipng; \

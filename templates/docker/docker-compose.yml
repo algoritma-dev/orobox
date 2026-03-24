@@ -22,14 +22,15 @@ x-templates:
     {{if eq .Type "bundle" -}}
     - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
     {{- end}}
-    {{- end}}
     - "cache:/var/www/oro/var/cache"
     - "public_storage:/var/www/oro/public/media"
     - "private_storage:/var/www/oro/var/data"
+    {{- end}}
 
 services:
   application:
     <<: *oro-app
+    user: ${ORO_USER_RUNTIME:-www-data}
     command:
       - bash
       - -c
@@ -84,21 +85,33 @@ services:
       {{if eq .Type "bundle" -}}
       - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
       {{- end}}
-      {{- end}}
       - "cache:/var/www/oro/var/cache:ro"
       - "public_storage:/var/www/oro/public/media:ro"
       - "private_storage:/var/www/oro/var/data:ro"
+      {{- end}}
       {{if .HasSsl -}}
       - "{{.CertsPath}}:/etc/nginx/certs:ro"
       {{- end}}
 
   volume-init:
     <<: *oro-app
-    command: -- true
+    command:
+      - bash
+      - -c
+      - |
+        echo "Initializing volumes and permissions for ${ORO_USER_RUNTIME:-www-data}..."
+        [ -n "$ORO_USER_RUNTIME" ] && chown $ORO_USER_RUNTIME . public var var/cache var/logs var/data public/media 2>/dev/null || true
+        [ -d public ] && chown -R ${ORO_USER_RUNTIME:-www-data} public 2>/dev/null || true
+        [ -d var ] && chown -R ${ORO_USER_RUNTIME:-www-data} var 2>/dev/null || true
+        true
     environment:
       ORO_XDEBUG_ENABLED: "false"
     volumes:
+      {{if eq .Type "project" -}}
+      - "{{.BundlePath}}:/var/www/oro"
+      {{- else -}}
       - "oro_app:/var/www/oro"
+      {{- end}}
 
   web-init:
     <<: *oro-app
@@ -188,6 +201,7 @@ services:
 
   cron:
     <<: *oro-app
+    user: ${ORO_USER_RUNTIME:-www-data}
     command: cron
     restart: unless-stopped
     ulimits:
@@ -244,7 +258,7 @@ services:
     hostname: mail
     ports:
       - "8025:8025"
-      - "1025:1025"
+      - "2025:1025"
     restart: unless-stopped
   {{end}}
   {{if .RabbitMQ}}

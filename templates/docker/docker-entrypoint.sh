@@ -92,8 +92,44 @@ check_and_restore() {
 case "$1" in
     nginx)
         if [ -n "$ORO_USER_RUNTIME" ]; then
-            # Replace : with space for Nginx user directive (user [user] [group])
-            NGINX_USER=$(echo $ORO_USER_RUNTIME | tr ':' ' ')
+            # Check if ORO_USER_RUNTIME is numeric UID[:GID]
+            if [[ "$ORO_USER_RUNTIME" == *:* ]]; then
+                USER_ID=${ORO_USER_RUNTIME%:*}
+                GROUP_ID=${ORO_USER_RUNTIME#*:}
+            else
+                USER_ID=$ORO_USER_RUNTIME
+                GROUP_ID=""
+            fi
+
+            if [[ "$USER_ID" =~ ^[0-9]+$ ]]; then
+                # Ensure group exists if GID provided
+                if [ -n "$GROUP_ID" ] && [[ "$GROUP_ID" =~ ^[0-9]+$ ]]; then
+                    if ! grep -q "^[^:]*:[^:]*:$GROUP_ID:" /etc/group; then
+                        addgroup -g "$GROUP_ID" oro-group || true
+                    fi
+                fi
+                # Ensure user exists if UID provided
+                if ! grep -q "^[^:]*:[^:]*:$USER_ID:" /etc/passwd; then
+                    if [ -n "$GROUP_ID" ] && [[ "$GROUP_ID" =~ ^[0-9]+$ ]]; then
+                        GROUP_NAME=$(grep "^[^:]*:[^:]*:$GROUP_ID:" /etc/group | cut -d: -f1 | head -n 1)
+                        adduser -D -H -u "$USER_ID" -G "$GROUP_NAME" oro-user || true
+                    else
+                        adduser -D -H -u "$USER_ID" oro-user || true
+                    fi
+                fi
+                # Use the actual name for the UID/GID in nginx.conf
+                NGINX_USER_NAME=$(grep "^[^:]*:[^:]*:$USER_ID:" /etc/passwd | cut -d: -f1 | head -n 1)
+                if [ -n "$GROUP_ID" ] && [[ "$GROUP_ID" =~ ^[0-9]+$ ]]; then
+                    NGINX_GROUP_NAME=$(grep "^[^:]*:[^:]*:$GROUP_ID:" /etc/group | cut -d: -f1 | head -n 1)
+                    NGINX_USER="$NGINX_USER_NAME $NGINX_GROUP_NAME"
+                else
+                    NGINX_USER="$NGINX_USER_NAME"
+                fi
+            else
+                # Replace : with space for Nginx user directive (user [user] [group])
+                NGINX_USER=$(echo $ORO_USER_RUNTIME | tr ':' ' ')
+            fi
+
             sed -i "s/^#*user .*/user $NGINX_USER;/" /etc/nginx/nginx.conf
             # Ensure Nginx can write to its directories as the specified user
             chown -R $ORO_USER_RUNTIME /var/lib/nginx /var/log/nginx /run/nginx || true
@@ -160,10 +196,18 @@ case "$1" in
         exit 0
         ;;
     restore)
+        # In project mode, if composer.json is missing, restore the full project
+        if [ "{{.Type}}" = "project" ] && [ ! -f "composer.json" ]; then
+            if [ -f "/opt/oro_backups/oro_project_full.tar.gz" ]; then
+                echo "Project files missing. Restoring from /opt/oro_backups/oro_project_full.tar.gz..."
+                tar -xzf /opt/oro_backups/oro_project_full.tar.gz -C . --no-same-owner
+            fi
+        fi
+
         # Restore assets if backup exists
         if [ -f "/opt/oro_backups/oro_assets.tar.gz" ]; then
             echo "Restoring assets from /opt/oro_backups/oro_assets.tar.gz..."
-            tar -xzf /opt/oro_backups/oro_assets.tar.gz -C .
+            tar -xzf /opt/oro_backups/oro_assets.tar.gz -C . --no-same-owner
         fi
 
         # Wait for DB to be ready
