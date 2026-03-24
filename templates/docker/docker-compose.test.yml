@@ -1,6 +1,6 @@
 x-templates:
   oro-app: &oro-app
-    image: "orobox-app:{{.OroVersion}}-latest"
+    image: "orobox-app:{{.OroVersion}}-{{.Type}}-latest"
     build:
       context: .
       dockerfile: Dockerfile

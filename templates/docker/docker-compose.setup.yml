@@ -1,6 +1,6 @@
 x-templates:
   oro-app: &oro-app
-    image: "orobox-app:{{.OroVersion}}-latest"
+    image: "orobox-app:{{.OroVersion}}-{{.Type}}-latest"
     build:
       context: .
       dockerfile: Dockerfile
@@ -32,7 +32,6 @@ services:
     command: restore
     user: ${ORO_USER_RUNTIME:-www-data}
     environment:
-      ORO_ENV: ${ORO_ENV:-dev}
       ORO_XDEBUG_ENABLED: "false"
     depends_on:
       {{if .Postgres -}}
