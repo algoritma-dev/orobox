@@ -12,11 +12,14 @@ import (
 
 var cfgFile string
 
+// Version is the current version of the tool.
+var Version = "0.0.1-dev"
+
 var rootCmd = &cobra.Command{
 	Use:     "oro",
 	Short:   "CLI tool for OroCommerce environment setup",
 	Long:    `Orobox is a CLI tool to quickly configure an isolated development environment for OroCommerce bundles.`,
-	Version: "0.0.1-dev",
+	Version: Version,
 	PersistentPreRun: func(cmd *cobra.Command, _ []string) {
 		if ConfigError != nil && cmd.Name() != "init" {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", ConfigError)

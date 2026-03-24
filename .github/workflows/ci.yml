@@ -20,7 +20,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
-          cache: false # Disabilitato per ora se vogliamo evitare problemi di cache tra job
+          cache: false # Disabled for now to avoid cache issues between jobs
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
