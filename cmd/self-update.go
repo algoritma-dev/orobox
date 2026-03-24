@@ -87,10 +87,40 @@ func findBestAsset(r *release) (url, name string) {
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
 
-	// Look for an asset that contains both the OS and the architecture in its name.
+	// Map architecture aliases
+	archs := []string{goarch}
+	if goarch == "amd64" {
+		archs = append(archs, "x86_64")
+	} else if goarch == "arm64" {
+		archs = append(archs, "aarch64")
+	}
+
+	// Look for an asset that contains both the OS and a matching architecture in its name.
 	for _, asset := range r.Assets {
 		nameLower := strings.ToLower(asset.Name)
-		if strings.Contains(nameLower, goos) && strings.Contains(nameLower, goarch) {
+
+		// Skip archives and checksum files to ensure we get the raw binary
+		if strings.HasSuffix(nameLower, ".tar.gz") ||
+			strings.HasSuffix(nameLower, ".zip") ||
+			strings.HasSuffix(nameLower, ".tgz") ||
+			strings.HasSuffix(nameLower, ".sha256") ||
+			strings.HasSuffix(nameLower, ".sig") {
+			continue
+		}
+
+		if !strings.Contains(nameLower, goos) {
+			continue
+		}
+
+		matchedArch := false
+		for _, arch := range archs {
+			if strings.Contains(nameLower, arch) {
+				matchedArch = true
+				break
+			}
+		}
+
+		if matchedArch {
 			return asset.BrowserDownloadURL, asset.Name
 		}
 	}
