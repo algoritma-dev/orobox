@@ -188,4 +188,10 @@ If you want to contribute to Orobox, you can use the provided `Makefile` to simp
   ```
 
 ---
+
 Developed to simplify the work of OroCommerce developers.
+
+---
+
+### Inspired by
+- [MageBox](https://magebox.dev/)
