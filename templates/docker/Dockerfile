@@ -30,7 +30,7 @@ RUN apk add --no-cache \
     linux-headers
 
 # Install PHP extensions
-{{ if eq .PHPVersion "8.4" -}}
+{{ if or (eq .PHPVersion "8.4") (eq .PHPVersion "8.5") -}}
 RUN docker-php-source extract \
     && mkdir -p /usr/src/php/ext/imap \
     && curl -fsSL https://pecl.php.net/get/imap | tar xvz -C /usr/src/php/ext/imap --strip-components=1 \
