@@ -16,6 +16,8 @@ ARG PHP_VERSION
 RUN apk add --no-cache \
     $PHPIZE_DEPS \
     postgresql-dev \
+    freetype-dev \
+    libjpeg-turbo-dev \
     libpng-dev \
     libjpeg-turbo-dev \
     freetype-dev \
@@ -31,12 +33,11 @@ RUN apk add --no-cache \
 
 # Install PHP extensions
 {{ if or (eq .PHPVersion "8.4") (eq .PHPVersion "8.5") -}}
-RUN docker-php-source extract \
-    && mkdir -p /usr/src/php/ext/imap \
-    && curl -fsSL https://pecl.php.net/get/imap | tar xvz -C /usr/src/php/ext/imap --strip-components=1 \
+ADD https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions /usr/local/bin/
+RUN chmod +x /usr/local/bin/install-php-extensions && install-php-extensions imap opcache \
+    && docker-php-source extract \
     && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
-    && docker-php-ext-configure imap --with-kerberos --with-imap-ssl \
-    && docker-php-ext-install -j$(nproc) gd pdo_pgsql intl zip opcache bcmath soap xml pcntl tidy imap \
+    && docker-php-ext-install -j$(nproc) gd pdo_pgsql intl zip bcmath soap xml pcntl tidy \
     && docker-php-source delete
 {{- else -}}
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
