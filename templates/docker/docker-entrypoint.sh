@@ -102,6 +102,7 @@ case "$1" in
         [ -n "$ORO_FORMATTING_CODE" ] && INSTALL_OPTS+=( "--formatting-code=${ORO_FORMATTING_CODE}" )
 
         echo "Running: php bin/console oro:install --no-interaction ${INSTALL_OPTS[*]} $ORO_INSTALL_OPTIONS $*"
+        rm -rf var/cache/* var/logs/* var/sessions/*
         php bin/console oro:install --no-interaction "${INSTALL_OPTS[@]}" $ORO_INSTALL_OPTIONS "$@"
         STATUS=$?
         if [ $STATUS -ne 0 ]; then
