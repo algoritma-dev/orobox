@@ -101,8 +101,8 @@ func performInstallation() bool {
 			}
 
 			fmt.Println("Extracting OroCommerce sources...")
-			// Use cp -rn to avoid overwriting existing files
-			cpCmd := exec.Command("cp", "-rn", tmpDir+"/.", ".")
+			// Use cp -r to merge directories and copy hidden files
+			cpCmd := exec.Command("cp", "-r", tmpDir+"/.", ".")
 			if err := cpCmd.Run(); err != nil {
 				fmt.Printf("Extract sources failed: %v\n", err)
 				return false
@@ -145,7 +145,7 @@ func performInstallation() bool {
 			fmt.Println("Downloading OroCommerce into volume...")
 			// Use a temporary directory to clone, then move to avoid "directory not empty" errors if bundle is mounted
 			cloneCmd := []string{"run", "--rm", "application", "bash", "-c",
-				fmt.Sprintf("git clone -b %s --depth 1 https://github.com/oroinc/orocommerce-application /tmp/oro-app && cp -rn /tmp/oro-app/. . && rm -rf /tmp/oro-app && composer install", conf.OroVersion)}
+				fmt.Sprintf("git clone -b %s --depth 1 https://github.com/oroinc/orocommerce-application /tmp/oro-app && cp -r /tmp/oro-app/. . && rm -rf /tmp/oro-app && composer install", conf.OroVersion)}
 			if err := docker.RunComposeCommand(cloneCmd...); err != nil {
 				fmt.Printf("Download/Install into volume failed: %v\n", err)
 				return false

@@ -15,16 +15,16 @@ x-templates:
       - "host.docker.internal:host-gateway"
 
   volumes-oro: &volumes-oro
-    {{if eq .Type "project" -}}
-    - "{{.BundlePath}}:/var/www/oro"
+                 {{if eq .Type "project" -}}
+                 - "{{.BundlePath}}:/var/www/oro"
     {{- else -}}
-    - "oro_app:/var/www/oro"
-    {{if eq .Type "bundle" -}}
-    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
+                 - "oro_app:/var/www/oro"
+                 {{if eq .Type "bundle" -}}
+                 - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
     {{- end}}
-    - "cache:/var/www/oro/var/cache"
-    - "public_storage:/var/www/oro/public/media"
-    - "private_storage:/var/www/oro/var/data"
+                 - "cache:/var/www/oro/var/cache"
+                 - "public_storage:/var/www/oro/public/media"
+                 - "private_storage:/var/www/oro/var/data"
     {{- end}}
 
 services:
@@ -100,9 +100,9 @@ services:
       - -c
       - |
         echo "Initializing volumes and permissions for ${ORO_USER_RUNTIME:-www-data}..."
-        mkdir -p bin public var var/cache var/logs var/data public/media
-        [ -n "$ORO_USER_RUNTIME" ] && chown $ORO_USER_RUNTIME . bin public var var/cache var/logs var/data public/media 2>/dev/null || true
-        chown -R ${ORO_USER_RUNTIME:-www-data} bin public var 2>/dev/null || true
+        mkdir -p bin config public src templates translations var assets var/cache var/logs var/data public/media
+        [ -n "$ORO_USER_RUNTIME" ] && chown $ORO_USER_RUNTIME . bin config public src templates translations var assets var/cache var/logs var/data public/media 2>/dev/null || true
+        chown -R ${ORO_USER_RUNTIME:-www-data} bin config public src templates translations var assets 2>/dev/null || true
         true
     environment:
       ORO_XDEBUG_ENABLED: "false"
