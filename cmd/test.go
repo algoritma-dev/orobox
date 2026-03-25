@@ -33,12 +33,6 @@ func runTestCommand() {
 		fmt.Printf("Warning: failed to ensure application_test is running: %v\n", err)
 	}
 
-	// Run database check and restore (or install if empty)
-	if err := docker.RunComposeCommand("exec", "-T", "application_test", "/usr/local/bin/docker-entrypoint.sh", "restore"); err != nil {
-		fmt.Printf("Database preparation failed: %v\n", err)
-		return
-	}
-
 	var args []string
 	args = append(args, "exec")
 

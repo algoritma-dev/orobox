@@ -48,16 +48,13 @@ func TestUpCommand(t *testing.T) {
 		calls = calls[1:]
 	}
 
-	if len(calls) != 2 {
-		t.Errorf("Expected 2 more calls to RunComposeCommand (restore, up), got %d: %v", len(calls), calls)
+	if len(calls) != 1 {
+		t.Errorf("Expected 1 more call to RunComposeCommand (up), got %d: %v", len(calls), calls)
 		return
 	}
 
-	if len(calls[0]) < 3 || calls[0][0] != "run" || calls[0][2] != "restore" {
-		t.Errorf("Expected call to be run --rm restore, got %v", calls[0])
-	}
-	if len(calls[1]) < 3 || calls[1][0] != "up" || !contains(calls[1], "application") {
-		t.Errorf("Expected call to be up -d application, got %v", calls[1])
+	if len(calls[0]) < 3 || calls[0][0] != "up" || !contains(calls[0], "application") {
+		t.Errorf("Expected call to be up -d application, got %v", calls[0])
 	}
 }
 
@@ -120,8 +117,8 @@ func TestTestCommand(t *testing.T) {
 		t.Fatalf("rootCmd.Execute() failed: %v", err)
 	}
 
-	if len(calls) != 3 {
-		t.Errorf("Expected 3 calls to RunComposeCommand (up, restore, exec), got %d: %v", len(calls), calls)
+	if len(calls) != 2 {
+		t.Errorf("Expected 2 calls to RunComposeCommand (up, exec), got %d: %v", len(calls), calls)
 		return
 	}
 
@@ -130,13 +127,8 @@ func TestTestCommand(t *testing.T) {
 		t.Errorf("Expected first call to be up -d application_test, got %v", calls[0])
 	}
 
-	// 2nd call: exec restore
-	if calls[1][0] != "exec" || !contains(calls[1], "application_test") || !contains(calls[1], "restore") {
-		t.Errorf("Expected second call to be exec application_test restore, got %v", calls[1])
-	}
-
-	// 3rd call: actual test execution
-	lastCall := calls[2]
+	// 2nd call: actual test execution
+	lastCall := calls[1]
 	if lastCall[0] != "exec" || !contains(lastCall, "application_test") || !contains(lastCall, "APP_ENV=test") || !contains(lastCall, "ORO_ENV=test") || !contains(lastCall, "ORO_DB_NAME=oro_db_test") {
 		t.Errorf("Expected exec application_test with test environment, got %v", lastCall)
 	}
@@ -288,12 +280,12 @@ func TestTestCommandBundle(t *testing.T) {
 		t.Fatalf("rootCmd.Execute() failed: %v", err)
 	}
 
-	if len(calls) != 3 {
-		t.Errorf("Expected 3 calls to RunComposeCommand, got %d: %v", len(calls), calls)
+	if len(calls) != 2 {
+		t.Errorf("Expected 2 calls to RunComposeCommand, got %d: %v", len(calls), calls)
 		return
 	}
 
-	lastCall := calls[2]
+	lastCall := calls[1]
 	if !contains(lastCall, "simple-phpunit") || !contains(lastCall, "--configuration=src/MyTestBundle") {
 		t.Errorf("Expected simple-phpunit with configuration, got %v", lastCall)
 	}

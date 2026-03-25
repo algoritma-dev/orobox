@@ -100,18 +100,13 @@ services:
       - -c
       - |
         echo "Initializing volumes and permissions for ${ORO_USER_RUNTIME:-www-data}..."
-        [ -n "$ORO_USER_RUNTIME" ] && chown $ORO_USER_RUNTIME . public var var/cache var/logs var/data public/media 2>/dev/null || true
-        [ -d public ] && chown -R ${ORO_USER_RUNTIME:-www-data} public 2>/dev/null || true
-        [ -d var ] && chown -R ${ORO_USER_RUNTIME:-www-data} var 2>/dev/null || true
+        mkdir -p bin public var var/cache var/logs var/data public/media
+        [ -n "$ORO_USER_RUNTIME" ] && chown $ORO_USER_RUNTIME . bin public var var/cache var/logs var/data public/media 2>/dev/null || true
+        chown -R ${ORO_USER_RUNTIME:-www-data} bin public var 2>/dev/null || true
         true
     environment:
       ORO_XDEBUG_ENABLED: "false"
-    volumes:
-      {{if eq .Type "project" -}}
-      - "{{.BundlePath}}:/var/www/oro"
-      {{- else -}}
-      - "oro_app:/var/www/oro"
-      {{- end}}
+    volumes: *volumes-oro
 
   web-init:
     <<: *oro-app

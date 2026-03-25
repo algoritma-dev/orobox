@@ -23,10 +23,13 @@ x-templates:
     {{- end}}
     {{- end}}
     - "cache:/var/www/oro/var/cache"
+    - "public_storage:/var/www/oro/public/media"
+    - "private_storage:/var/www/oro/var/data"
 
 services:
   application_test:
     <<: *oro-app
+    user: ${ORO_USER_RUNTIME:-www-data}
     command:
       - bash
       - -c

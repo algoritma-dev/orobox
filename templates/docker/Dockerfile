@@ -99,7 +99,12 @@ COPY --from=node_image /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=node_image /usr/local/bin/node /usr/local/bin/node
 RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
-    && npm install -g npm@${NPM_VERSION}
+    && npm install -g npm@${NPM_VERSION} \
+    && mkdir -p /.npm /.composer && chmod -R 777 /.npm /.composer
+
+ENV NPM_CONFIG_CACHE=/.npm
+ENV COMPOSER_HOME=/.composer
+ENV npm_config_update_notifier=false
 
 # Copy PHP extensions from builder
 COPY --from=builder /usr/local/lib/php/extensions /usr/local/lib/php/extensions
@@ -151,8 +156,8 @@ RUN { \
 # Configure Nginx
 COPY nginx.conf /etc/nginx/http.d/default.conf
 RUN mkdir -p /var/lib/nginx/tmp /var/lib/nginx/logs /var/log/nginx /run/nginx \
-    && chown -R www-data:www-data /var/lib/nginx /var/log/nginx /run/nginx \
-    && sed -i 's/^#*user .*/user www-data;/' /etc/nginx/nginx.conf \
+    && chown -R root:root /var/lib/nginx /var/log/nginx /run/nginx \
+    && sed -i 's/^#*user .*/user root;/' /etc/nginx/nginx.conf \
     && ln -sf /dev/stdout /var/log/nginx/access.log \
     && ln -sf /dev/stderr /var/log/nginx/error.log \
     && ln -sf /dev/stderr /var/lib/nginx/logs/error.log
@@ -160,41 +165,11 @@ RUN mkdir -p /var/lib/nginx/tmp /var/lib/nginx/logs /var/log/nginx /run/nginx \
 # Set up working directory
 WORKDIR {{.OroRootDir}}
 
-# Install OroCommerce and create database dumps
-RUN --mount=type=cache,target=/root/.composer/cache \
-    --mount=type=tmpfs,target=/var/lib/postgresql/data \
-    set -e; \
-    mkdir -p /opt/oro_backups && chmod 777 /opt/oro_backups; \
-    composer create-project oro/commerce-crm-application . {{.OroVersion}} --no-interaction --prefer-dist; \
-    ./bin/simple-phpunit --version; \
-    apk add --no-cache postgresql postgresql-contrib; \
-    mkdir -p /run/postgresql && chown -R postgres:postgres /run/postgresql; \
-    chown -R postgres:postgres /var/lib/postgresql/data; \
-    su postgres -s /bin/sh -c "initdb -D /var/lib/postgresql/data"; \
-    su postgres -s /bin/sh -c "pg_ctl -D /var/lib/postgresql/data -l /tmp/pg.log start"; \
-    until su postgres -s /bin/sh -c "pg_isready -q"; do sleep 1; done; \
-    su postgres -s /bin/sh -c "psql -d postgres --command \"CREATE USER oro_db_user WITH SUPERUSER PASSWORD 'oro_db_pass';\""; \
-    su postgres -s /bin/sh -c "createdb -O oro_db_user oro_db"; \
-    su postgres -s /bin/sh -c "psql -d oro_db -c 'CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"; CREATE EXTENSION IF NOT EXISTS \"pg_trgm\";'"; \
-    export ORO_DB_URL=postgresql://oro_db_user:oro_db_pass@127.0.0.1/oro_db; \
-    export ORO_MQ_DSN=dbal: ORO_SEARCH_ENGINE_DSN=orm: ORO_SESSION_DSN=native:; \
-    php bin/console oro:install --no-interaction --application-url={{with index .Domains 0}}http{{if .Ssl}}s{{end}}://{{.Host}}/{{end}} --organization-name=OroInc --user-name=admin --user-email=admin@example.com --user-firstname=John --user-lastname=Doe --user-password=admin --sample-data=y; \
-    PGPASSWORD=oro_db_pass pg_dump -h 127.0.0.1 -U oro_db_user oro_db | gzip > /opt/oro_backups/oro_db_dev.sql.gz; \
-    mkdir -p var/{data,cache}; \
-    chown -R www-data:www-data var; \
-    tar -czf /opt/oro_backups/oro_assets.tar.gz var/data/ public/media/; \
-    ls -lh /opt/oro_backups/; \
-    [ -s /opt/oro_backups/oro_db_dev.sql.gz ] || { echo "Error: oro_db_dev.sql.gz is missing or empty"; exit 1; }; \
-    su postgres -s /bin/sh -c "pg_ctl -D /var/lib/postgresql/data stop"; \
-    apk del postgresql postgresql-contrib; \
-    rm -rf var/cache/* var/data/* var/logs/* /tmp/* /run/postgresql/*; \
-    chown -R www-data:www-data .; \
-    tar -czf /opt/oro_backups/oro_project_full.tar.gz .; \
-    ln -sf /usr/bin/jpegoptim /usr/local/bin/jpegoptim; \
+# Final permissions and symlinks
+RUN ln -sf /usr/bin/jpegoptim /usr/local/bin/jpegoptim; \
     ln -sf /usr/bin/pngquant /usr/local/bin/pngquant; \
     ln -sf /usr/bin/optipng /usr/local/bin/optipng; \
-    rm -f /usr/local/etc/php/conf.d/*phar* || true; \
-    unset ORO_DB_URL ORO_MQ_DSN ORO_SEARCH_ENGINE_DSN ORO_SESSION_DSN
+    rm -f /usr/local/etc/php/conf.d/*phar* || true;
 
 # Create required directories for nginx and tools
 RUN mkdir -p /opt/oro-nginx-tool /opt/oro-nginx/etc/sites-available \

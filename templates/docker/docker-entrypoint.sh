@@ -49,56 +49,9 @@ ensure_db_exists() {
     PGPASSWORD=$ORO_DB_ROOT_PASSWORD psql -h $ORO_DB_HOST -p ${ORO_DB_PORT:-5432} -U $ORO_DB_ROOT_USER -d "$db_name" -c 'CREATE EXTENSION "pg_trgm";'
 }
 
-check_and_restore() {
-    local db_name="$1"
-    local backup_file="$2"
-    local run_update="${3:-false}"
-    
-    ensure_db_exists "$db_name"
-
-    local table_count=$(PGPASSWORD=$ORO_DB_ROOT_PASSWORD psql -h $ORO_DB_HOST -p ${ORO_DB_PORT:-5432} -U $ORO_DB_ROOT_USER -d $db_name -t -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';" | tr -d '[:space:]' || echo "0")
-    echo "Found $table_count tables in $db_name"
-    
-    local is_empty=false
-    if [ "$table_count" = "0" ] || [ -z "$table_count" ]; then
-        is_empty=true
-        if [ -f "$backup_file" ]; then
-            echo "Restoring $db_name from $backup_file..."
-            if gunzip -c "$backup_file" | PGPASSWORD=$ORO_DB_ROOT_PASSWORD psql -h $ORO_DB_HOST -p ${ORO_DB_PORT:-5432} -U $ORO_DB_ROOT_USER -d $db_name > /tmp/restore_$db_name.log 2>&1; then
-                echo "Restore of $db_name completed."
-            else
-                echo "Error: Restore of $db_name failed. See /tmp/restore_$db_name.log"
-                cat /tmp/restore_$db_name.log
-                exit 1
-            fi
-        elif [ "$ORO_ENV" = "test" ]; then
-            echo "Database $db_name is empty and no backup found. Running oro:install for test..."
-            rm -rf var/cache/test
-            php bin/console oro:install --no-interaction --env=test --skip-translations
-            return $?
-        else
-            echo "Warning: Backup file $backup_file not found. Skipping restore for $db_name."
-        fi
-    else
-        echo "Database $db_name already contains data. Skipping restore."
-    fi
-
-    if [ "$is_empty" = "true" ] && [ "$run_update" = "true" ]; then
-        echo "Ensuring schema is up to date (this may take a few minutes)..."
-        php bin/console oro:platform:update --force --no-interaction --env=${ORO_ENV:-dev}
-    fi
-}
-
+# Case statements for commands
 case "$1" in
     nginx)
-        if [ -n "$ORO_USER_RUNTIME" ]; then
-             # Replace : with space for Nginx user directive (user [user] [group])
-            NGINX_USER=$(echo $ORO_USER_RUNTIME | tr ':' ' ')
-
-            sed -i "s/^#*user .*/user $NGINX_USER;/" /etc/nginx/nginx.conf
-            # Ensure Nginx can write to its directories as the specified user
-            chown -R $ORO_USER_RUNTIME /var/lib/nginx /var/log/nginx /run/nginx || true
-        fi
         exec nginx -g 'daemon off;'
         ;;
     php-fpm)
@@ -158,42 +111,6 @@ case "$1" in
             [ -f var/logs/dev.log ] && tail -n 50 var/logs/dev.log
             exit $STATUS
         fi
-        exit 0
-        ;;
-    restore)
-        # In project mode, if composer.json is missing, restore the full project
-        if [ "{{.Type}}" = "project" ] && [ ! -f "composer.json" ]; then
-            if [ -f "/opt/oro_backups/oro_project_full.tar.gz" ]; then
-                echo "Project files missing. Restoring from /opt/oro_backups/oro_project_full.tar.gz..."
-                tar -xzf /opt/oro_backups/oro_project_full.tar.gz -C . --no-same-owner
-            fi
-        fi
-
-        # Restore assets if backup exists
-        if [ -f "/opt/oro_backups/oro_assets.tar.gz" ]; then
-            echo "Restoring assets from /opt/oro_backups/oro_assets.tar.gz..."
-            tar -xzf /opt/oro_backups/oro_assets.tar.gz -C . --no-same-owner
-        fi
-
-        # Wait for DB to be ready
-        if [ -n "$ORO_DB_HOST" ]; then
-            echo "Waiting for database ${ORO_DB_HOST}:${ORO_DB_PORT:-5432}..."
-            until pg_isready -h ${ORO_DB_HOST} -p ${ORO_DB_PORT:-5432} -U ${ORO_DB_USER:-oro_db_user} -d postgres > /dev/null 2>&1; do
-                sleep 1
-            done
-            echo "Database is up!"
-        fi
-
-        if [ "$ORO_ENV" = "test" ]; then
-            [ -n "$ORO_DB_NAME_TEST" ] && check_and_restore "$ORO_DB_NAME_TEST" "/opt/oro_backups/oro_db_test.sql.gz" "true"
-        else
-            [ -n "$ORO_DB_NAME" ] && check_and_restore "$ORO_DB_NAME" "/opt/oro_backups/oro_db_dev.sql.gz" "true"
-        fi
-
-        if [ "$ORO_ENV" = "prod" ]; then
-          php bin/console cache:clear --no-debug
-        fi
-
         exit 0
         ;;
     nginx-init)

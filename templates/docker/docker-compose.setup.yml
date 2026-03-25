@@ -27,25 +27,6 @@ x-templates:
     {{- end}}
 
 services:
-  restore:
-    <<: *oro-app
-    command: restore
-    user: ${ORO_USER_RUNTIME:-www-data}
-    environment:
-      ORO_XDEBUG_ENABLED: "false"
-    depends_on:
-      {{if .Postgres -}}
-      "db":
-        condition: service_healthy
-      {{- end}}
-      {{if .Mailpit -}}
-      "mail":
-        condition: service_started
-      {{- end}}
-      "volume-init":
-        condition: service_completed_successfully
-    volumes: *volumes-setup
-
   install:
     <<: *oro-app
     command: install ${ORO_INSTALL_OPTIONS}
@@ -54,6 +35,8 @@ services:
       ORO_SAMPLE_DATA: ${ORO_SAMPLE_DATA:-y}
       ORO_XDEBUG_ENABLED: ${ORO_INSTALL_XDEBUG_ENABLED:-false}
     depends_on:
+      "gotenberg":
+        condition: service_healthy
       {{if .Postgres -}}
       "db":
         condition: service_healthy

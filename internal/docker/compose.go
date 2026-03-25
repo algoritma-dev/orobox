@@ -7,7 +7,9 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
+	"runtime"
 	"text/template"
 
 	"github.com/algoritma-dev/orobox/internal/config"
@@ -118,6 +120,7 @@ func EnsureDockerCompose() bool {
 		HasSsl               bool
 		CertsPath            string
 		Xdebug               bool
+		UserRuntime          string
 	}{
 		Type:            viper.GetString("type"),
 		InternalDir:     internalDir,
@@ -127,6 +130,13 @@ func EnsureDockerCompose() bool {
 		BundleName:      config.GetBundleName(),
 		MemoryLimit:     "2048M", // Default
 		PhpFpmPort:      "9000",
+		UserRuntime:     "www-data",
+	}
+
+	if runtime.GOOS == "linux" {
+		if currentUser, err := user.Current(); err == nil {
+			data.UserRuntime = currentUser.Uid + ":" + currentUser.Gid
+		}
 	}
 
 	data.NginxHTTPPort, data.NginxHTTPSPort = GetNginxPorts()

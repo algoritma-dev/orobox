@@ -34,15 +34,9 @@ var upCmd = &cobra.Command{
 		}
 
 		fmt.Println("Environment started!")
-		fmt.Println("Running OroCommerce bootstrap (this may take a few minutes)...")
-
-		if err := docker.RunComposeCommand("run", "--rm", "restore"); err != nil {
-			fmt.Printf("Bootstrap failed: %v\n", err)
-			return
-		}
 
 		if err := docker.RunComposeCommand("up", "-d", "application"); err != nil {
-			fmt.Printf("Bootstrap failed: %v\n", err)
+			fmt.Printf("Startup failed: %v\n", err)
 			return
 		}
 
