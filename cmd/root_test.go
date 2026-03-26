@@ -13,8 +13,8 @@ func TestRootCommand(t *testing.T) {
 		t.Errorf("Expected use 'oro', got %s", rootCmd.Use)
 	}
 
-	if rootCmd.Version != "0.0.4-dev" {
-		t.Errorf("Expected version '0.0.4-dev', got %s", rootCmd.Version)
+	if rootCmd.Version != Version {
+		t.Errorf("Expected version %s, got %s", Version, rootCmd.Version)
 	}
 }
 
@@ -30,7 +30,7 @@ func TestVersionFlag(t *testing.T) {
 	}
 
 	got := buf.String()
-	want := "oro version 0.0.4-dev\n"
+	want := "oro version " + Version + "\n"
 	if got != want {
 		t.Errorf("Expected %q, got %q", want, got)
 	}
