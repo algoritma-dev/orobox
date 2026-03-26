@@ -143,7 +143,7 @@ func TestTestCommand(t *testing.T) {
 	docker.RunComposeCommand = mockRun
 	docker.RunComposeCommandSilently = mockRunSilently
 
-	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
+	docker.RunComposeCommandWithOutput = func(_ ...string) ([]byte, error) {
 		return []byte("OK"), nil
 	}
 
@@ -316,7 +316,7 @@ func TestTestCommandBundle(t *testing.T) {
 	docker.RunComposeCommand = mockRun
 	docker.RunComposeCommandSilently = mockRunSilently
 
-	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
+	docker.RunComposeCommandWithOutput = func(_ ...string) ([]byte, error) {
 		return []byte("OK"), nil
 	}
 
@@ -380,7 +380,7 @@ func TestTestInitCommand(t *testing.T) {
 	docker.RunComposeCommandSilently = mockRunSilently
 
 	// Simula ambiente NON inizializzato per evitare prompt
-	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
+	docker.RunComposeCommandWithOutput = func(_ ...string) ([]byte, error) {
 		return nil, fmt.Errorf("not initialized")
 	}
 
