@@ -16,7 +16,7 @@ Before installing Orobox, make sure you have installed on your system:
 Run the following command in your terminal. It will automatically detect your operating system and architecture:
 
 ```bash
-curl -sSfL "https://github.com/algoritma-dev/orobox/releases/download/0.0.5-dev/orobox_$(uname -s)_$(uname -m | sed 's/aarch64/arm64/')" -o ~/.local/bin/orobox && chmod +x ~/.local/bin/orobox && hash -r
+curl -sSfL "https://github.com/algoritma-dev/orobox/releases/download/0.0.6-dev/orobox_$(uname -s)_$(uname -m | sed 's/aarch64/arm64/')" -o ~/.local/bin/orobox && chmod +x ~/.local/bin/orobox && hash -r
 ```
 
 *Note: Make sure `~/.local/bin` is in your `PATH`.*
@@ -26,7 +26,7 @@ curl -sSfL "https://github.com/algoritma-dev/orobox/releases/download/0.0.5-dev/
 Run the following command in PowerShell:
 
 ```powershell
-mkdir -Force "$HOME\.local\bin"; iwr "https://github.com/algoritma-dev/orobox/releases/download/0.0.5-dev/orobox_Windows_$($env:PROCESSOR_ARCHITECTURE.ToLower().Replace('amd64','x86_64')).exe" -OutFile "$HOME\.local\bin\orobox.exe"
+mkdir -Force "$HOME\.local\bin"; iwr "https://github.com/algoritma-dev/orobox/releases/download/0.0.6-dev/orobox_Windows_$($env:PROCESSOR_ARCHITECTURE.ToLower().Replace('amd64','x86_64')).exe" -OutFile "$HOME\.local\bin\orobox.exe"
 ```
 
 *Note: Make sure to add `%USERPROFILE%\.local\bin` to your User `Path` environment variable.*
