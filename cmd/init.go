@@ -168,14 +168,6 @@ func performInstallation() bool {
 		return false
 	}
 
-	// 5. Run Oro installation for test environment
-	fmt.Println("Preparing test environment...")
-	testInstallCmd := []string{"run", "--rm", "application_test", "bash", "-c",
-		"php bin/console oro:install --no-interaction --env=test --skip-translations"}
-	if err := docker.RunComposeCommand(testInstallCmd...); err != nil {
-		fmt.Printf("Warning: test environment installation failed: %v\n", err)
-	}
-
 	return true
 }
 

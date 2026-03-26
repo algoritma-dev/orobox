@@ -33,6 +33,17 @@ func runTestCommand() {
 		fmt.Printf("Warning: failed to ensure application_test is running: %v\n", err)
 	}
 
+	// Check if database schema exists
+	fmt.Print("Checking database schema... ")
+	checkArgs := []string{"exec", "-T", "application_test", "php", "bin/console", "doctrine:query:sql", "SELECT 1 FROM oro_user LIMIT 1", "--env=test"}
+	if _, err := docker.RunComposeCommandWithOutput(checkArgs...); err != nil {
+		fmt.Println("NOT FOUND")
+		fmt.Println("Error: Test database schema is not initialized or incomplete.")
+		fmt.Println("Please run 'orobox test-init' to prepare the test environment.")
+		return
+	}
+	fmt.Println("OK")
+
 	var args []string
 	args = append(args, "exec")
 

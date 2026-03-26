@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -105,10 +106,17 @@ func TestTestCommand(t *testing.T) {
 	oldRun := docker.RunComposeCommand
 	defer func() { docker.RunComposeCommand = oldRun }()
 
+	oldRunWithOutput := docker.RunComposeCommandWithOutput
+	defer func() { docker.RunComposeCommandWithOutput = oldRunWithOutput }()
+
 	var calls [][]string
 	docker.RunComposeCommand = func(args ...string) error {
 		calls = append(calls, args)
 		return nil
+	}
+
+	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
+		return []byte("OK"), nil
 	}
 
 	rootCmd.SetArgs([]string{"test"})
@@ -261,10 +269,17 @@ func TestTestCommandBundle(t *testing.T) {
 	oldRun := docker.RunComposeCommand
 	defer func() { docker.RunComposeCommand = oldRun }()
 
+	oldRunWithOutput := docker.RunComposeCommandWithOutput
+	defer func() { docker.RunComposeCommandWithOutput = oldRunWithOutput }()
+
 	var calls [][]string
 	docker.RunComposeCommand = func(args ...string) error {
 		calls = append(calls, args)
 		return nil
+	}
+
+	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
+		return []byte("OK"), nil
 	}
 
 	viper.Set("type", "bundle")
@@ -301,4 +316,71 @@ func contains(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+func TestTestInitCommand(t *testing.T) {
+	oldRun := docker.RunComposeCommand
+	defer func() { docker.RunComposeCommand = oldRun }()
+
+	oldRunWithOutput := docker.RunComposeCommandWithOutput
+	defer func() { docker.RunComposeCommandWithOutput = oldRunWithOutput }()
+
+	var calls [][]string
+	docker.RunComposeCommand = func(args ...string) error {
+		calls = append(calls, args)
+		return nil
+	}
+
+	// Simula ambiente NON inizializzato per evitare prompt
+	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
+		return nil, fmt.Errorf("not initialized")
+	}
+
+	rootCmd.SetArgs([]string{"test-init"})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("rootCmd.Execute() failed: %v", err)
+	}
+
+	// Expected calls: up, drop (psql), create, cache clear, install
+	if len(calls) < 5 {
+		t.Errorf("Expected at least 5 calls to RunComposeCommand, got %d: %v", len(calls), calls)
+		return
+	}
+
+	if calls[0][0] != "up" || !contains(calls[0], "application_test") {
+		t.Errorf("Expected first call to be up, got %v", calls[0])
+	}
+
+	foundDrop := false
+	foundCreate := false
+	foundCacheClear := false
+	foundInstall := false
+	for _, call := range calls {
+		if contains(call, "psql") && contains(call, "DROP DATABASE") {
+			foundDrop = true
+		}
+		if contains(call, "doctrine:database:create") {
+			foundCreate = true
+		}
+		if contains(call, "rm -rf var/cache/*") {
+			foundCacheClear = true
+		}
+		if contains(call, "oro:install") {
+			foundInstall = true
+		}
+	}
+
+	if !foundDrop {
+		t.Errorf("database drop command (psql) not found in calls")
+	}
+	if !foundCreate {
+		t.Errorf("database create command not found in calls")
+	}
+	if !foundCacheClear {
+		t.Errorf("cache clear command not found in calls")
+	}
+	if !foundInstall {
+		t.Errorf("oro:install command not found in calls")
+	}
 }

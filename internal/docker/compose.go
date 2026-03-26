@@ -273,6 +273,18 @@ var RunComposeCommand = func(args ...string) error {
 	return cmd.Run()
 }
 
+// RunComposeCommandWithOutput runs docker compose and returns its combined output.
+// It is a variable to allow overriding in tests.
+var RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
+	composeCmd := GetComposeCommand()
+
+	argsToRun := append(composeCmd[1:], GetBaseComposeArgs()...)
+	argsToRun = append(argsToRun, args...)
+
+	cmd := exec.Command(composeCmd[0], argsToRun...)
+	return cmd.CombinedOutput()
+}
+
 func writeDockerfile(internalDir string, data any) bool {
 	src := "templates/docker/Dockerfile"
 	dockerfileContent, err := fs.ReadFile(Templates, src)
