@@ -14,7 +14,7 @@ Before installing Orobox, make sure you have installed on your system:
 Run the following command in your terminal. It will automatically detect your operating system and architecture:
 
 ```bash
-curl -sSfL "https://github.com/algoritma-dev/orobox/releases/download/0.0.2-dev/orobox_$(uname -s)_$(uname -m | sed 's/aarch64/arm64/')" -o ~/.local/bin/orobox && chmod +x ~/.local/bin/orobox && hash -r
+curl -sSfL "https://github.com/algoritma-dev/orobox/releases/download/0.0.4-dev/orobox_$(uname -s)_$(uname -m | sed 's/aarch64/arm64/')" -o ~/.local/bin/orobox && chmod +x ~/.local/bin/orobox && hash -r
 ```
 
 *Note: Make sure `~/.local/bin` is in your `PATH`.*
