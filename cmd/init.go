@@ -26,7 +26,6 @@ var (
 	oroVersion      string
 	bundleNamespace string
 	installType     string
-	nonInteractive  bool
 	stdin           io.Reader = os.Stdin
 )
 
@@ -47,10 +46,6 @@ var initCmd = &cobra.Command{
 
 		if err := os.Chdir(bundlePath); err != nil {
 			panic(err)
-		}
-
-		if nonInteractive {
-			os.Setenv("OROBOX_NON_INTERACTIVE", "1")
 		}
 
 		generateConfig()
@@ -183,7 +178,6 @@ func init() {
 	initCmd.Flags().StringVarP(&oroVersion, "oro-version", "v", "6.1", "OroCommerce version")
 	initCmd.Flags().StringVarP(&bundleNamespace, "bundle-namespace", "n", "", "Bundle namespace")
 	initCmd.Flags().StringVarP(&installType, "type", "t", "bundle", "Installation type (bundle, project, demo)")
-	initCmd.Flags().BoolVarP(&nonInteractive, "non-interactive", "i", false, "Run in non-interactive mode")
 }
 
 func generateConfig() {
@@ -199,66 +193,7 @@ func generateConfig() {
 		return
 	}
 
-	fmt.Println("Config file .orobox.yaml not found or invalid. Let's create it.")
-
-	if nonInteractive {
-		var className, namespace string
-		if installType == config.InstallTypeBundle {
-			if bundleNamespace == "" {
-				fmt.Println("Error: bundle-namespace is required for bundle installation type in non-interactive mode")
-				os.Exit(1)
-			}
-			var found bool
-			className, namespace, found = config.FindPhpClass(bundleNamespace)
-			if !found {
-				lastSlash := strings.LastIndex(bundleNamespace, "\\")
-				if lastSlash != -1 {
-					className = bundleNamespace[lastSlash+1:]
-					namespace = bundleNamespace[:lastSlash]
-				} else {
-					className = bundleNamespace
-					namespace = ""
-				}
-			}
-		}
-
-		conf := config.OroConfig{
-			Type:       installType,
-			Class:      className,
-			Namespace:  namespace,
-			OroVersion: oroVersion,
-			Domains: []config.DomainConfig{
-				{
-					Host: "oro.demo",
-					Root: "public",
-					Ssl:  true,
-				},
-			},
-			Services: config.ServicesConfig{
-				Redis:   false,
-				Mailpit: installType != config.InstallTypeDemo,
-				Php: config.PhpConfig{
-					Xdebug: false,
-				},
-				RabbitMQ:      false,
-				Elasticsearch: false,
-			},
-		}
-
-		data, err := yamlv3.Marshal(&conf)
-		if err != nil {
-			fmt.Printf("Warning: %s\n", err)
-			return
-		}
-
-		err = os.WriteFile(configPath, data, 0644)
-		if err != nil {
-			fmt.Printf("Warning: %s\n", err)
-		}
-		return
-	}
-
-	fmt.Println("Let's create it interactively.")
+	fmt.Println("Config file .orobox.yaml not found or invalid. Let's create it interactively.")
 	reader := bufio.NewReader(stdin)
 
 	typeOfInstall := utils.AskSelection(reader, "Installation type", []string{config.InstallTypeBundle, config.InstallTypeProject, config.InstallTypeDemo}, installType)
