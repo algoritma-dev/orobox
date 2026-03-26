@@ -241,12 +241,22 @@ services:
   redis:
     image: "redis:{{.RedisVersion}}"
     hostname: redis
+    ports:
+      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
     restart: unless-stopped
+
+  redisinsight:
+    image: redis/redisinsight:latest
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
+    depends_on:
+      - redis
   {{end}}
   {{if .Mailpit}}
   mail:
@@ -262,10 +272,11 @@ services:
     image: {{if eq .Type "demo"}}"rabbitmq:{{.RabbitMQVersion}}"{{else}}"rabbitmq:{{.RabbitMQVersion}}-management"{{end}}
     hostname: rabbitmq
     restart: unless-stopped
-    {{if ne .Type "demo" -}}
     ports:
+      {{if ne .Type "demo" -}}
       - "15672:15672"
-    {{- end}}
+      {{- end}}
+      - "5672:5672"
     environment:
       RABBITMQ_DEFAULT_USER: ${ORO_RABBITMQ_USER:-guest}
       RABBITMQ_DEFAULT_PASS: ${ORO_RABBITMQ_PASS:-guest}
@@ -275,6 +286,8 @@ services:
     image: "elasticsearch:{{.ElasticsearchVersion}}"
     hostname: elasticsearch
     restart: unless-stopped
+    ports:
+      - "9200:9200"
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
