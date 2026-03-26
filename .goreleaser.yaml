@@ -22,7 +22,7 @@ archives:
   - id: archives
     formats: ["tar.gz"]
     # use zip for windows archives
-    formats_overrides:
+    format_overrides:
       - goos: windows
         formats: ["zip"]
     name_template: >-
