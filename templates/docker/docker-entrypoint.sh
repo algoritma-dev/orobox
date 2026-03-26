@@ -16,39 +16,6 @@ else
     fi
 fi
 
-ensure_db_exists() {
-    local db_name="$1"
-    
-    # Ensure root connection is possible
-    if [ -z "$ORO_DB_ROOT_PASSWORD" ]; then
-        echo "Warning: ORO_DB_ROOT_PASSWORD is not set. Skipping database existence check."
-        return 0
-    fi
-
-    # Create User if not exists
-    if PGPASSWORD=$ORO_DB_ROOT_PASSWORD psql -h $ORO_DB_HOST -p ${ORO_DB_PORT:-5432} -U $ORO_DB_ROOT_USER -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname = '$ORO_DB_USER'" 2>/dev/null | grep -q 1; then
-        echo "Role $ORO_DB_USER already exists."
-    else
-        echo "Creating role $ORO_DB_USER..."
-        PGPASSWORD=$ORO_DB_ROOT_PASSWORD psql -h $ORO_DB_HOST -p ${ORO_DB_PORT:-5432} -U $ORO_DB_ROOT_USER -d postgres -c "CREATE USER \"$ORO_DB_USER\" WITH PASSWORD '$ORO_DB_PASSWORD'"
-    fi
-
-    # Create DB if not exists
-    if PGPASSWORD=$ORO_DB_ROOT_PASSWORD psql -h $ORO_DB_HOST -p ${ORO_DB_PORT:-5432} -U $ORO_DB_ROOT_USER -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '$db_name'" 2>/dev/null | grep -q 1; then
-        echo "Database $db_name already exists."
-    else
-        echo "Creating database $db_name owned by $ORO_DB_USER..."
-        PGPASSWORD=$ORO_DB_ROOT_PASSWORD psql -h $ORO_DB_HOST -p ${ORO_DB_PORT:-5432} -U $ORO_DB_ROOT_USER -d postgres -c "CREATE DATABASE \"$db_name\" OWNER \"$ORO_DB_USER\""
-    fi
-    
-    # Add extensions
-    PGPASSWORD=$ORO_DB_ROOT_PASSWORD psql -h $ORO_DB_HOST -p ${ORO_DB_PORT:-5432} -U $ORO_DB_ROOT_USER -d "$db_name" -t -c "SELECT 1 FROM pg_extension WHERE extname = 'uuid-ossp';" | grep -q 1 || \
-    PGPASSWORD=$ORO_DB_ROOT_PASSWORD psql -h $ORO_DB_HOST -p ${ORO_DB_PORT:-5432} -U $ORO_DB_ROOT_USER -d "$db_name" -c 'CREATE EXTENSION "uuid-ossp";'
-    
-    PGPASSWORD=$ORO_DB_ROOT_PASSWORD psql -h $ORO_DB_HOST -p ${ORO_DB_PORT:-5432} -U $ORO_DB_ROOT_USER -d "$db_name" -t -c "SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm';" | grep -q 1 || \
-    PGPASSWORD=$ORO_DB_ROOT_PASSWORD psql -h $ORO_DB_HOST -p ${ORO_DB_PORT:-5432} -U $ORO_DB_ROOT_USER -d "$db_name" -c 'CREATE EXTENSION "pg_trgm";'
-}
-
 # Case statements for commands
 case "$1" in
     nginx)
@@ -71,17 +38,6 @@ case "$1" in
         ;;
     install)
         shift
-        # Wait for DB to be ready
-        if [ -n "$ORO_DB_HOST" ]; then
-            echo "Waiting for database ${ORO_DB_HOST}:${ORO_DB_PORT:-5432}..."
-            until pg_isready -h ${ORO_DB_HOST} -p ${ORO_DB_PORT:-5432} -U ${ORO_DB_USER:-oro_db_user} -d postgres > /dev/null 2>&1; do
-                sleep 1
-            done
-            echo "Database is up!"
-            # Ensure DB exists before running install
-            [ -n "$ORO_DB_NAME" ] && ensure_db_exists "$ORO_DB_NAME"
-        fi
-
         # Build install command options
         INSTALL_OPTS=()
         # Use ORO_APP_URL if defined, otherwise build it from protocol and domain
@@ -102,6 +58,7 @@ case "$1" in
         [ -n "$ORO_FORMATTING_CODE" ] && INSTALL_OPTS+=( "--formatting-code=${ORO_FORMATTING_CODE}" )
 
         echo "Running: php bin/console oro:install --no-interaction ${INSTALL_OPTS[*]} $ORO_INSTALL_OPTIONS $*"
+        ls -la var/cache/dev
         rm -rf var/cache/* var/logs/* var/sessions/*
         php bin/console oro:install --no-interaction "${INSTALL_OPTS[@]}" $ORO_INSTALL_OPTIONS "$@"
         STATUS=$?
