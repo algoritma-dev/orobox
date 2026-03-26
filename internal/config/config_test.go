@@ -145,6 +145,23 @@ func TestGetNamespace(t *testing.T) {
 	}
 }
 
+func TestGetFirstDomainHost(t *testing.T) {
+	viper.Reset()
+	if GetFirstDomainHost() != "oro.demo" {
+		t.Errorf("Expected default host oro.demo, got %s", GetFirstDomainHost())
+	}
+
+	domains := []DomainConfig{
+		{Host: "test.domain"},
+		{Host: "other.domain"},
+	}
+	viper.Set("domains", domains)
+
+	if GetFirstDomainHost() != "test.domain" {
+		t.Errorf("Expected host test.domain, got %s", GetFirstDomainHost())
+	}
+}
+
 func TestFindPhpClass(t *testing.T) {
 	// Create a temporary directory for testing
 	tmpDir, err := os.MkdirTemp("", "findphpclass")

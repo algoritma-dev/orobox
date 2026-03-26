@@ -62,6 +62,13 @@ var upCmd = &cobra.Command{
 			fmt.Printf("	- ORO_MAILER_DSN=smtp://mail:1025\n")
 		}
 
+		if viper.GetBool("services.adminer") {
+			utils.PrintTitle("Adminer is available at:")
+			fmt.Println("  - http://localhost:8081")
+			dbUser, dbPass, dbName := docker.GetDatabaseCredentials()
+			fmt.Printf("  - Credentials: %s / %s (Database: %s)\n", dbUser, dbPass, dbName)
+		}
+
 		if viper.GetBool("services.redis") {
 			utils.PrintTitle("Redis is available at:")
 			fmt.Printf("  - RedisInsight UI: http://localhost:8001\n")
@@ -88,7 +95,7 @@ var upCmd = &cobra.Command{
 			fmt.Println("To debug in PhpStorm:")
 			fmt.Println("  1. Ensure the 'Phone' icon (Listener) is ON.")
 			fmt.Println("  2. Configure Path Mappings in Settings -> PHP -> Servers:")
-			fmt.Printf("     - Host: %s\n", "oro.demo (or your custom domain)")
+			fmt.Printf("     - Host: %s\n", config.GetFirstDomainHost())
 			fmt.Printf("     - Local Path: %s\n", config.GetHostBundlePath())
 			fmt.Printf("       Remote Path: /var/www/oro/src/%s\n", config.GetBundlePath())
 			fmt.Println("\nTo debug background processes, set in your .env:")

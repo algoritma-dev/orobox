@@ -61,8 +61,7 @@ func GetNginxPorts() (httpPort string, httpsPort string) {
 
 // GetApplicationURLs returns the list of URLs where the application is reachable.
 func GetApplicationURLs() []string {
-	var domains []config.DomainConfig
-	_ = viper.UnmarshalKey("domains", &domains)
+	domains := config.GetDomains()
 
 	httpPort, httpsPort := GetNginxPorts()
 
@@ -82,6 +81,45 @@ func GetApplicationURLs() []string {
 		urls = append(urls, url)
 	}
 	return urls
+}
+
+// GetDatabaseCredentials returns the credentials to access the database.
+func GetDatabaseCredentials() (user string, pass string, dbname string) {
+	internalDir := config.GetInternalDir()
+	envFile := filepath.Join(internalDir, ".env")
+
+	// Default values if anything fails
+	user = "oro_db_user"
+	pass = "oro_db_pass"
+	dbname = "oro_db"
+
+	v := viper.New()
+	v.SetConfigFile(envFile)
+	v.SetConfigType("dotenv")
+	if err := v.ReadInConfig(); err == nil {
+		if u := v.GetString("ORO_DB_USER"); u != "" {
+			user = u
+		}
+		if p := v.GetString("ORO_DB_PASSWORD"); p != "" {
+			pass = p
+		}
+		if db := v.GetString("ORO_DB_NAME"); db != "" {
+			dbname = db
+		}
+	}
+
+	// Check environment overrides
+	if u := os.Getenv("ORO_DB_USER"); u != "" {
+		user = u
+	}
+	if p := os.Getenv("ORO_DB_PASSWORD"); p != "" {
+		pass = p
+	}
+	if db := os.Getenv("ORO_DB_NAME"); db != "" {
+		dbname = db
+	}
+
+	return user, pass, dbname
 }
 
 // EnsureDockerCompose renders and writes all docker-related files under the
@@ -109,6 +147,9 @@ func EnsureDockerCompose() bool {
 		RabbitMQVersion      string
 		Elasticsearch        bool
 		ElasticsearchVersion string
+		RedisInsight         bool
+		Kibana               bool
+		Adminer              bool
 		InternalDir          string
 		OroRootDir           string
 		CustomBundle         string
@@ -141,7 +182,7 @@ func EnsureDockerCompose() bool {
 
 	data.NginxHTTPPort, data.NginxHTTPSPort = GetNginxPorts()
 
-	_ = viper.UnmarshalKey("domains", &data.Domains)
+	data.Domains = config.GetDomains()
 	for _, domain := range data.Domains {
 		if domain.Ssl {
 			data.HasSsl = true
@@ -179,6 +220,11 @@ func EnsureDockerCompose() bool {
 		data.ElasticsearchVersion = versions.Elasticsearch
 	}
 
+	data.Kibana = data.Elasticsearch && data.Type != "demo"
+	if viper.IsSet("services.kibana") {
+		data.Kibana = viper.GetBool("services.kibana")
+	}
+
 	absBundlePath, err := filepath.Abs(config.GetHostBundlePath())
 	if err != nil {
 		absBundlePath = config.GetHostBundlePath()
@@ -188,8 +234,19 @@ func EnsureDockerCompose() bool {
 	if data.Redis {
 		data.RedisVersion = versions.Redis
 	}
+
+	data.RedisInsight = data.Redis
+	if viper.IsSet("services.redisinsight") {
+		data.RedisInsight = viper.GetBool("services.redisinsight")
+	}
+
 	data.Mailpit = viper.GetBool("services.mailpit")
 	data.Xdebug = viper.GetBool("services.php.xdebug")
+
+	data.Adminer = data.Postgres
+	if viper.IsSet("services.adminer") {
+		data.Adminer = viper.GetBool("services.adminer")
+	}
 
 	changed := false
 	changed = writeDockerfile(internalDir, data) || changed

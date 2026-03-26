@@ -228,12 +228,28 @@ func generateConfig() {
 	isDemo := typeOfInstall == config.InstallTypeDemo
 
 	redisEnabled := utils.AskYesNo(reader, "Enable Redis?", false)
+	redisInsightEnabled := false
+	if redisEnabled && !isDemo {
+		redisInsightEnabled = utils.AskYesNo(reader, "Enable RedisInsight?", true)
+	}
+
 	mailpit := false
 	if !isDemo {
 		mailpit = utils.AskYesNo(reader, "Enable Mailpit?", true)
 	}
+
 	rabbitmqEnabled := utils.AskYesNo(reader, "Enable RabbitMQ?", false)
 	elasticsearchEnabled := utils.AskYesNo(reader, "Enable Elasticsearch?", false)
+
+	kibanaEnabled := false
+	if elasticsearchEnabled && !isDemo {
+		kibanaEnabled = utils.AskYesNo(reader, "Enable Kibana?", true)
+	}
+
+	adminerEnabled := false
+	if !isDemo {
+		adminerEnabled = utils.AskYesNo(reader, "Enable Adminer?", true)
+	}
 
 	conf := config.OroConfig{
 		Type:       typeOfInstall,
@@ -248,13 +264,16 @@ func generateConfig() {
 			},
 		},
 		Services: config.ServicesConfig{
-			Redis:   redisEnabled,
-			Mailpit: mailpit,
+			Redis:        redisEnabled,
+			RedisInsight: redisInsightEnabled,
+			Mailpit:      mailpit,
 			Php: config.PhpConfig{
 				Xdebug: false,
 			},
 			RabbitMQ:      rabbitmqEnabled,
 			Elasticsearch: elasticsearchEnabled,
+			Kibana:        kibanaEnabled,
+			Adminer:       adminerEnabled,
 		},
 	}
 

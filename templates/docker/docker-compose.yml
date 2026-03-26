@@ -249,7 +249,8 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
-
+  {{end}}
+  {{if and .RedisInsight (ne .Type "demo")}}
   redisinsight:
     image: redis/redisinsight:latest
     ports:
@@ -317,8 +318,7 @@ services:
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://127.0.0.1:3000/health" ]
     restart: on-failure
-
-  {{if .Postgres}}
+  {{if and .Adminer (ne .Type "demo")}}
   adminer:
     image: adminer
     ports:
@@ -327,8 +327,7 @@ services:
     depends_on:
       - db
   {{end}}
-
-  {{if and .Elasticsearch (ne .Type "demo")}}
+  {{if and .Kibana (ne .Type "demo")}}
   kibana:
     image: "kibana:{{.ElasticsearchVersion}}"
     ports:

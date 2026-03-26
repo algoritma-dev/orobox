@@ -31,6 +31,9 @@ type ServicesConfig struct {
 	Php           PhpConfig `yaml:"php" mapstructure:"php"`
 	RabbitMQ      bool      `yaml:"rabbitmq" mapstructure:"rabbitmq"`
 	Elasticsearch bool      `yaml:"elasticsearch" mapstructure:"elasticsearch"`
+	RedisInsight  bool      `yaml:"redisinsight" mapstructure:"redisinsight"`
+	Kibana        bool      `yaml:"kibana" mapstructure:"kibana"`
+	Adminer       bool      `yaml:"adminer" mapstructure:"adminer"`
 }
 
 // OroVersions defines the versions of components for a specific OroCommerce version.
@@ -206,6 +209,22 @@ func GetInternalDir() string {
 		return filepath.Join(".config", "orobox", GetProjectName())
 	}
 	return filepath.Join(home, ".config", "orobox", GetProjectName())
+}
+
+// GetFirstDomainHost returns the host of the first configured domain.
+func GetFirstDomainHost() string {
+	domains := GetDomains()
+	if len(domains) > 0 {
+		return domains[0].Host
+	}
+	return "oro.demo"
+}
+
+// GetDomains returns the list of configured domains.
+func GetDomains() []DomainConfig {
+	var domains []DomainConfig
+	_ = viper.UnmarshalKey("domains", &domains)
+	return domains
 }
 
 // FindPhpClass tries to find a PHP class in the project directory.

@@ -47,11 +47,14 @@ domains:
     ssl: false
 services:
   redis: true
+  redisinsight: true
   mailpit: true
   php:
     xdebug: true
   rabbitmq: true
   elasticsearch: false
+  kibana: false
+  adminer: true
 ```
 
 ### Configuration Fields
@@ -65,9 +68,12 @@ services:
 - `domains`: List of domains for the environment.
 - `services`: Configuration for optional services and tools:
     - `redis`: (bool) Enable/disable Redis.
+    - `redisinsight`: (bool) Enable/disable RedisInsight.
     - `mailpit`: (bool) Enable/disable Mailpit.
     - `rabbitmq`: (bool) Enable/disable RabbitMQ.
     - `elasticsearch`: (bool) Enable/disable Elasticsearch/OpenSearch.
+    - `kibana`: (bool) Enable/disable Kibana (only if Elasticsearch is enabled).
+    - `adminer`: (bool) Enable/disable Adminer (PostgreSQL manager).
     - `php`:
         - `xdebug`: (bool) Enable/disable Xdebug.
 
