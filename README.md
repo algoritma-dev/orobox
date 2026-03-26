@@ -206,6 +206,10 @@ If you want to contribute to Orobox, you can use the provided `Makefile` to simp
   ```bash
   make build
   ```
+- **Update Version**:
+  ```bash
+  make set-version v=X.Y.Z
+  ```
 
 ---
 
