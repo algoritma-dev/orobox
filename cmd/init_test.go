@@ -49,8 +49,8 @@ func TestGenerateConfig(t *testing.T) {
 	}
 
 	content := string(data)
-	if !strings.Contains(content, "oro_version: \"7.0\"") {
-		t.Errorf("Expected oro_version 7.0 in config, got:\n%s", content)
+	if !strings.Contains(content, "oro_version: \"6.1\"") {
+		t.Errorf("Expected oro_version 6.1 in config, got:\n%s", content)
 	}
 	if !strings.Contains(content, "host: test.local") {
 		t.Errorf("Expected host test.local in config, got:\n%s", content)
