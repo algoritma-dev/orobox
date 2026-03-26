@@ -157,11 +157,11 @@ services:
       {{- end}}
       {{if .RabbitMQ -}}
       "rabbitmq":
-        condition: service_started
+        condition: service_healthy
       {{- end}}
       {{if .Elasticsearch -}}
       "elasticsearch":
-        condition: service_started
+        condition: service_healthy
       {{- end}}
     volumes: *volumes-oro
 
@@ -253,7 +253,7 @@ services:
   redisinsight:
     image: redis/redisinsight:latest
     ports:
-      - "8001:8001"
+      - "8001:5540"
     restart: unless-stopped
     depends_on:
       - redis
@@ -269,9 +269,14 @@ services:
   {{end}}
   {{if .RabbitMQ}}
   rabbitmq:
-    image: {{if eq .Type "demo"}}"rabbitmq:{{.RabbitMQVersion}}"{{else}}"rabbitmq:{{.RabbitMQVersion}}-management"{{end}}
+    image: "rabbitmq:{{.RabbitMQVersion}}"
     hostname: rabbitmq
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     ports:
       {{if ne .Type "demo" -}}
       - "15672:15672"
@@ -286,11 +291,17 @@ services:
     image: "elasticsearch:{{.ElasticsearchVersion}}"
     hostname: elasticsearch
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health?local=true || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     ports:
       - "9200:9200"
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
+      - cluster.routing.allocation.disk.threshold_enabled=false
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
     ulimits:
       memlock:
@@ -311,7 +322,7 @@ services:
   adminer:
     image: adminer
     ports:
-      - "8080:8080"
+      - "8081:8080"
     restart: unless-stopped
     depends_on:
       - db
@@ -324,9 +335,12 @@ services:
       - "5601:5601"
     restart: unless-stopped
     depends_on:
-      - elasticsearch
+      "elasticsearch":
+        condition: service_healthy
     environment:
       ELASTICSEARCH_HOSTS: "http://elasticsearch:9200"
+      XPACK_SECURITY_ENABLED: "false"
+      XPACK_ENCRYPTED_SAVED_OBJECTS_ENCRYPTION_KEY: "a-32-character-minimum-encryption-key-for-kibana"
   {{end}}
 
 volumes:

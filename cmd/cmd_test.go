@@ -64,8 +64,8 @@ func TestUpCommand(t *testing.T) {
 		return
 	}
 
-	if len(calls[0]) < 3 || calls[0][0] != "up" || !contains(calls[0], "application") {
-		t.Errorf("Expected call to be up -d application, got %v", calls[0])
+	if len(calls[0]) < 2 || calls[0][0] != "up" || !contains(calls[0], "-d") {
+		t.Errorf("Expected call to be up -d, got %v", calls[0])
 	}
 }
 

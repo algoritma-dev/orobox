@@ -32,7 +32,7 @@ var upCmd = &cobra.Command{
 			}
 		}
 
-		if err := docker.RunComposeCommandSilently("Starting containers...", "up", "-d", "application"); err != nil {
+		if err := docker.RunComposeCommandSilently("Starting containers...", "up", "-d"); err != nil {
 			utils.PrintError(fmt.Sprintf("Startup failed: %v", err))
 			return
 		}
@@ -47,27 +47,29 @@ var upCmd = &cobra.Command{
 		if viper.GetBool("services.mailpit") {
 			utils.PrintTitle("Mailpit is available at:")
 			fmt.Println("  - http://localhost:8025")
+			fmt.Printf("  - Set in your .env:\n")
+			fmt.Printf("	- ORO_MAILER_DSN=smtp://mail:1025\n")
 		}
 
 		if viper.GetBool("services.redis") {
 			utils.PrintTitle("Redis is available at:")
 			fmt.Printf("  - RedisInsight UI: http://localhost:8001\n")
 			fmt.Printf("  - Set in your .env:\n")
-			fmt.Printf("	- REDIS_DSN=redis://localhost:6379\n")
+			fmt.Printf("	- ORO_REDIS_URL=redis://redis:6379\n")
 		}
 
 		if viper.GetBool("services.rabbitmq") {
 			utils.PrintTitle("RabbitMQ is available at:")
 			fmt.Printf("  - Management UI: http://localhost:15672 (guest/guest)\n")
 			fmt.Printf("  - Set in your .env:\n")
-			fmt.Printf("	- MESSENGER_TRANSPORT_DSN=amqp://guest:guest@localhost:5672/%%2f/messages\n")
+			fmt.Printf("	- MESSENGER_TRANSPORT_DSN=amqp://guest:guest@rabbitmq:5672/%%2f/messages\n")
 		}
 
 		if viper.GetBool("services.elasticsearch") {
 			utils.PrintTitle("Elasticsearch is available at:")
 			fmt.Printf("  - Kibana UI: http://localhost:5601\n")
 			fmt.Printf("  - Set in your .env:\n")
-			fmt.Printf("	- ELASTICSEARCH_URL=http://localhost:9200\n")
+			fmt.Printf("	- ORO_SEARCH_URL=http://elasticsearch:9200\n")
 		}
 
 		if viper.GetBool("services.php.xdebug") {
