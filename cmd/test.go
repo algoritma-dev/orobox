@@ -34,7 +34,7 @@ func runTestCommand() {
 	}
 
 	// Check if database schema exists
-	fmt.Print("Checking database schema... ")
+	fmt.Print("Checking test environment... ")
 	checkArgs := []string{"exec", "-T", "application_test", "php", "bin/console", "doctrine:query:sql", "SELECT 1 FROM oro_user LIMIT 1", "--env=test"}
 	if _, err := docker.RunComposeCommandWithOutput(checkArgs...); err != nil {
 		fmt.Println("NOT FOUND")

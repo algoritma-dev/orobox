@@ -363,7 +363,7 @@ func TestTestInitCommand(t *testing.T) {
 		if contains(call, "doctrine:database:create") {
 			foundCreate = true
 		}
-		if contains(call, "rm -rf var/cache/*") {
+		if contains(call, "rm -rf var/cache/test") {
 			foundCacheClear = true
 		}
 		if contains(call, "oro:install") {
