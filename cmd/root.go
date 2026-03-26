@@ -14,7 +14,7 @@ import (
 var cfgFile string
 
 // Version is the current version of the tool.
-var Version = "0.0.4-dev"
+var Version = "0.0.5-dev"
 
 var rootCmd = &cobra.Command{
 	Use:     "oro",
