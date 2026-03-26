@@ -42,6 +42,8 @@ func init() {
 	cobra.OnInitialize(initConfig)
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is .orobox.yaml)")
+	rootCmd.PersistentFlags().BoolP("debug", "d", false, "mostra tutto l'output di docker")
+	_ = viper.BindPFlag("debug", rootCmd.PersistentFlags().Lookup("debug"))
 }
 
 // ConfigError contains the error if the configuration file is invalid.

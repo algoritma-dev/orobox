@@ -4,6 +4,7 @@ package docker
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -263,16 +264,21 @@ func GetBaseComposeArgs() []string {
 // and captures its output, showing it only if an error occurs.
 // It shows a loader while running.
 var RunComposeCommandSilently = func(message string, args ...string) error {
-	utils.StartLoader(message)
-	defer utils.StopLoader()
+	debug := viper.GetBool("debug")
+	if !debug {
+		utils.StartLoader(message)
+		defer utils.StopLoader()
+	} else if message != "" {
+		utils.PrintInfo(message)
+	}
 
 	composeCmd := GetComposeCommand()
 
 	var argsToRun []string
 	argsToRun = append(argsToRun, composeCmd[1:]...)
 
-	// Add --progress quiet if it's 'docker compose' (V2)
-	if len(composeCmd) > 1 && composeCmd[1] == "compose" {
+	// Add --progress quiet if it's 'docker compose' (V2) and not in debug mode
+	if !debug && len(composeCmd) > 1 && composeCmd[1] == "compose" {
 		argsToRun = append(argsToRun, "--progress", "quiet")
 	}
 
@@ -280,6 +286,13 @@ var RunComposeCommandSilently = func(message string, args ...string) error {
 	argsToRun = append(argsToRun, args...)
 
 	cmd := exec.Command(composeCmd[0], argsToRun...)
+
+	if debug {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		return cmd.Run()
+	}
+
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -319,13 +332,14 @@ var RunComposeCommand = func(message string, args ...string) error {
 // RunComposeCommandWithOutput runs docker compose and returns its combined output.
 // It is a variable to allow overriding in tests.
 var RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
+	debug := viper.GetBool("debug")
 	composeCmd := GetComposeCommand()
 
 	var argsToRun []string
 	argsToRun = append(argsToRun, composeCmd[1:]...)
 
-	// Add --progress quiet if it's 'docker compose' (V2)
-	if len(composeCmd) > 1 && composeCmd[1] == "compose" {
+	// Add --progress quiet if it's 'docker compose' (V2) and not in debug mode
+	if !debug && len(composeCmd) > 1 && composeCmd[1] == "compose" {
 		argsToRun = append(argsToRun, "--progress", "quiet")
 	}
 
@@ -333,6 +347,13 @@ var RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
 	argsToRun = append(argsToRun, args...)
 
 	cmd := exec.Command(composeCmd[0], argsToRun...)
+	if debug {
+		var buf bytes.Buffer
+		cmd.Stdout = io.MultiWriter(os.Stdout, &buf)
+		cmd.Stderr = io.MultiWriter(os.Stderr, &buf)
+		err := cmd.Run()
+		return buf.Bytes(), err
+	}
 	return cmd.CombinedOutput()
 }
 
