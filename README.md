@@ -11,6 +11,8 @@ Before installing Orobox, make sure you have installed on your system:
 
 ## Installation
 
+### Linux / macOS
+
 Run the following command in your terminal. It will automatically detect your operating system and architecture:
 
 ```bash
@@ -18,6 +20,16 @@ curl -sSfL "https://github.com/algoritma-dev/orobox/releases/download/0.0.4-dev/
 ```
 
 *Note: Make sure `~/.local/bin` is in your `PATH`.*
+
+### Windows (PowerShell)
+
+Run the following command in PowerShell:
+
+```powershell
+mkdir -Force "$HOME\.local\bin"; iwr "https://github.com/algoritma-dev/orobox/releases/download/0.0.4-dev/orobox_Windows_$($env:PROCESSOR_ARCHITECTURE.ToLower().Replace('amd64','x86_64')).exe" -OutFile "$HOME\.local\bin\orobox.exe"
+```
+
+*Note: Make sure to add `%USERPROFILE%\.local\bin` to your User `Path` environment variable.*
 
 ## Configuration (`.orobox.yaml`)
 
