@@ -7,6 +7,7 @@ import (
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
+	"github.com/algoritma-dev/orobox/internal/utils"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -18,7 +19,7 @@ var testCmd = &cobra.Command{
 	Short: "Run tests (PHPUnit)",
 	Run: func(_ *cobra.Command, _ []string) {
 		docker.EnsureDockerCompose()
-		fmt.Println("Running tests...")
+		utils.PrintInfo("Running tests...")
 		runTestCommand()
 	},
 }
@@ -29,8 +30,8 @@ func init() {
 
 func runTestCommand() {
 	// Ensure application_test container is running
-	if err := docker.RunComposeCommand("up", "-d", "application_test"); err != nil {
-		fmt.Printf("Warning: failed to ensure application_test is running: %v\n", err)
+	if err := docker.RunComposeCommandSilently("up", "-d", "application_test"); err != nil {
+		utils.PrintWarning(fmt.Sprintf("failed to ensure application_test is running: %v", err))
 	}
 
 	// Check if database schema exists
@@ -38,8 +39,8 @@ func runTestCommand() {
 	checkArgs := []string{"exec", "-T", "application_test", "php", "bin/console", "doctrine:query:sql", "SELECT 1 FROM oro_user LIMIT 1", "--env=test"}
 	if _, err := docker.RunComposeCommandWithOutput(checkArgs...); err != nil {
 		fmt.Println("NOT FOUND")
-		fmt.Println("Error: Test database schema is not initialized or incomplete.")
-		fmt.Println("Please run 'orobox test-init' to prepare the test environment.")
+		utils.PrintError("Test database schema is not initialized or incomplete.")
+		utils.PrintInfo("Please run 'orobox test-init' to prepare the test environment.")
 		return
 	}
 	fmt.Println("OK")
@@ -68,9 +69,9 @@ func runTestCommand() {
 
 	err := docker.RunComposeCommand(args...)
 	if err != nil {
-		fmt.Printf("Tests reported errors: %v\n", err)
+		utils.PrintError(fmt.Sprintf("Tests reported errors: %v", err))
 	} else {
-		fmt.Println("Tests completed successfully!")
+		utils.PrintSuccess("Tests completed successfully!")
 	}
 }
 

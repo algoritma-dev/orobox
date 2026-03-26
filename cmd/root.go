@@ -4,6 +4,7 @@ package cmd
 import (
 	"fmt"
 	"github.com/algoritma-dev/orobox/internal/config"
+	"github.com/algoritma-dev/orobox/internal/utils"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -22,7 +23,7 @@ var rootCmd = &cobra.Command{
 	Version: Version,
 	PersistentPreRun: func(cmd *cobra.Command, _ []string) {
 		if ConfigError != nil && cmd.Name() != "init" {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", ConfigError)
+			utils.PrintError(ConfigError.Error())
 			os.Exit(1)
 		}
 	},
@@ -71,8 +72,8 @@ func initConfig() {
 		}
 
 		if ConfigError == nil {
-			fmt.Fprintln(os.Stderr, "Using config file:", configFile)
-			fmt.Fprintln(os.Stderr, "Using box folder:", config.GetInternalDir())
+			utils.PrintInfo("Using config file: " + configFile)
+			utils.PrintInfo("Using box folder: " + config.GetInternalDir())
 		}
 	}
 }

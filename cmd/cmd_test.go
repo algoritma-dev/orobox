@@ -27,13 +27,19 @@ func init() {
 
 func TestUpCommand(t *testing.T) {
 	oldRun := docker.RunComposeCommand
-	defer func() { docker.RunComposeCommand = oldRun }()
+	oldRunSilently := docker.RunComposeCommandSilently
+	defer func() {
+		docker.RunComposeCommand = oldRun
+		docker.RunComposeCommandSilently = oldRunSilently
+	}()
 
 	var calls [][]string
-	docker.RunComposeCommand = func(args ...string) error {
+	mockRun := func(args ...string) error {
 		calls = append(calls, args)
 		return nil
 	}
+	docker.RunComposeCommand = mockRun
+	docker.RunComposeCommandSilently = mockRun
 
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
@@ -60,11 +66,11 @@ func TestUpCommand(t *testing.T) {
 }
 
 func TestDownCommand(t *testing.T) {
-	oldRun := docker.RunComposeCommand
-	defer func() { docker.RunComposeCommand = oldRun }()
+	oldRun := docker.RunComposeCommandSilently
+	defer func() { docker.RunComposeCommandSilently = oldRun }()
 
 	var capturedArgs []string
-	docker.RunComposeCommand = func(args ...string) error {
+	docker.RunComposeCommandSilently = func(args ...string) error {
 		capturedArgs = args
 		return nil
 	}
@@ -75,17 +81,21 @@ func TestDownCommand(t *testing.T) {
 		t.Fatalf("rootCmd.Execute() failed: %v", err)
 	}
 
+	if len(capturedArgs) == 0 {
+		t.Fatal("Expected call to RunComposeCommandSilently, got 0")
+	}
+
 	if capturedArgs[0] != "down" {
 		t.Errorf("Expected down command, got %v", capturedArgs)
 	}
 }
 
 func TestCleanCommand(t *testing.T) {
-	oldRun := docker.RunComposeCommand
-	defer func() { docker.RunComposeCommand = oldRun }()
+	oldRun := docker.RunComposeCommandSilently
+	defer func() { docker.RunComposeCommandSilently = oldRun }()
 
 	var capturedArgs []string
-	docker.RunComposeCommand = func(args ...string) error {
+	docker.RunComposeCommandSilently = func(args ...string) error {
 		capturedArgs = args
 		return nil
 	}
@@ -96,6 +106,10 @@ func TestCleanCommand(t *testing.T) {
 		t.Fatalf("rootCmd.Execute() failed: %v", err)
 	}
 
+	if len(capturedArgs) == 0 {
+		t.Fatal("Expected call to RunComposeCommandSilently, got 0")
+	}
+
 	// clean calls down -v --remove-orphans
 	if capturedArgs[0] != "down" || !contains(capturedArgs, "-v") {
 		t.Errorf("Expected down -v, got %v", capturedArgs)
@@ -104,16 +118,22 @@ func TestCleanCommand(t *testing.T) {
 
 func TestTestCommand(t *testing.T) {
 	oldRun := docker.RunComposeCommand
-	defer func() { docker.RunComposeCommand = oldRun }()
+	oldRunSilently := docker.RunComposeCommandSilently
+	defer func() {
+		docker.RunComposeCommand = oldRun
+		docker.RunComposeCommandSilently = oldRunSilently
+	}()
 
 	oldRunWithOutput := docker.RunComposeCommandWithOutput
 	defer func() { docker.RunComposeCommandWithOutput = oldRunWithOutput }()
 
 	var calls [][]string
-	docker.RunComposeCommand = func(args ...string) error {
+	mockRun := func(args ...string) error {
 		calls = append(calls, args)
 		return nil
 	}
+	docker.RunComposeCommand = mockRun
+	docker.RunComposeCommandSilently = mockRun
 
 	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
 		return []byte("OK"), nil
@@ -267,16 +287,22 @@ func TestLogsCommand(t *testing.T) {
 
 func TestTestCommandBundle(t *testing.T) {
 	oldRun := docker.RunComposeCommand
-	defer func() { docker.RunComposeCommand = oldRun }()
+	oldRunSilently := docker.RunComposeCommandSilently
+	defer func() {
+		docker.RunComposeCommand = oldRun
+		docker.RunComposeCommandSilently = oldRunSilently
+	}()
 
 	oldRunWithOutput := docker.RunComposeCommandWithOutput
 	defer func() { docker.RunComposeCommandWithOutput = oldRunWithOutput }()
 
 	var calls [][]string
-	docker.RunComposeCommand = func(args ...string) error {
+	mockRun := func(args ...string) error {
 		calls = append(calls, args)
 		return nil
 	}
+	docker.RunComposeCommand = mockRun
+	docker.RunComposeCommandSilently = mockRun
 
 	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
 		return []byte("OK"), nil
@@ -320,16 +346,22 @@ func contains(slice []string, item string) bool {
 
 func TestTestInitCommand(t *testing.T) {
 	oldRun := docker.RunComposeCommand
-	defer func() { docker.RunComposeCommand = oldRun }()
+	oldRunSilently := docker.RunComposeCommandSilently
+	defer func() {
+		docker.RunComposeCommand = oldRun
+		docker.RunComposeCommandSilently = oldRunSilently
+	}()
 
 	oldRunWithOutput := docker.RunComposeCommandWithOutput
 	defer func() { docker.RunComposeCommandWithOutput = oldRunWithOutput }()
 
 	var calls [][]string
-	docker.RunComposeCommand = func(args ...string) error {
+	mockRun := func(args ...string) error {
 		calls = append(calls, args)
 		return nil
 	}
+	docker.RunComposeCommand = mockRun
+	docker.RunComposeCommandSilently = mockRun
 
 	// Simula ambiente NON inizializzato per evitare prompt
 	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {

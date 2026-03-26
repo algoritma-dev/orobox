@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/algoritma-dev/orobox/internal/utils"
+
 	"github.com/spf13/cobra"
 )
 
@@ -30,8 +32,8 @@ var selfUpdateCmd = &cobra.Command{
 	Use:   "self-update",
 	Short: "Update orobox to the latest version",
 	RunE: func(_ *cobra.Command, _ []string) error {
-		fmt.Printf("Current version: %s\n", Version)
-		fmt.Println("Checking for updates...")
+		utils.PrintInfo(fmt.Sprintf("Current version: %s", Version))
+		utils.PrintInfo("Checking for updates...")
 
 		latest, err := getLatestRelease()
 		if err != nil {
@@ -39,23 +41,23 @@ var selfUpdateCmd = &cobra.Command{
 		}
 
 		if latest.TagName == Version {
-			fmt.Println("You are already using the latest version.")
+			utils.PrintSuccess("You are already using the latest version.")
 			return nil
 		}
 
-		fmt.Printf("New version available: %s\n", latest.TagName)
+		utils.PrintSuccess(fmt.Sprintf("New version available: %s", latest.TagName))
 
 		assetURL, assetName := findBestAsset(latest)
 		if assetURL == "" {
 			return fmt.Errorf("no suitable binary found for %s/%s in release %s", runtime.GOOS, runtime.GOARCH, latest.TagName)
 		}
 
-		fmt.Printf("Downloading %s...\n", assetName)
+		utils.PrintInfo(fmt.Sprintf("Downloading %s...", assetName))
 		if err := applyUpdate(assetURL); err != nil {
 			return fmt.Errorf("failed to apply update: %w", err)
 		}
 
-		fmt.Printf("Successfully updated to %s\n", latest.TagName)
+		utils.PrintSuccess(fmt.Sprintf("Successfully updated to %s", latest.TagName))
 		return nil
 	},
 }

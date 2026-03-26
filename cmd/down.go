@@ -4,6 +4,7 @@ package cmd
 import (
 	"fmt"
 	"github.com/algoritma-dev/orobox/internal/docker"
+	"github.com/algoritma-dev/orobox/internal/utils"
 
 	"github.com/spf13/cobra"
 )
@@ -13,11 +14,11 @@ var downCmd = &cobra.Command{
 	Short: "Shut down the environment",
 	Run: func(_ *cobra.Command, _ []string) {
 		docker.EnsureDockerCompose()
-		if err := docker.RunComposeCommand("down"); err != nil {
-			fmt.Printf("Shut down failed: %v\n", err)
+		if err := docker.RunComposeCommandSilently("down"); err != nil {
+			utils.PrintError(fmt.Sprintf("Shut down failed: %v", err))
 			return
 		}
-		fmt.Println("Environment shut down.")
+		utils.PrintSuccess("Environment shut down.")
 	},
 }
 

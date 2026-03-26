@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/algoritma-dev/orobox/internal/docker"
+	"github.com/algoritma-dev/orobox/internal/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -46,14 +47,14 @@ var logsCmd = &cobra.Command{
 		}
 
 		if len(services) == 0 {
-			fmt.Println("Please specify at least one log type: --nginx, --php, --app, --consumer, --cron, or --ws")
+			utils.PrintWarning("Please specify at least one log type: --nginx, --php, --app, --consumer, --cron, or --ws")
 			_ = cmd.Help()
 			return
 		}
 
 		args := append([]string{"logs", "-f"}, services...)
 		if err := docker.RunComposeCommand(args...); err != nil {
-			fmt.Printf("Error viewing logs: %v\n", err)
+			utils.PrintError(fmt.Sprintf("Error viewing logs: %v", err))
 		}
 
 		// Reset flags for subsequent calls (important for tests)

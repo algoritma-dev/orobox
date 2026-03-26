@@ -7,9 +7,43 @@ import (
 	"strings"
 )
 
+const (
+	colorReset  = "\033[0m"
+	colorRed    = "\033[31m"
+	colorGreen  = "\033[32m"
+	colorYellow = "\033[33m"
+	colorBlue   = "\033[34m"
+	colorCyan   = "\033[36m"
+)
+
+// PrintSuccess prints a success message in green.
+func PrintSuccess(message string) {
+	fmt.Printf("%s✔ %s%s\n", colorGreen, message, colorReset)
+}
+
+// PrintError prints an error message in red.
+func PrintError(message string) {
+	fmt.Printf("%s✘ %s%s\n", colorRed, message, colorReset)
+}
+
+// PrintWarning prints a warning message in yellow.
+func PrintWarning(message string) {
+	fmt.Printf("%s⚠ %s%s\n", colorYellow, message, colorReset)
+}
+
+// PrintInfo prints an informational message in blue.
+func PrintInfo(message string) {
+	fmt.Printf("%sℹ %s%s\n", colorBlue, message, colorReset)
+}
+
+// PrintTitle prints a title message in cyan.
+func PrintTitle(message string) {
+	fmt.Printf("\n%s%s%s\n", colorCyan, message, colorReset)
+}
+
 // AskQuestion asks a question to the user and returns the answer or a default value.
 func AskQuestion(reader *bufio.Reader, question string, defaultValue string) string {
-	fmt.Printf("%s [%s]: ", question, defaultValue)
+	fmt.Printf("%s%s%s [%s]: ", colorCyan, question, colorReset, defaultValue)
 	input, _ := reader.ReadString('\n')
 	input = strings.TrimSpace(input)
 	if input == "" {
@@ -24,7 +58,7 @@ func AskYesNo(reader *bufio.Reader, question string, defaultValue bool) bool {
 	if !defaultValue {
 		defaultStr = "n"
 	}
-	fmt.Printf("%s (y/n) [%s]: ", question, defaultStr)
+	fmt.Printf("%s%s (y/n)%s [%s]: ", colorCyan, question, colorReset, defaultStr)
 	input, _ := reader.ReadString('\n')
 	input = strings.TrimSpace(strings.ToLower(input))
 	if input == "" {
@@ -35,7 +69,7 @@ func AskYesNo(reader *bufio.Reader, question string, defaultValue bool) bool {
 
 // AskSelection asks a multiple choice question to the user and returns the selected value.
 func AskSelection(reader *bufio.Reader, question string, options []string, defaultValue string) string {
-	fmt.Printf("%s\n", question)
+	fmt.Printf("%s%s%s\n", colorCyan, question, colorReset)
 	for i, option := range options {
 		fmt.Printf("  [%d] %s\n", i+1, option)
 	}

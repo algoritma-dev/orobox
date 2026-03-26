@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -58,9 +59,9 @@ var initCmd = &cobra.Command{
 		dockerfileIsChanged := docker.EnsureDockerCompose()
 
 		if dockerfileIsChanged {
-			fmt.Println("Building Docker images...")
-			if err := docker.RunComposeCommand("build"); err != nil {
-				fmt.Printf("Build failed: %v\n", err)
+			utils.PrintInfo("Building Docker images...")
+			if err := docker.RunComposeCommandSilently("build"); err != nil {
+				utils.PrintError(fmt.Sprintf("Build failed: %v", err))
 				return
 			}
 		}
@@ -69,49 +70,50 @@ var initCmd = &cobra.Command{
 			return
 		}
 
-		fmt.Printf("Environment initialized successfully!\n")
+		utils.PrintSuccess("Environment initialized successfully!")
 	},
 }
 
 func performInstallation() bool {
 	var conf config.OroConfig
 	if err := viper.Unmarshal(&conf); err != nil {
-		fmt.Printf("Error reading config: %v\n", err)
+		utils.PrintError(fmt.Sprintf("Error reading config: %v", err))
 		return false
 	}
 
 	// 1. Download sources (git clone)
 	if conf.Type == config.InstallTypeProject {
 		if _, err := os.Stat("composer.json"); os.IsNotExist(err) {
-			fmt.Printf("Cloning OroCommerce %s...\n", conf.OroVersion)
+			utils.PrintInfo(fmt.Sprintf("Cloning OroCommerce %s...", conf.OroVersion))
 			// Use a temporary directory to clone, then move to avoid "directory not empty" errors (like .orobox.yaml)
 			tmpDir, err := os.MkdirTemp("", "oro-app-*")
 			if err != nil {
-				fmt.Printf("Temp dir creation failed: %v\n", err)
+				utils.PrintError(fmt.Sprintf("Temp dir creation failed: %v", err))
 				return false
 			}
 			defer os.RemoveAll(tmpDir)
 
 			cloneCmd := exec.Command("git", "clone", "-b", conf.OroVersion, "https://github.com/oroinc/orocommerce-application.git", tmpDir)
-			cloneCmd.Stdout = os.Stdout
-			cloneCmd.Stderr = os.Stderr
+			// Hidden output for git clone as well, unless error
+			var stderr bytes.Buffer
+			cloneCmd.Stderr = &stderr
 			if err := cloneCmd.Run(); err != nil {
-				fmt.Printf("Clone failed: %v\n", err)
+				utils.PrintError(fmt.Sprintf("Clone failed: %v\n%s", err, stderr.String()))
 				return false
 			}
 
-			fmt.Println("Extracting OroCommerce sources...")
+			utils.PrintInfo("Extracting OroCommerce sources...")
 			// Use cp -r to merge directories and copy hidden files
 			cpCmd := exec.Command("cp", "-r", tmpDir+"/.", ".")
 			if err := cpCmd.Run(); err != nil {
-				fmt.Printf("Extract sources failed: %v\n", err)
+				utils.PrintError(fmt.Sprintf("Extract sources failed: %v", err))
 				return false
 			}
 		}
 	}
 
 	// 2. Ensure environment is ready
-	fmt.Println("Starting services for installation...")
+	utils.PrintInfo("Starting services for installation...")
 	services := []string{"up", "-d", "db"}
 	if conf.Services.Redis {
 		services = append(services, "redis")
@@ -125,46 +127,46 @@ func performInstallation() bool {
 	if conf.Services.Mailpit {
 		services = append(services, "mail")
 	}
-	if err := docker.RunComposeCommand(services...); err != nil {
-		fmt.Printf("Failed to start services: %v\n", err)
+	if err := docker.RunComposeCommandSilently(services...); err != nil {
+		utils.PrintError(fmt.Sprintf("Failed to start services: %v", err))
 		return false
 	}
 
 	// Run volume-init to fix permissions before any composer/git command
-	fmt.Println("Ensuring permissions...")
-	if err := docker.RunComposeCommand("run", "--rm", "volume-init"); err != nil {
-		fmt.Printf("Warning: volume-init failed: %v\n", err)
+	utils.PrintInfo("Ensuring permissions...")
+	if err := docker.RunComposeCommandSilently("run", "--rm", "volume-init"); err != nil {
+		utils.PrintWarning(fmt.Sprintf("volume-init failed: %v", err))
 	}
 
 	// 3. For bundle or demo, we might need to clone into the volume if not project
 	if conf.Type != config.InstallTypeProject {
-		fmt.Println("Preparing OroCommerce in volume...")
+		utils.PrintInfo("Preparing OroCommerce in volume...")
 		// Always try to clone if composer.json is missing in the container
 		checkCmd := []string{"run", "--rm", "application", "ls", "composer.json"}
-		if err := docker.RunComposeCommand(checkCmd...); err != nil {
-			fmt.Println("Downloading OroCommerce into volume...")
+		if err := docker.RunComposeCommandSilently(checkCmd...); err != nil {
+			utils.PrintInfo("Downloading OroCommerce into volume...")
 			// Use a temporary directory to clone, then move to avoid "directory not empty" errors if bundle is mounted
 			cloneCmd := []string{"run", "--rm", "application", "bash", "-c",
 				fmt.Sprintf("git clone -b %s --depth 1 https://github.com/oroinc/orocommerce-application /tmp/oro-app && cp -r /tmp/oro-app/. . && rm -rf /tmp/oro-app && composer install", conf.OroVersion)}
-			if err := docker.RunComposeCommand(cloneCmd...); err != nil {
-				fmt.Printf("Download/Install into volume failed: %v\n", err)
+			if err := docker.RunComposeCommandSilently(cloneCmd...); err != nil {
+				utils.PrintError(fmt.Sprintf("Download/Install into volume failed: %v", err))
 				return false
 			}
 		}
 	} else {
 		// Project mode: just composer install
-		fmt.Println("Running composer install...")
-		if err := docker.RunComposeCommand("run", "--rm", "application", "composer", "install"); err != nil {
-			fmt.Printf("Composer install failed: %v\n", err)
+		utils.PrintInfo("Running composer install...")
+		if err := docker.RunComposeCommandSilently("run", "--rm", "application", "composer", "install"); err != nil {
+			utils.PrintError(fmt.Sprintf("Composer install failed: %v", err))
 			return false
 		}
 	}
 
 	// 4. Run Oro installation
-	fmt.Println("Running OroCommerce installation (this may take several minutes)...")
+	utils.PrintInfo("Running OroCommerce installation (this may take several minutes)...")
 	// Use the 'install' service from docker-compose.setup.yml
-	if err := docker.RunComposeCommand("run", "--rm", "install"); err != nil {
-		fmt.Printf("OroCommerce installation failed: %v\n", err)
+	if err := docker.RunComposeCommandSilently("run", "--rm", "install"); err != nil {
+		utils.PrintError(fmt.Sprintf("OroCommerce installation failed: %v", err))
 		return false
 	}
 
@@ -187,13 +189,13 @@ func generateConfig() {
 		if validateConfig() {
 			return
 		}
-		fmt.Println("Config file .orobox.yaml is invalid. Let's recreate it.")
+		utils.PrintWarning("Config file .orobox.yaml is invalid. Let's recreate it.")
 	} else if !errors.Is(err, os.ErrNotExist) {
-		fmt.Printf("Warning checking %s: %v\n", configPath, err)
+		utils.PrintWarning(fmt.Sprintf("Warning checking %s: %v", configPath, err))
 		return
 	}
 
-	fmt.Println("Config file .orobox.yaml not found or invalid. Let's create it interactively.")
+	utils.PrintTitle("Config file .orobox.yaml not found or invalid. Let's create it interactively.")
 	reader := bufio.NewReader(stdin)
 
 	typeOfInstall := utils.AskSelection(reader, "Installation type", []string{config.InstallTypeBundle, config.InstallTypeProject, config.InstallTypeDemo}, installType)
@@ -206,7 +208,7 @@ func generateConfig() {
 			var found bool
 			className, namespace, found = config.FindPhpClass(bundleClass)
 			if !found {
-				fmt.Printf("Warning: PHP class for %s not found in current directory or subdirectories.\n", bundleClass)
+				utils.PrintWarning(fmt.Sprintf("PHP class for %s not found in current directory or subdirectories.", bundleClass))
 				// Manual parsing if not found
 				lastSlash := strings.LastIndex(bundleClass, "\\")
 				if lastSlash != -1 {
@@ -217,7 +219,7 @@ func generateConfig() {
 					namespace = ""
 				}
 			} else {
-				fmt.Printf("Found class %s in namespace %s\n", className, namespace)
+				utils.PrintInfo(fmt.Sprintf("Found class %s in namespace %s", className, namespace))
 			}
 		}
 	}
@@ -262,13 +264,13 @@ func generateConfig() {
 
 	data, err := yamlv3.Marshal(&conf)
 	if err != nil {
-		fmt.Printf("Warning: %s\n", err)
+		utils.PrintWarning(fmt.Sprintf("Yaml marshal error: %s", err))
 		return
 	}
 
 	err = os.WriteFile(configPath, data, 0644)
 	if err != nil {
-		fmt.Printf("Warning: %s\n", err)
+		utils.PrintWarning(fmt.Sprintf("Write config error: %s", err))
 	}
 }
 
@@ -280,11 +282,11 @@ func validateConfig() bool {
 	}
 	c, err := config.ParseConfig(data)
 	if err != nil {
-		fmt.Printf("Validation error: %v\n", err)
+		utils.PrintError(fmt.Sprintf("Validation error: %v", err))
 		return false
 	}
 	if err := c.Validate(); err != nil {
-		fmt.Printf("Validation error: %v\n", err)
+		utils.PrintError(fmt.Sprintf("Validation error: %v", err))
 		return false
 	}
 	return true

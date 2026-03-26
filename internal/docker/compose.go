@@ -13,6 +13,7 @@ import (
 	"text/template"
 
 	"github.com/algoritma-dev/orobox/internal/config"
+	"github.com/algoritma-dev/orobox/internal/utils"
 
 	"github.com/spf13/viper"
 )
@@ -258,8 +259,34 @@ func GetBaseComposeArgs() []string {
 	return args
 }
 
-// RunComposeCommand runs docker compose with the provided arguments.
-// It is a variable to allow overriding in tests.
+// RunComposeCommandSilently runs docker compose with the provided arguments
+// and captures its output, showing it only if an error occurs.
+var RunComposeCommandSilently = func(args ...string) error {
+	composeCmd := GetComposeCommand()
+
+	argsToRun := append(composeCmd[1:], GetBaseComposeArgs()...)
+	argsToRun = append(argsToRun, args...)
+
+	cmd := exec.Command(composeCmd[0], argsToRun...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	cmd.Stdin = os.Stdin
+
+	err := cmd.Run()
+	if err != nil {
+		if stderr.Len() > 0 {
+			utils.PrintError(stderr.String())
+		} else if stdout.Len() > 0 {
+			utils.PrintError(stdout.String())
+		}
+		return err
+	}
+	return nil
+}
+
+// RunComposeCommand runs docker compose with the provided arguments
+// and connects to system stdout/stderr.
 var RunComposeCommand = func(args ...string) error {
 	composeCmd := GetComposeCommand()
 

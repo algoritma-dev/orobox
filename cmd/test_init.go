@@ -21,11 +21,11 @@ var testInitCmd = &cobra.Command{
 
 		var conf config.OroConfig
 		if err := viper.Unmarshal(&conf); err != nil {
-			fmt.Printf("Error reading config: %v\n", err)
+			utils.PrintError(fmt.Sprintf("Error reading config: %v", err))
 			return
 		}
 
-		fmt.Println("Starting services for test environment...")
+		utils.PrintInfo("Starting services for test environment...")
 		services := []string{"up", "-d", "db", "application_test"}
 		if conf.Services.Redis {
 			services = append(services, "redis")
@@ -37,8 +37,8 @@ var testInitCmd = &cobra.Command{
 			services = append(services, "elasticsearch")
 		}
 
-		if err := docker.RunComposeCommand(services...); err != nil {
-			fmt.Printf("Failed to start services: %v\n", err)
+		if err := docker.RunComposeCommandSilently(services...); err != nil {
+			utils.PrintError(fmt.Sprintf("Failed to start services: %v", err))
 			return
 		}
 
@@ -47,12 +47,12 @@ var testInitCmd = &cobra.Command{
 		if _, err := docker.RunComposeCommandWithOutput(checkArgs...); err == nil {
 			reader := bufio.NewReader(os.Stdin)
 			if !utils.AskYesNo(reader, "Test environment is already initialized. Do you want to reset it?", false) {
-				fmt.Println("Aborted.")
+				utils.PrintInfo("Aborted.")
 				return
 			}
 		}
 
-		fmt.Println("Resetting test database...")
+		utils.PrintInfo("Resetting test database...")
 		// Use psql via db container to drop database more reliably (can terminate active connections)
 		dbUser := viper.GetString("db_user")
 		if dbUser == "" {
@@ -66,34 +66,34 @@ var testInitCmd = &cobra.Command{
 		// Try psql first with FORCE (requires Postgres 13+)
 		dropSQL := "DROP DATABASE IF EXISTS oro_db_test WITH (FORCE);"
 		dropArgs := []string{"exec", "-T", "db", "psql", "-U", dbUser, "-d", "postgres", "-c", dropSQL}
-		if err := docker.RunComposeCommand(dropArgs...); err != nil {
-			fmt.Printf("Warning: failed to drop test database using psql: %v. Trying via doctrine...\n", err)
+		if err := docker.RunComposeCommandSilently(dropArgs...); err != nil {
+			utils.PrintWarning(fmt.Sprintf("failed to drop test database using psql: %v. Trying via doctrine...", err))
 			dropCmd := []string{"exec", "-T", "application_test", "php", "bin/console", "doctrine:database:drop", "--force", "--env=test", "--if-exists"}
-			if err := docker.RunComposeCommand(dropCmd...); err != nil {
-				fmt.Printf("Warning: failed to drop test database: %v\n", err)
+			if err := docker.RunComposeCommandSilently(dropCmd...); err != nil {
+				utils.PrintWarning(fmt.Sprintf("failed to drop test database: %v", err))
 			}
 		}
 
 		createCmd := []string{"exec", "-T", "application_test", "php", "bin/console", "doctrine:database:create", "--env=test"}
-		if err := docker.RunComposeCommand(createCmd...); err != nil {
-			fmt.Printf("Error: failed to create test database: %v\n", err)
+		if err := docker.RunComposeCommandSilently(createCmd...); err != nil {
+			utils.PrintError(fmt.Sprintf("failed to create test database: %v", err))
 			return
 		}
 
-		fmt.Println("Clearing cache for test environment...")
+		utils.PrintInfo("Clearing cache for test environment...")
 		clearCacheCmd := []string{"exec", "-T", "application_test", "bash", "-c", "rm -rf var/cache/test"}
-		if err := docker.RunComposeCommand(clearCacheCmd...); err != nil {
-			fmt.Printf("Warning: failed to clear cache: %v\n", err)
+		if err := docker.RunComposeCommandSilently(clearCacheCmd...); err != nil {
+			utils.PrintWarning(fmt.Sprintf("failed to clear cache: %v", err))
 		}
 
-		fmt.Println("Running Oro installation for test environment (this may take several minutes)...")
+		utils.PrintInfo("Running Oro installation for test environment (this may take several minutes)...")
 		installCmd := []string{"exec", "-T", "application_test", "php", "bin/console", "oro:install", "--no-interaction", "--env=test", "--skip-translations"}
-		if err := docker.RunComposeCommand(installCmd...); err != nil {
-			fmt.Printf("Error: test environment installation failed: %v\n", err)
+		if err := docker.RunComposeCommandSilently(installCmd...); err != nil {
+			utils.PrintError(fmt.Sprintf("test environment installation failed: %v", err))
 			return
 		}
 
-		fmt.Println("Test environment initialized successfully!")
+		utils.PrintSuccess("Test environment initialized successfully!")
 	},
 }
 
