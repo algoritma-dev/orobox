@@ -267,7 +267,9 @@ var RunComposeCommand = func(args ...string) error {
 	argsToRun = append(argsToRun, args...)
 
 	cmd := exec.Command(composeCmd[0], argsToRun...)
-	cmd.Stdin = os.Stdin
+	if os.Getenv("OROBOX_NON_INTERACTIVE") != "1" {
+		cmd.Stdin = os.Stdin
+	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()

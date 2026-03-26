@@ -1,0 +1,85 @@
+name: Installation Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test-installation:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        install-type: [bundle, project, demo]
+    
+    name: Test ${{ matrix.install-type }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 2048
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'false'
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Install mkcert
+        run: |
+          sudo apt-get update && sudo apt-get install libnss3-tools -y
+          curl -L -o mkcert https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-linux-amd64
+          chmod +x mkcert
+          sudo mv mkcert /usr/local/bin/mkcert
+          sudo mkcert -install
+
+      - name: Build Orobox
+        run: go build -o orobox main.go
+
+      - name: Create test directory
+        run: mkdir -p test-${{ matrix.install-type }}
+
+      - name: Run orobox init (${{ matrix.install-type }})
+        run: |
+          if [ "${{ matrix.install-type }}" == "bundle" ]; then
+            ./orobox init -t bundle -n "My\Test\Bundle" -i -b test-bundle
+          elif [ "${{ matrix.install-type }}" == "project" ]; then
+            ./orobox init -t project -i -v 6.1 -b test-project
+          else
+            ./orobox init -t demo -i -b test-demo
+          fi
+
+      - name: Verify installation
+        run: |
+          TARGET_DIR="test-${{ matrix.install-type }}"
+          if [ ! -f "$TARGET_DIR/.orobox.yaml" ]; then
+            echo ".orobox.yaml not found!"
+            exit 1
+          fi
+          echo "Checking Docker containers..."
+          docker ps -a
+          echo "Installation of ${{ matrix.install-type }} completed successfully!"
+
+      - name: Debug on failure
+        if: failure()
+        run: |
+          echo "Installation failed. Checking logs..."
+          docker ps -a
+          for container in $(docker ps -a -q); do
+            echo "--------------------------------------------------------"
+            echo "Logs for container: $(docker inspect --format='{{.Name}}' $container)"
+            docker logs $container --tail 200
+            echo "--------------------------------------------------------"
+          done
