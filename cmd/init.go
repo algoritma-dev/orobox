@@ -51,14 +51,11 @@ var initCmd = &cobra.Command{
 
 		if nonInteractive {
 			os.Setenv("OROBOX_NON_INTERACTIVE", "1")
-			viper.Set("type", installType)
-			viper.Set("oro_version", oroVersion)
 		}
 
 		generateConfig()
 
 		// Reload config after generation
-		viper.SetConfigFile(".orobox.yaml")
 		_ = viper.ReadInConfig()
 
 		certificates.InstallSslCertificates()
