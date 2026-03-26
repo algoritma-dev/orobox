@@ -95,14 +95,15 @@ services:
 
   volume-init:
     <<: *oro-app
+    user: root
     command:
       - bash
       - -c
       - |
         echo "Initializing volumes and permissions for ${ORO_USER_RUNTIME:-www-data}..."
         mkdir -p bin config public src templates translations var assets var/cache var/logs var/data public/media
-        [ -n "$ORO_USER_RUNTIME" ] && chown $ORO_USER_RUNTIME . bin config public src templates translations var assets var/cache var/logs var/data public/media 2>/dev/null || true
-        chown -R ${ORO_USER_RUNTIME:-www-data} bin config public src templates translations var assets 2>/dev/null || true
+        chown -R ${ORO_USER_RUNTIME:-www-data} . bin config public src templates translations var assets var/cache var/logs var/data public/media 2>/dev/null || true
+        chmod -R 777 var/cache var/logs var/data 2>/dev/null || true
         true
     environment:
       ORO_XDEBUG_ENABLED: "false"

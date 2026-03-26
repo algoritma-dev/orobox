@@ -53,7 +53,7 @@ var logsCmd = &cobra.Command{
 		}
 
 		args := append([]string{"logs", "-f"}, services...)
-		if err := docker.RunComposeCommand(args...); err != nil {
+		if err := docker.RunComposeCommand("", args...); err != nil {
 			utils.PrintError(fmt.Sprintf("Error viewing logs: %v", err))
 		}
 

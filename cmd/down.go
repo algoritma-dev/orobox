@@ -14,7 +14,7 @@ var downCmd = &cobra.Command{
 	Short: "Shut down the environment",
 	Run: func(_ *cobra.Command, _ []string) {
 		docker.EnsureDockerCompose()
-		if err := docker.RunComposeCommandSilently("down"); err != nil {
+		if err := docker.RunComposeCommandSilently("Stopping containers...", "down"); err != nil {
 			utils.PrintError(fmt.Sprintf("Shut down failed: %v", err))
 			return
 		}

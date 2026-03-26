@@ -59,8 +59,7 @@ var initCmd = &cobra.Command{
 		dockerfileIsChanged := docker.EnsureDockerCompose()
 
 		if dockerfileIsChanged {
-			utils.PrintInfo("Building Docker images...")
-			if err := docker.RunComposeCommandSilently("build"); err != nil {
+			if err := docker.RunComposeCommandSilently("Building Docker images...", "build"); err != nil {
 				utils.PrintError(fmt.Sprintf("Build failed: %v", err))
 				return
 			}
@@ -113,7 +112,6 @@ func performInstallation() bool {
 	}
 
 	// 2. Ensure environment is ready
-	utils.PrintInfo("Starting services for installation...")
 	services := []string{"up", "-d", "db"}
 	if conf.Services.Redis {
 		services = append(services, "redis")
@@ -127,45 +125,43 @@ func performInstallation() bool {
 	if conf.Services.Mailpit {
 		services = append(services, "mail")
 	}
-	if err := docker.RunComposeCommandSilently(services...); err != nil {
+	if err := docker.RunComposeCommandSilently("Starting services for installation...", services...); err != nil {
 		utils.PrintError(fmt.Sprintf("Failed to start services: %v", err))
 		return false
 	}
 
 	// Run volume-init to fix permissions before any composer/git command
-	utils.PrintInfo("Ensuring permissions...")
-	if err := docker.RunComposeCommandSilently("run", "--rm", "volume-init"); err != nil {
+	if err := docker.RunComposeCommandSilently("Ensuring permissions...", "run", "--rm", "-T", "volume-init"); err != nil {
 		utils.PrintWarning(fmt.Sprintf("volume-init failed: %v", err))
 	}
 
 	// 3. For bundle or demo, we might need to clone into the volume if not project
 	if conf.Type != config.InstallTypeProject {
-		utils.PrintInfo("Preparing OroCommerce in volume...")
 		// Always try to clone if composer.json is missing in the container
-		checkCmd := []string{"run", "--rm", "application", "ls", "composer.json"}
-		if err := docker.RunComposeCommandSilently(checkCmd...); err != nil {
-			utils.PrintInfo("Downloading OroCommerce into volume...")
+		checkCmd := []string{"run", "--rm", "-T", "application", "test", "-f", "composer.json"}
+		utils.StartLoader("Checking for OroCommerce installation...")
+		_, err := docker.RunComposeCommandWithOutput(checkCmd...)
+		utils.StopLoader()
+		if err != nil {
 			// Use a temporary directory to clone, then move to avoid "directory not empty" errors if bundle is mounted
-			cloneCmd := []string{"run", "--rm", "application", "bash", "-c",
+			cloneCmd := []string{"run", "--rm", "-T", "application", "bash", "-c",
 				fmt.Sprintf("git clone -b %s --depth 1 https://github.com/oroinc/orocommerce-application /tmp/oro-app && cp -r /tmp/oro-app/. . && rm -rf /tmp/oro-app && composer install", conf.OroVersion)}
-			if err := docker.RunComposeCommandSilently(cloneCmd...); err != nil {
+			if err := docker.RunComposeCommandSilently("Downloading and installing OroCommerce into volume...", cloneCmd...); err != nil {
 				utils.PrintError(fmt.Sprintf("Download/Install into volume failed: %v", err))
 				return false
 			}
 		}
 	} else {
 		// Project mode: just composer install
-		utils.PrintInfo("Running composer install...")
-		if err := docker.RunComposeCommandSilently("run", "--rm", "application", "composer", "install"); err != nil {
+		if err := docker.RunComposeCommandSilently("Running composer install...", "run", "--rm", "-T", "application", "composer", "install"); err != nil {
 			utils.PrintError(fmt.Sprintf("Composer install failed: %v", err))
 			return false
 		}
 	}
 
 	// 4. Run Oro installation
-	utils.PrintInfo("Running OroCommerce installation (this may take several minutes)...")
 	// Use the 'install' service from docker-compose.setup.yml
-	if err := docker.RunComposeCommandSilently("run", "--rm", "install"); err != nil {
+	if err := docker.RunComposeCommandSilently("Running OroCommerce installation (this may take several minutes)...", "run", "--rm", "-T", "install"); err != nil {
 		utils.PrintError(fmt.Sprintf("OroCommerce installation failed: %v", err))
 		return false
 	}

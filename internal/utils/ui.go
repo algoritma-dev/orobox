@@ -5,6 +5,14 @@ import (
 	"bufio"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
+)
+
+var (
+	loaderStop chan struct{}
+	loaderWG   sync.WaitGroup
+	loaderMu   sync.Mutex
 )
 
 const (
@@ -103,4 +111,48 @@ func AskSelection(reader *bufio.Reader, question string, options []string, defau
 	}
 
 	return options[idx-1]
+}
+
+// StartLoader starts a spinner loader with a message.
+func StartLoader(message string) {
+	loaderMu.Lock()
+	defer loaderMu.Unlock()
+
+	if loaderStop != nil {
+		return // Loader already running
+	}
+
+	loaderStop = make(chan struct{})
+	stopCh := loaderStop
+	loaderWG.Add(1)
+
+	go func() {
+		defer loaderWG.Done()
+		frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+		i := 0
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-stopCh:
+				fmt.Print("\r\033[K") // Clear the line
+				return
+			case <-ticker.C:
+				fmt.Printf("\r%s%s %s%s", colorCyan, frames[i], message, colorReset)
+				i = (i + 1) % len(frames)
+			}
+		}
+	}()
+}
+
+// StopLoader stops the current spinner loader.
+func StopLoader() {
+	loaderMu.Lock()
+	if loaderStop != nil {
+		close(loaderStop)
+		loaderStop = nil
+	}
+	loaderMu.Unlock()
+	loaderWG.Wait()
 }

@@ -26,6 +26,22 @@ x-templates:
     {{- end}}
 
 services:
+  volume-setup:
+    <<: *oro-app
+    user: root
+    command:
+      - bash
+      - -c
+      - |
+        echo "Initializing volumes and permissions for ${ORO_USER_RUNTIME:-www-data}..."
+        mkdir -p bin config public src templates translations var assets var/cache var/logs var/data public/media
+        chown -R ${ORO_USER_RUNTIME:-www-data} . bin config public src templates translations var assets var/cache var/logs var/data public/media 2>/dev/null || true
+        chmod -R 777 var/cache var/logs var/data 2>/dev/null || true
+        true
+    environment:
+      ORO_XDEBUG_ENABLED: "false"
+    volumes: *volumes-setup
+
   install:
     <<: *oro-app
     command: install ${ORO_INSTALL_OPTIONS}
@@ -34,6 +50,8 @@ services:
       ORO_SAMPLE_DATA: ${ORO_SAMPLE_DATA:-y}
       ORO_XDEBUG_ENABLED: ${ORO_INSTALL_XDEBUG_ENABLED:-false}
     depends_on:
+      "volume-setup":
+        condition: service_completed_successfully
       "gotenberg":
         condition: service_healthy
       {{if .Postgres -}}

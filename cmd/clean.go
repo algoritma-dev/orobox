@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"fmt"
+
 	"github.com/algoritma-dev/orobox/internal/docker"
 	"github.com/algoritma-dev/orobox/internal/utils"
 
@@ -14,8 +15,7 @@ var cleanCmd = &cobra.Command{
 	Short: "Remove all containers and volumes to start fresh",
 	Run: func(_ *cobra.Command, _ []string) {
 		docker.EnsureDockerCompose()
-		utils.PrintInfo("Cleaning up environment (removing containers and volumes)...")
-		if err := docker.RunComposeCommandSilently("down", "-v", "--remove-orphans"); err != nil {
+		if err := docker.RunComposeCommandSilently("Cleaning up containers and volumes...", "down", "-v", "--remove-orphans"); err != nil {
 			utils.PrintError(fmt.Sprintf("Cleanup failed: %v", err))
 			return
 		}

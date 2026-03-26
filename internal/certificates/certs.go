@@ -38,12 +38,6 @@ func InstallSslCertificates() {
 		return
 	}
 
-	fmt.Println("Installing CA certificates...")
-	cmd := exec.Command("mkcert", "-install")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	_ = cmd.Run()
-
 	certsDirs := filepath.Join(config.GetInternalDir(), "certs")
 
 	err = os.MkdirAll(certsDirs, 0755)
@@ -52,6 +46,10 @@ func InstallSslCertificates() {
 		return
 	}
 
+	// 1. Ensure mkcert CA is installed (silent)
+	_ = exec.Command("mkcert", "-install").Run()
+
+	// 2. Generate certificates for each domain if missing
 	for _, domain := range oroConfig.Domains {
 		if !domain.Ssl {
 			continue
@@ -62,7 +60,7 @@ func InstallSslCertificates() {
 
 		if _, err := os.Stat(certFile); err == nil {
 			if _, err := os.Stat(keyFile); err == nil {
-				fmt.Printf("Certificates for %s already exist, skipping...\n", domain.Host)
+				// Certs already exist, skip silently
 				continue
 			}
 		}

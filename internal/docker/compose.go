@@ -244,7 +244,7 @@ func GetBaseComposeArgs() []string {
 	projectName := config.GetProjectName()
 	internalDir := config.GetInternalDir()
 	composeFile := filepath.Join(internalDir, "docker-compose.yml")
-	args := []string{"-p", projectName, "-f", composeFile}
+	args := []string{"-p", projectName, "--project-directory", internalDir, "-f", composeFile}
 
 	// Add setup and test files if they exist
 	setupFile := filepath.Join(internalDir, "docker-compose.setup.yml")
@@ -261,24 +261,37 @@ func GetBaseComposeArgs() []string {
 
 // RunComposeCommandSilently runs docker compose with the provided arguments
 // and captures its output, showing it only if an error occurs.
-var RunComposeCommandSilently = func(args ...string) error {
+// It shows a loader while running.
+var RunComposeCommandSilently = func(message string, args ...string) error {
+	utils.StartLoader(message)
+	defer utils.StopLoader()
+
 	composeCmd := GetComposeCommand()
 
-	argsToRun := append(composeCmd[1:], GetBaseComposeArgs()...)
+	var argsToRun []string
+	argsToRun = append(argsToRun, composeCmd[1:]...)
+
+	// Add --progress quiet if it's 'docker compose' (V2)
+	if len(composeCmd) > 1 && composeCmd[1] == "compose" {
+		argsToRun = append(argsToRun, "--progress", "quiet")
+	}
+
+	argsToRun = append(argsToRun, GetBaseComposeArgs()...)
 	argsToRun = append(argsToRun, args...)
 
 	cmd := exec.Command(composeCmd[0], argsToRun...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	cmd.Stdin = os.Stdin
 
 	err := cmd.Run()
 	if err != nil {
+		utils.StopLoader() // Stop loader before printing error
 		if stderr.Len() > 0 {
-			utils.PrintError(stderr.String())
-		} else if stdout.Len() > 0 {
-			utils.PrintError(stdout.String())
+			fmt.Print(stderr.String())
+		}
+		if stdout.Len() > 0 {
+			fmt.Print(stdout.String())
 		}
 		return err
 	}
@@ -287,7 +300,10 @@ var RunComposeCommandSilently = func(args ...string) error {
 
 // RunComposeCommand runs docker compose with the provided arguments
 // and connects to system stdout/stderr.
-var RunComposeCommand = func(args ...string) error {
+var RunComposeCommand = func(message string, args ...string) error {
+	if message != "" {
+		utils.PrintInfo(message)
+	}
 	composeCmd := GetComposeCommand()
 
 	argsToRun := append(composeCmd[1:], GetBaseComposeArgs()...)
@@ -305,7 +321,15 @@ var RunComposeCommand = func(args ...string) error {
 var RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
 	composeCmd := GetComposeCommand()
 
-	argsToRun := append(composeCmd[1:], GetBaseComposeArgs()...)
+	var argsToRun []string
+	argsToRun = append(argsToRun, composeCmd[1:]...)
+
+	// Add --progress quiet if it's 'docker compose' (V2)
+	if len(composeCmd) > 1 && composeCmd[1] == "compose" {
+		argsToRun = append(argsToRun, "--progress", "quiet")
+	}
+
+	argsToRun = append(argsToRun, GetBaseComposeArgs()...)
 	argsToRun = append(argsToRun, args...)
 
 	cmd := exec.Command(composeCmd[0], argsToRun...)

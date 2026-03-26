@@ -20,21 +20,19 @@ var upCmd = &cobra.Command{
 	Run: func(_ *cobra.Command, _ []string) {
 		dockerfileIsChanged := docker.EnsureDockerCompose()
 		if dockerfileIsChanged {
-			utils.PrintInfo("Configuration changed, rebuilding containers...")
-			if err := docker.RunComposeCommandSilently("build"); err != nil {
+			if err := docker.RunComposeCommandSilently("Rebuilding containers...", "build"); err != nil {
 				utils.PrintError(fmt.Sprintf("Build failed: %v", err))
 				return
 			}
 		}
 
 		if cleanBeforeUp {
-			utils.PrintInfo("Cleaning up environment before starting...")
-			if err := docker.RunComposeCommandSilently("down", "-v", "--remove-orphans"); err != nil {
+			if err := docker.RunComposeCommandSilently("Cleaning up environment...", "down", "-v", "--remove-orphans"); err != nil {
 				utils.PrintWarning(fmt.Sprintf("failed to clean up: %v", err))
 			}
 		}
 
-		if err := docker.RunComposeCommandSilently("up", "-d", "application"); err != nil {
+		if err := docker.RunComposeCommandSilently("Starting containers...", "up", "-d", "application"); err != nil {
 			utils.PrintError(fmt.Sprintf("Startup failed: %v", err))
 			return
 		}

@@ -4,7 +4,25 @@ import (
 	"bufio"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestLoader(t *testing.T) {
+	StartLoader("Testing...")
+
+	done := make(chan bool)
+	go func() {
+		StopLoader()
+		done <- true
+	}()
+
+	select {
+	case <-done:
+		// Success
+	case <-time.After(2 * time.Second):
+		t.Fatal("StopLoader timed out, possible deadlock")
+	}
+}
 
 func TestAskQuestion(t *testing.T) {
 	tests := []struct {
