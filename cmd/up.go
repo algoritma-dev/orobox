@@ -37,11 +37,22 @@ var upCmd = &cobra.Command{
 			return
 		}
 
+		fmt.Println()
 		utils.PrintSuccess("Orobox is up and running!")
 
-		for _, url := range docker.GetApplicationURLs() {
-			fmt.Printf("  - %s\n", url)
-			fmt.Printf("  - %s/admin (admin/admin)\n", url)
+		var urls = docker.GetApplicationURLs()
+
+		utils.PrintTitle("The application is available at:")
+
+		if len(urls) > 0 {
+			fmt.Printf("Backoffice: %s/admin (admin/admin)\n", urls[0])
+			fmt.Println("Storefront:")
+
+			for _, url := range urls {
+				fmt.Printf("  - %s\n", url)
+			}
+		} else {
+			fmt.Println("No application URLs configured. Set at least one domain in your config.")
 		}
 
 		if viper.GetBool("services.mailpit") {

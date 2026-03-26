@@ -75,7 +75,6 @@ func initConfig() {
 
 		if ConfigError == nil {
 			utils.PrintInfo("Using config file: " + configFile)
-			utils.PrintInfo("Using box folder: " + config.GetInternalDir())
 		}
 	}
 }
