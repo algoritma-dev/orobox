@@ -21,7 +21,6 @@ x-templates:
     {{if eq .Type "bundle" -}}
     - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
     {{- end}}
-    - "cache:/var/www/oro/var/cache"
     - "public_storage:/var/www/oro/public/media"
     - "private_storage:/var/www/oro/var/data"
     {{- end}}
