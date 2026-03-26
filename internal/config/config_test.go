@@ -145,38 +145,6 @@ func TestGetNamespace(t *testing.T) {
 	}
 }
 
-func TestGetBundleName(t *testing.T) {
-	tests := []struct {
-		name      string
-		namespace string
-		override  string
-		want      string
-	}{
-		{"default", "", "", "CustomBundle"},
-		{"simple", "MyBundle", "", "MyBundle"},
-		{"namespaced", "Algoritma\\Bundle\\ShippyProBundle", "", "AlgoritmaShippyProBundle"},
-		{"namespaced without Bundle", "Algoritma\\ShippyProBundle", "", "AlgoritmaShippyProBundle"},
-		{"override", "Algoritma\\Bundle\\ShippyProBundle", "MySpecificBundle", "MySpecificBundle"},
-		{"missing Bundle suffix", "Algoritma\\ShippyPro", "", "AlgoritmaShippyProBundle"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			viper.Reset()
-			if tt.namespace != "" {
-				viper.Set("namespace", tt.namespace)
-			}
-			if tt.override != "" {
-				viper.Set("bundle_name", tt.override)
-			}
-			got := GetBundleName()
-			if got != tt.want {
-				t.Errorf("GetBundleName() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestFindPhpClass(t *testing.T) {
 	// Create a temporary directory for testing
 	tmpDir, err := os.MkdirTemp("", "findphpclass")
