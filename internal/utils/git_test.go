@@ -25,9 +25,3 @@ func TestCompareVersions(t *testing.T) {
 		}
 	}
 }
-
-func TestGetLatestTag(t *testing.T) {
-	// We can't easily test GetLatestTag without network or mocking git.
-	// But we can test it with a real repo for verification if needed.
-	// For now, let's assume compareVersions is correct.
-}
