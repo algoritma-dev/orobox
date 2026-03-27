@@ -1,14 +1,6 @@
 x-templates:
   oro-app: &oro-app
     image: "algoritmadev/orobox:{{.OroVersion}}-{{.Type}}-latest"
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        PHP_VERSION: "{{.PHPVersion}}"
-        NODE_VERSION: "{{.NodeVersion}}"
-        NPM_VERSION: "{{.NpmVersion}}"
-        MEMORY_LIMIT: "${PHP_MEMORY_LIMIT:-2048M}"
     env_file: .env
     extra_hosts:
       - "host.docker.internal:host-gateway"

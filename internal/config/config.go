@@ -203,7 +203,17 @@ func GetProjectName() string {
 
 // GetInternalDir returns the internal directory for storing Orobox data.
 func GetInternalDir() string {
-	return ".orobox"
+	if os.Getenv("CI") != "" || os.Getenv("OROBOX_LOCAL_CONFIG") != "" {
+		return ".orobox"
+	}
+
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return ".orobox"
+	}
+
+	projectName := GetProjectName()
+	return filepath.Join(configDir, "orobox", projectName)
 }
 
 // GetFirstDomainHost returns the host of the first configured domain.

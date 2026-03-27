@@ -2,14 +2,6 @@
 x-templates:
   oro-app: &oro-app
     image: "algoritmadev/orobox:{{.OroVersion}}-{{.Type}}-latest"
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        PHP_VERSION: "{{.PHPVersion}}"
-        NODE_VERSION: "{{.NodeVersion}}"
-        NPM_VERSION: "{{.NpmVersion}}"
-        MEMORY_LIMIT: "${PHP_MEMORY_LIMIT:-2048M}"
     env_file: .env
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -25,8 +17,6 @@ x-templates:
                  - "cache:/var/www/oro/var/cache"
                  - "public_storage:/var/www/oro/public/media"
                  - "private_storage:/var/www/oro/var/data"
-                 - "./nginx.conf:/etc/nginx/http.d/default.conf:ro"
-                 - "./docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro"
     {{- end}}
 
 services:
@@ -91,8 +81,6 @@ services:
       - "public_storage:/var/www/oro/public/media:ro"
       - "private_storage:/var/www/oro/var/data:ro"
       {{- end}}
-      - "./nginx.conf:/etc/nginx/http.d/default.conf:ro"
-      - "./docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro"
       {{if .HasSsl -}}
       - "{{.CertsPath}}:/etc/nginx/certs:ro"
       {{- end}}
@@ -238,7 +226,6 @@ services:
       start_period: 60s
     restart: unless-stopped
     volumes:
-      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
       - pg_data:/var/lib/postgresql/data
   {{end}}
   {{if .Redis}}

@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/spf13/viper"
@@ -200,7 +201,35 @@ func TestFindPhpClass(t *testing.T) {
 }
 
 func TestGetInternalDir(t *testing.T) {
-	if GetInternalDir() != ".orobox" {
-		t.Errorf("Expected internal directory .orobox, got %s", GetInternalDir())
-	}
+	t.Run("CI mode", func(t *testing.T) {
+		os.Setenv("CI", "1")
+		defer os.Unsetenv("CI")
+		if GetInternalDir() != ".orobox" {
+			t.Errorf("Expected internal directory .orobox in CI mode, got %s", GetInternalDir())
+		}
+	})
+
+	t.Run("Local config mode", func(t *testing.T) {
+		os.Setenv("OROBOX_LOCAL_CONFIG", "1")
+		defer os.Unsetenv("OROBOX_LOCAL_CONFIG")
+		if GetInternalDir() != ".orobox" {
+			t.Errorf("Expected internal directory .orobox in local config mode, got %s", GetInternalDir())
+		}
+	})
+
+	t.Run("Standard mode", func(t *testing.T) {
+		os.Unsetenv("CI")
+		os.Unsetenv("OROBOX_LOCAL_CONFIG")
+		dir := GetInternalDir()
+		if dir == ".orobox" {
+			t.Errorf("Expected user config directory in standard mode, got %s", dir)
+		}
+
+		configDir, _ := os.UserConfigDir()
+		projectName := GetProjectName()
+		expected := filepath.Join(configDir, "orobox", projectName)
+		if dir != expected {
+			t.Errorf("Expected %s, got %s", expected, dir)
+		}
+	})
 }
