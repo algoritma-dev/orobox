@@ -1,5 +1,5 @@
 # Dockerfile template for OroCommerce development
-ARG PHP_VERSION=8.1
+ARG PHP_VERSION={{.PHPVersion}}
 ARG NODE_VERSION=18
 ARG NPM_VERSION=10
 ARG MEMORY_LIMIT=2048M
