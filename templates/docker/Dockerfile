@@ -185,8 +185,7 @@ RUN wget -O /usr/local/bin/php-fpm-healthcheck https://raw.githubusercontent.com
     && chmod +x /usr/local/bin/php-fpm-healthcheck
 
 # Expose ports
-EXPOSE {{.NginxHTTPPort}}
-{{if .HasSsl}}EXPOSE {{.NginxHTTPSPort}}{{end}}
+EXPOSE 80 443
 
 # Entrypoint and default command
 ENTRYPOINT ["docker-entrypoint.sh"]

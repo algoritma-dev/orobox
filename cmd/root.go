@@ -22,7 +22,7 @@ var rootCmd = &cobra.Command{
 	Long:    `Orobox is a CLI tool to quickly configure an isolated development environment for OroCommerce bundles.`,
 	Version: Version,
 	PersistentPreRun: func(cmd *cobra.Command, _ []string) {
-		if ConfigError != nil && cmd.Name() != "init" {
+		if ConfigError != nil && cmd.Name() != "init" && cmd.Name() != "internal-gen-docker" {
 			utils.PrintError(ConfigError.Error())
 			os.Exit(1)
 		}

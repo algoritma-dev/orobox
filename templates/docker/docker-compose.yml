@@ -1,7 +1,7 @@
 
 x-templates:
   oro-app: &oro-app
-    image: "orobox-app:{{.OroVersion}}-{{.Type}}-latest"
+    image: "algoritmadev/orobox-app:{{.OroVersion}}-{{.Type}}-latest"
     build:
       context: .
       dockerfile: Dockerfile
@@ -25,6 +25,8 @@ x-templates:
                  - "cache:/var/www/oro/var/cache"
                  - "public_storage:/var/www/oro/public/media"
                  - "private_storage:/var/www/oro/var/data"
+                 - "./nginx.conf:/etc/nginx/http.d/default.conf:ro"
+                 - "./docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro"
     {{- end}}
 
 services:
@@ -65,10 +67,10 @@ services:
       start_period: 15s
     ports:
       - published: "{{.NginxHTTPPort}}"
-        target: "{{.NginxHTTPPort}}"
+        target: 80
       {{if .HasSsl -}}
       - published: "{{.NginxHTTPSPort}}"
-        target: "{{.NginxHTTPSPort}}"
+        target: 443
       {{- end}}
     depends_on:
       "web-init":
@@ -89,6 +91,8 @@ services:
       - "public_storage:/var/www/oro/public/media:ro"
       - "private_storage:/var/www/oro/var/data:ro"
       {{- end}}
+      - "./nginx.conf:/etc/nginx/http.d/default.conf:ro"
+      - "./docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro"
       {{if .HasSsl -}}
       - "{{.CertsPath}}:/etc/nginx/certs:ro"
       {{- end}}

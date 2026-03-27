@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/algoritma-dev/orobox/internal/docker"
 	"github.com/algoritma-dev/orobox/internal/utils"
 
 	"github.com/spf13/cobra"
@@ -55,6 +56,12 @@ var selfUpdateCmd = &cobra.Command{
 		utils.PrintInfo(fmt.Sprintf("Downloading %s...", assetName))
 		if err := applyUpdate(assetURL); err != nil {
 			return fmt.Errorf("failed to apply update: %w", err)
+		}
+
+		// Pull latest Docker images
+		utils.PrintInfo("Updating Docker images...")
+		if err := docker.RunComposeCommandSilently("Pulling latest images...", "pull"); err != nil {
+			utils.PrintWarning(fmt.Sprintf("failed to pull latest images: %v", err))
 		}
 
 		utils.PrintSuccess(fmt.Sprintf("Successfully updated to %s", latest.TagName))

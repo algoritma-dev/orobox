@@ -198,7 +198,7 @@ func generateConfig() {
 
 	var className, namespace string
 	if typeOfInstall == config.InstallTypeBundle {
-		bundleClass := utils.AskQuestion(reader, "Full bundle class (eg: Algoritma\\Bundle\\ShippyProBundle\\AlgoritmaShippyProBundle)", "")
+		bundleClass := utils.AskQuestion(reader, "Full bundle class (eg: Algoritma\\Bundle\\TestBundle\\TestBundle)", "")
 
 		if bundleClass != "" {
 			var found bool

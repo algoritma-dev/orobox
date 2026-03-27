@@ -1,0 +1,83 @@
+name: Docker Build and Push
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'templates/docker/docker-entrypoint.sh'
+      - 'templates/docker/init-db.sql'
+      - 'templates/docker/nginx.conf'
+      - 'templates/docker/Dockerfile'
+      - 'templates/docker/docker-compose.yml'
+      - '.github/workflows/docker-build.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        oro-version: ["5.1", "6.0", "6.1"]
+        type: ["bundle", "project", "demo"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_OROBOX_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Orobox CLI
+        run: go build -o orobox main.go
+
+      - name: Generate Docker files
+        run: |
+          # Create a configuration for orobox
+          cat <<EOF > .orobox.yaml
+          type: ${{ matrix.type }}
+          oro_version: "${{ matrix.oro-version }}"
+          domains:
+            - host: localhost
+          services:
+            rabbitmq: true
+            elasticsearch: true
+            redis: true
+            mailpit: true
+            adminer: true
+            php:
+              xdebug: true
+          EOF
+          
+          # Generate files using the internal command
+          ./orobox internal-gen-docker
+          
+          # Prepare the build context
+          mkdir -p build-context
+          cp .orobox/Dockerfile build-context/
+          cp .orobox/nginx.conf build-context/
+          cp .orobox/docker-entrypoint.sh build-context/
+          cp .orobox/init-db.sql build-context/
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: build-context
+          file: build-context/Dockerfile
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/orobox-app:${{ matrix.oro-version }}-${{ matrix.type }}-latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            MEMORY_LIMIT=2048M
