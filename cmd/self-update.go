@@ -15,6 +15,7 @@ import (
 	"github.com/algoritma-dev/orobox/internal/utils"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 type release struct {
@@ -58,10 +59,13 @@ var selfUpdateCmd = &cobra.Command{
 			return fmt.Errorf("failed to apply update: %w", err)
 		}
 
-		// Pull latest Docker images
-		utils.PrintInfo("Updating Docker images...")
-		if err := docker.RunComposeCommandSilently("Pulling latest images...", "pull"); err != nil {
-			utils.PrintWarning(fmt.Sprintf("failed to pull latest images: %v", err))
+		// Pull latest Docker images if we are in a project
+		if viper.ConfigFileUsed() != "" {
+			utils.PrintInfo("Updating Docker images...")
+			docker.EnsureDockerCompose()
+			if err := docker.RunComposeCommandSilently("Pulling latest images...", "pull"); err != nil {
+				utils.PrintWarning(fmt.Sprintf("failed to pull latest images: %v", err))
+			}
 		}
 
 		utils.PrintSuccess(fmt.Sprintf("Successfully updated to %s", latest.TagName))

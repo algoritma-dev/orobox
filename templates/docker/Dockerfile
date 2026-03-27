@@ -1,8 +1,8 @@
 # Dockerfile template for OroCommerce development
 ARG PHP_VERSION={{.PHPVersion}}
-ARG NODE_VERSION=18
-ARG NPM_VERSION=10
-ARG MEMORY_LIMIT=2048M
+ARG NODE_VERSION={{.NodeVersion}}
+ARG NPM_VERSION={{.NpmVersion}}
+ARG MEMORY_LIMIT={{.MemoryLimit}}
 
 # Get Node from official image
 FROM node:${NODE_VERSION}-alpine AS node_image
