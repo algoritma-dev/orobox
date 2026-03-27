@@ -8,26 +8,14 @@ import (
 	"path/filepath"
 
 	"github.com/algoritma-dev/orobox/internal/config"
-	yamlv3 "gopkg.in/yaml.v3"
 )
 
 // InstallSslCertificates installs the SSL certificates for the configured domains.
 func InstallSslCertificates() {
-	configPath := ".orobox.yaml"
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return
-	}
-
-	var oroConfig config.OroConfig
-	err = yamlv3.Unmarshal(data, &oroConfig)
-	if err != nil {
-		fmt.Printf("Warning: error parsing %s: %v\n", configPath, err)
-		return
-	}
+	domains := config.GetDomains()
 
 	hasSsl := false
-	for _, domain := range oroConfig.Domains {
+	for _, domain := range domains {
 		if domain.Ssl {
 			hasSsl = true
 			break
@@ -40,7 +28,7 @@ func InstallSslCertificates() {
 
 	certsDirs := filepath.Join(config.GetInternalDir(), "certs")
 
-	err = os.MkdirAll(certsDirs, 0755)
+	err := os.MkdirAll(certsDirs, 0755)
 	if err != nil {
 		fmt.Printf("Warning: could not create certs directory: %v\n", err)
 		return
@@ -50,7 +38,7 @@ func InstallSslCertificates() {
 	_ = exec.Command("mkcert", "-install").Run()
 
 	// 2. Generate certificates for each domain if missing
-	for _, domain := range oroConfig.Domains {
+	for _, domain := range domains {
 		if !domain.Ssl {
 			continue
 		}

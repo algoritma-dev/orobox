@@ -4,6 +4,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/algoritma-dev/orobox/internal/certificates"
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
 	"github.com/algoritma-dev/orobox/internal/utils"
@@ -18,6 +19,7 @@ var upCmd = &cobra.Command{
 	Use:   "up",
 	Short: "Start the development environment",
 	Run: func(_ *cobra.Command, _ []string) {
+		certificates.InstallSslCertificates()
 		docker.EnsureDockerCompose()
 
 		if cleanBeforeUp {
