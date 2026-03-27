@@ -1,2 +1,11 @@
 /.idea/
 orobox
+/cmd/.orobox/.env
+/cmd/.orobox/.env.test
+/cmd/.orobox/docker-compose.setup.yml
+/cmd/.orobox/docker-compose.test.yml
+/cmd/.orobox/docker-compose.yml
+/cmd/.orobox/docker-entrypoint.sh
+/cmd/.orobox/Dockerfile
+/cmd/.orobox/init-db.sql
+/cmd/.orobox/nginx.conf
