@@ -203,12 +203,7 @@ func GetProjectName() string {
 
 // GetInternalDir returns the internal directory for storing Orobox data.
 func GetInternalDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		// Fallback to a relative path if home dir is not found
-		return filepath.Join(".config", "orobox", GetProjectName())
-	}
-	return filepath.Join(home, ".config", "orobox", GetProjectName())
+	return ".orobox"
 }
 
 // GetFirstDomainHost returns the host of the first configured domain.
