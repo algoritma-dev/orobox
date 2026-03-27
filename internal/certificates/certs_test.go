@@ -7,13 +7,13 @@ import (
 	"github.com/spf13/viper"
 )
 
-func TestInstallSslCertificates_NoConfig(t *testing.T) {
+func TestInstallSslCertificates_NoConfig(_ *testing.T) {
 	viper.Reset()
 	// Should not panic or error if config is missing
 	InstallSslCertificates()
 }
 
-func TestInstallSslCertificates_NoSsl(t *testing.T) {
+func TestInstallSslCertificates_NoSsl(_ *testing.T) {
 	viper.Reset()
 	viper.Set("domains", []map[string]any{
 		{"host": "localhost", "ssl": false},
