@@ -42,33 +42,56 @@ var selfUpdateCmd = &cobra.Command{
 			return fmt.Errorf("failed to check for updates: %w", err)
 		}
 
-		if latest.TagName == Version {
-			utils.PrintSuccess("You are already using the latest version.")
+		if latest.TagName != Version {
+			utils.PrintSuccess(fmt.Sprintf("New version available: %s", latest.TagName))
+
+			assetURL, assetName := findBestAsset(latest)
+			if assetURL == "" {
+				return fmt.Errorf("no suitable binary found for %s/%s in release %s", runtime.GOOS, runtime.GOARCH, latest.TagName)
+			}
+
+			utils.PrintInfo(fmt.Sprintf("Downloading %s...", assetName))
+			if err := applyUpdate(assetURL); err != nil {
+				return fmt.Errorf("failed to apply update: %w", err)
+			}
+			utils.PrintSuccess(fmt.Sprintf("Successfully updated to %s", latest.TagName))
+		} else {
+			utils.PrintSuccess("You are already using the latest version of orobox.")
+
 			return nil
 		}
 
-		utils.PrintSuccess(fmt.Sprintf("New version available: %s", latest.TagName))
+		// Pull latest Docker images
+		utils.PrintInfo("Checking for Docker image updates...")
 
-		assetURL, assetName := findBestAsset(latest)
-		if assetURL == "" {
-			return fmt.Errorf("no suitable binary found for %s/%s in release %s", runtime.GOOS, runtime.GOARCH, latest.TagName)
+		anyUpdated := false
+		// Update all local orobox images
+		updatedLocal, err := docker.PullAllLocalOrobotImages()
+		if err != nil {
+			utils.PrintWarning(fmt.Sprintf("Failed to pull local orobox images: %v", err))
+		}
+		if updatedLocal {
+			anyUpdated = true
 		}
 
-		utils.PrintInfo(fmt.Sprintf("Downloading %s...", assetName))
-		if err := applyUpdate(assetURL); err != nil {
-			return fmt.Errorf("failed to apply update: %w", err)
-		}
-
-		// Pull latest Docker images if we are in a project
+		// Update project-specific services if we are in a project
 		if viper.ConfigFileUsed() != "" {
-			utils.PrintInfo("Updating Docker images...")
 			docker.EnsureDockerCompose()
-			if err := docker.RunComposeCommandSilently("Pulling latest images...", "pull"); err != nil {
-				utils.PrintWarning(fmt.Sprintf("failed to pull latest images: %v", err))
+			updatedProject, err := docker.PullProjectImages()
+			if err != nil {
+				utils.PrintWarning(fmt.Sprintf("Failed to pull project images: %v", err))
+			}
+			if updatedProject {
+				anyUpdated = true
 			}
 		}
 
-		utils.PrintSuccess(fmt.Sprintf("Successfully updated to %s", latest.TagName))
+		if anyUpdated {
+			utils.PrintSuccess("Docker images updated successfully.")
+		} else {
+			utils.PrintInfo("Docker images are already up to date.")
+		}
+
 		return nil
 	},
 }

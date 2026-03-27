@@ -3,6 +3,7 @@ package docker
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"text/template"
 
 	"github.com/algoritma-dev/orobox/internal/config"
@@ -405,6 +407,323 @@ var RunComposeCommand = func(message string, args ...string) error {
 		utils.PrintInfo("Try running: docker logout")
 	}
 	return err
+}
+
+// PullAllLocalOrobotImages finds all local images from algoritmadev/orobox and pulls updates for them.
+// It returns true if any image was updated.
+func PullAllLocalOrobotImages() (bool, error) {
+	// Filter for our images and get their IDs
+	cmd := exec.Command("docker", "images", "--filter", "reference=algoritmadev/orobox:*", "--format", "{{.Repository}}:{{.Tag}} {{.ID}}", "--no-trunc")
+	output, err := cmd.Output()
+	if err != nil {
+		return false, err
+	}
+
+	beforeIDs := make(map[string]string)
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	var images []string
+	for _, line := range lines {
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			imageName := parts[0]
+			imageID := parts[1]
+			if !strings.HasSuffix(imageName, ":<none>") {
+				beforeIDs[imageName] = imageID
+				images = append(images, imageName)
+			}
+		}
+	}
+
+	if len(images) == 0 {
+		return false, nil
+	}
+
+	var toPull []string
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	debug := viper.GetBool("debug")
+
+	if !debug {
+		utils.StartLoader("Checking for updates for local orobox images...")
+		defer utils.StopLoader()
+	}
+
+	for _, img := range images {
+		wg.Add(1)
+		go func(imageName string) {
+			defer wg.Done()
+			if needsPull(imageName) {
+				mu.Lock()
+				toPull = append(toPull, imageName)
+				mu.Unlock()
+			}
+		}(img)
+	}
+	wg.Wait()
+
+	if len(toPull) == 0 {
+		if !debug {
+			utils.StopLoader()
+		}
+		return false, nil
+	}
+
+	if !debug {
+		utils.StopLoader()
+		utils.StartLoader(fmt.Sprintf("Pulling %d updated orobox images...", len(toPull)))
+	} else {
+		utils.PrintInfo(fmt.Sprintf("Pulling %d updated orobox images...", len(toPull)))
+	}
+
+	wg = sync.WaitGroup{}
+	for _, img := range toPull {
+		wg.Add(1)
+		go func(imageName string) {
+			defer wg.Done()
+			pullCmd := exec.Command("docker", "pull", imageName)
+			if debug {
+				pullCmd.Stdout = os.Stdout
+				pullCmd.Stderr = os.Stderr
+			}
+			_ = pullCmd.Run()
+		}(img)
+	}
+	wg.Wait()
+
+	// Check IDs after pull
+	cmdAfter := exec.Command("docker", "images", "--filter", "reference=algoritmadev/orobox:*", "--format", "{{.Repository}}:{{.Tag}} {{.ID}}", "--no-trunc")
+	outputAfter, err := cmdAfter.Output()
+	if err != nil {
+		return false, err
+	}
+
+	afterIDs := make(map[string]string)
+	linesAfter := strings.Split(strings.TrimSpace(string(outputAfter)), "\n")
+	for _, line := range linesAfter {
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			afterIDs[parts[0]] = parts[1]
+		}
+	}
+
+	updated := false
+	for img, beforeID := range beforeIDs {
+		if afterID, ok := afterIDs[img]; ok && afterID != beforeID {
+			updated = true
+			break
+		}
+	}
+
+	return updated, nil
+}
+
+// PullProjectImages gets all images used by the current project and pulls updates for them.
+// It returns true if any image was updated.
+func PullProjectImages() (bool, error) {
+	// Get all images from compose config
+	composeCmd := GetComposeCommand()
+	args := append(composeCmd[1:], GetBaseComposeArgs()...)
+	args = append(args, "config", "--images")
+	cmd := exec.Command(composeCmd[0], args...)
+	output, err := cmd.Output()
+	if err != nil {
+		return false, err
+	}
+
+	projectImages := make(map[string]bool)
+	for _, img := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		img = strings.TrimSpace(img)
+		if img != "" {
+			// Some images might not have a tag in the config (defaults to latest)
+			// But docker images will show them with :latest
+			if !strings.Contains(img, ":") {
+				img += ":latest"
+			}
+			projectImages[img] = true
+		}
+	}
+
+	if len(projectImages) == 0 {
+		return false, nil
+	}
+
+	var toPull []string
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	debug := viper.GetBool("debug")
+
+	if !debug {
+		utils.StartLoader("Checking for updates for project images...")
+		defer utils.StopLoader()
+	}
+
+	for img := range projectImages {
+		wg.Add(1)
+		go func(imageName string) {
+			defer wg.Done()
+			if needsPull(imageName) {
+				mu.Lock()
+				toPull = append(toPull, imageName)
+				mu.Unlock()
+			}
+		}(img)
+	}
+	wg.Wait()
+
+	if len(toPull) == 0 {
+		if !debug {
+			utils.StopLoader()
+		}
+		return false, nil
+	}
+
+	if !debug {
+		utils.StopLoader()
+		utils.StartLoader(fmt.Sprintf("Pulling %d updated project images...", len(toPull)))
+	} else {
+		utils.PrintInfo(fmt.Sprintf("Pulling %d updated project images...", len(toPull)))
+	}
+
+	// Helper to get map of relevant image IDs
+	getImageIDs := func() map[string]string {
+		ids := make(map[string]string)
+		for img := range projectImages {
+			cmdIDs := exec.Command("docker", "inspect", "-f", "{{.ID}}", img)
+			outputIDs, err := cmdIDs.Output()
+			if err == nil {
+				ids[img] = strings.TrimSpace(string(outputIDs))
+			}
+		}
+		return ids
+	}
+
+	beforeIDs := getImageIDs()
+
+	// Pull only images that actually need it
+	wg = sync.WaitGroup{}
+	for _, img := range toPull {
+		wg.Add(1)
+		go func(imageName string) {
+			defer wg.Done()
+			pullCmd := exec.Command("docker", "pull", imageName)
+			if debug {
+				pullCmd.Stdout = os.Stdout
+				pullCmd.Stderr = os.Stderr
+			}
+			_ = pullCmd.Run()
+		}(img)
+	}
+	wg.Wait()
+
+	afterIDs := getImageIDs()
+
+	updated := false
+	// Check for changed IDs
+	for img, beforeID := range beforeIDs {
+		if afterID, ok := afterIDs[img]; ok && afterID != beforeID {
+			updated = true
+			break
+		}
+	}
+
+	// Check for newly pulled images
+	if !updated {
+		for img := range projectImages {
+			if _, before := beforeIDs[img]; !before {
+				if _, after := afterIDs[img]; after {
+					updated = true
+					break
+				}
+			}
+		}
+	}
+
+	return updated, nil
+}
+
+func needsPull(imageName string) bool {
+	// Get local image info
+	localDigest, arch, osName, err := getLocalImageInfo(imageName)
+	if err != nil {
+		// If we can't get local info, maybe it's not even pulled yet, so pull it.
+		return true
+	}
+
+	// Get remote image info
+	remoteDigest, err := getRemoteImageDigest(imageName, arch, osName)
+	if err != nil {
+		// If we can't get remote info (e.g. manifest inspect failed), fallback to always pull
+		return true
+	}
+
+	return localDigest != remoteDigest
+}
+
+func getLocalImageInfo(imageName string) (digest, arch, osName string, err error) {
+	// Use inspect to get digests, architecture and os
+	cmd := exec.Command("docker", "inspect", "-f", "{{range .RepoDigests}}{{.}} {{end}}|{{.Architecture}}|{{.Os}}", imageName)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", "", "", err
+	}
+	parts := strings.Split(strings.TrimSpace(string(output)), "|")
+	if len(parts) < 3 {
+		return "", "", "", fmt.Errorf("unexpected inspect output")
+	}
+
+	digests := strings.Fields(parts[0])
+	for _, d := range digests {
+		if idx := strings.Index(d, "@sha256:"); idx != -1 {
+			digest = d[idx+1:]
+			break
+		}
+	}
+	arch = parts[1]
+	osName = parts[2]
+	return digest, arch, osName, nil
+}
+
+type manifestDescriptor struct {
+	Digest   string `json:"digest"`
+	Platform struct {
+		Architecture string `json:"architecture"`
+		OS           string `json:"os"`
+	} `json:"platform"`
+}
+
+type manifestVerboseEntry struct {
+	Descriptor manifestDescriptor `json:"Descriptor"`
+}
+
+func getRemoteImageDigest(imageName, arch, osName string) (string, error) {
+	// Use manifest inspect -v to get a consistent format for both single and multi-arch images
+	cmd := exec.Command("docker", "manifest", "inspect", "-v", imageName)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+
+	// For a single image it might return a single object, but with -v it usually returns a list
+	// Let's try to parse as a list first.
+	var list []manifestVerboseEntry
+	if err := json.Unmarshal(output, &list); err != nil {
+		// Try as a single object
+		var single manifestVerboseEntry
+		if err := json.Unmarshal(output, &single); err != nil {
+			return "", err
+		}
+		list = []manifestVerboseEntry{single}
+	}
+
+	for _, entry := range list {
+		if entry.Descriptor.Platform.Architecture == arch && entry.Descriptor.Platform.OS == osName {
+			return entry.Descriptor.Digest, nil
+		}
+	}
+
+	return "", fmt.Errorf("no matching platform found")
 }
 
 // RunComposeCommandWithOutput runs docker compose and returns its combined output.
