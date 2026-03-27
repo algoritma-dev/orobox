@@ -76,7 +76,7 @@ jobs:
           context: build-context
           file: build-context/Dockerfile
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/orobox-app:${{ matrix.oro-version }}-${{ matrix.type }}-latest
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/orobox:${{ matrix.oro-version }}-${{ matrix.type }}-latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
