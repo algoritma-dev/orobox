@@ -73,10 +73,18 @@ func performInstallation() bool {
 		return false
 	}
 
+	// 0. Resolve OroCommerce version to the latest tag
+	oroRepo := "https://github.com/oroinc/orocommerce-application.git"
+	resolvedVersion, err := utils.GetLatestTag(oroRepo, conf.OroVersion)
+	if err != nil {
+		utils.PrintWarning(fmt.Sprintf("Could not resolve latest tag for %s, using it as is: %v", conf.OroVersion, err))
+		resolvedVersion = conf.OroVersion
+	}
+
 	// 1. Download sources (git clone)
 	if conf.Type == config.InstallTypeProject {
 		if _, err := os.Stat("composer.json"); os.IsNotExist(err) {
-			utils.PrintInfo(fmt.Sprintf("Cloning OroCommerce %s...", conf.OroVersion))
+			utils.PrintInfo(fmt.Sprintf("Cloning OroCommerce %s...", resolvedVersion))
 			// Use a temporary directory to clone, then move to avoid "directory not empty" errors (like .orobox.yaml)
 			tmpDir, err := os.MkdirTemp("", "oro-app-*")
 			if err != nil {
@@ -85,7 +93,7 @@ func performInstallation() bool {
 			}
 			defer os.RemoveAll(tmpDir)
 
-			cloneCmd := exec.Command("git", "clone", "-b", conf.OroVersion, "https://github.com/oroinc/orocommerce-application.git", tmpDir)
+			cloneCmd := exec.Command("git", "clone", "-b", resolvedVersion, oroRepo, tmpDir)
 			// Hidden output for git clone as well, unless error
 			var stderr bytes.Buffer
 			cloneCmd.Stderr = &stderr
@@ -138,7 +146,7 @@ func performInstallation() bool {
 		if err != nil {
 			// Use a temporary directory to clone, then move to avoid "directory not empty" errors if bundle is mounted
 			cloneCmd := []string{"run", "--rm", "-T", "application", "bash", "-c",
-				fmt.Sprintf("git clone -b %s --depth 1 https://github.com/oroinc/orocommerce-application /tmp/oro-app && cp -r /tmp/oro-app/. . && rm -rf /tmp/oro-app && composer install", conf.OroVersion)}
+				fmt.Sprintf("git clone -b %s --depth 1 %s /tmp/oro-app && cp -r /tmp/oro-app/. . && rm -rf /tmp/oro-app && composer install", resolvedVersion, oroRepo)}
 			if err := docker.RunComposeCommandSilently("Downloading and installing OroCommerce into volume...", cloneCmd...); err != nil {
 				utils.PrintError(fmt.Sprintf("Download/Install into volume failed: %v", err))
 				return false
