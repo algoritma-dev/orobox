@@ -265,7 +265,7 @@ services:
   {{end}}
   {{if .Mailpit}}
   mail:
-    image: axllent/mailpit
+    image: axllent/mailpit:latest
     hostname: mail
     ports:
       - "8025:8025"
@@ -324,7 +324,7 @@ services:
     restart: on-failure
   {{if and .Adminer (ne .Type "demo")}}
   adminer:
-    image: adminer
+    image: adminer:latest
     ports:
       - "8081:8080"
     restart: unless-stopped

@@ -11,6 +11,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"text/template"
 
 	"github.com/algoritma-dev/orobox/internal/config"
@@ -357,12 +358,20 @@ var RunComposeCommandSilently = func(message string, args ...string) error {
 	err := cmd.Run()
 	if err != nil {
 		utils.StopLoader() // Stop loader before printing error
+		stderrStr := stderr.String()
 		if stderr.Len() > 0 {
-			fmt.Print(stderr.String())
+			fmt.Print(stderrStr)
 		}
 		if stdout.Len() > 0 {
 			fmt.Print(stdout.String())
 		}
+
+		if strings.Contains(stderrStr, "unauthorized: incorrect username or password") {
+			utils.PrintWarning("\nDocker registry authentication failed.")
+			utils.PrintInfo("This often happens when your Docker login has expired or is invalid for public images on Docker Hub.")
+			utils.PrintInfo("Try running: docker logout")
+		}
+
 		return err
 	}
 	return nil
@@ -382,8 +391,16 @@ var RunComposeCommand = func(message string, args ...string) error {
 	cmd := exec.Command(composeCmd[0], argsToRun...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
+
+	err := cmd.Run()
+	if err != nil && strings.Contains(stderrBuf.String(), "unauthorized: incorrect username or password") {
+		utils.PrintWarning("\nDocker registry authentication failed.")
+		utils.PrintInfo("This often happens when your Docker login has expired or is invalid for public images on Docker Hub.")
+		utils.PrintInfo("Try running: docker logout")
+	}
+	return err
 }
 
 // RunComposeCommandWithOutput runs docker compose and returns its combined output.
@@ -409,9 +426,21 @@ var RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
 		cmd.Stdout = io.MultiWriter(os.Stdout, &buf)
 		cmd.Stderr = io.MultiWriter(os.Stderr, &buf)
 		err := cmd.Run()
-		return buf.Bytes(), err
+		output := buf.Bytes()
+		if err != nil && strings.Contains(string(output), "unauthorized: incorrect username or password") {
+			utils.PrintWarning("\nDocker registry authentication failed.")
+			utils.PrintInfo("This often happens when your Docker login has expired or is invalid for public images on Docker Hub.")
+			utils.PrintInfo("Try running: docker logout")
+		}
+		return output, err
 	}
-	return cmd.CombinedOutput()
+	output, err := cmd.CombinedOutput()
+	if err != nil && strings.Contains(string(output), "unauthorized: incorrect username or password") {
+		utils.PrintWarning("\nDocker registry authentication failed.")
+		utils.PrintInfo("This often happens when your Docker login has expired or is invalid for public images on Docker Hub.")
+		utils.PrintInfo("Try running: docker logout")
+	}
+	return output, err
 }
 
 func writeDockerfile(internalDir string, data any) bool {
