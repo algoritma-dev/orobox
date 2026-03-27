@@ -1,6 +1,8 @@
 name: Docker Build and Push
 
 on:
+  pull_request:
+    branches: [ main ]
   push:
     branches: [ main ]
     paths:
