@@ -198,3 +198,9 @@ func TestFindPhpClass(t *testing.T) {
 		t.Errorf("Expected not to find NonExistent class")
 	}
 }
+
+func TestGetInternalDir(t *testing.T) {
+	if GetInternalDir() != ".orobox" {
+		t.Errorf("Expected internal directory .orobox, got %s", GetInternalDir())
+	}
+}
