@@ -55,7 +55,7 @@ func TestUpCommand(t *testing.T) {
 		t.Fatalf("rootCmd.Execute() failed: %v", err)
 	}
 
-	if len(calls) > 0 && calls[0][0] == "build" {
+	for len(calls) > 0 && (calls[0][0] == "pull" || calls[0][0] == "build") {
 		calls = calls[1:]
 	}
 

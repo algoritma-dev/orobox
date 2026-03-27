@@ -59,6 +59,7 @@ var initCmd = &cobra.Command{
 		dockerfileIsChanged := docker.EnsureDockerCompose()
 
 		if dockerfileIsChanged {
+			_ = docker.RunComposeCommandSilently("Downloading images...", "pull")
 			if err := docker.RunComposeCommandSilently("Building Docker images...", "build"); err != nil {
 				utils.PrintError(fmt.Sprintf("Build failed: %v", err))
 				return
