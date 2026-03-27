@@ -260,7 +260,7 @@ func EnsureDockerCompose() bool {
 
 	changed = writeEnvFile("templates/docker/.env", internalDir, data) || changed
 	changed = writeEnvFile("templates/docker/.env.test", internalDir, data) || changed
-
+	changed = writeNginxConf(internalDir, data) || changed
 	changed = writeComposeFile(internalDir, "docker-compose.yml", data) || changed
 	changed = writeComposeFile(internalDir, "docker-compose.setup.yml", data) || changed
 	changed = writeComposeFile(internalDir, "docker-compose.test.yml", data) || changed

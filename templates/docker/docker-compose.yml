@@ -51,7 +51,7 @@ services:
     command: nginx
     restart: unless-stopped
     healthcheck:
-      test: "curl -If http://127.0.0.1:{{.NginxHTTPPort}}/"
+      test: "curl -If http://127.0.0.1:80/"
       interval: 15s
       timeout: 30s
       start_period: 15s
@@ -70,6 +70,7 @@ services:
     tmpfs:
       - /opt/oro-nginx
     volumes:
+      - "./nginx.conf:/etc/nginx/http.d/default.conf:ro"
       {{if eq .Type "project" -}}
       - "{{.BundlePath}}:/var/www/oro"
       {{- else -}}
