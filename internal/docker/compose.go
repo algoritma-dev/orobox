@@ -167,6 +167,7 @@ func EnsureDockerCompose() bool {
 		Xdebug               bool
 		UserRuntime          string
 		UseTmpfs             bool
+		TmpfsSize            string
 	}{
 		Type:            viper.GetString("type"),
 		InternalDir:     internalDir,
@@ -177,6 +178,11 @@ func EnsureDockerCompose() bool {
 		PhpFpmPort:      "9000",
 		UserRuntime:     "www-data",
 		UseTmpfs:        viper.GetBool("test.use_tmpfs"),
+		TmpfsSize:       viper.GetString("test.tmpfs_size"),
+	}
+
+	if data.TmpfsSize == "" {
+		data.TmpfsSize = "1g"
 	}
 
 	if runtime.GOOS == "linux" {

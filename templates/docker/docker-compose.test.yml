@@ -52,7 +52,7 @@ services:
       POSTGRES_ROOT_PASSWORD: ${ORO_DB_ROOT_PASSWORD:-oro_db_pass}
     {{if .UseTmpfs -}}
     tmpfs:
-      - /var/lib/postgresql/data
+      - /var/lib/postgresql/data:size={{.TmpfsSize}}
     volumes:
       - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
     {{else -}}

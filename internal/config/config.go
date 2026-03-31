@@ -38,7 +38,8 @@ type ServicesConfig struct {
 
 // TestConfig represents the configuration for the test environment.
 type TestConfig struct {
-	UseTmpfs bool `yaml:"use_tmpfs" mapstructure:"use_tmpfs"`
+	UseTmpfs  bool   `yaml:"use_tmpfs" mapstructure:"use_tmpfs"`
+	TmpfsSize string `yaml:"tmpfs_size" mapstructure:"tmpfs_size"`
 }
 
 // OroVersions defines the versions of components for a specific OroCommerce version.

@@ -15,6 +15,7 @@ import (
 )
 
 var testInitUseTmpfs bool
+var testInitTmpfsSize string
 
 var testInitCmd = &cobra.Command{
 	Use:   "test-init",
@@ -22,9 +23,11 @@ var testInitCmd = &cobra.Command{
 	Run: func(_ *cobra.Command, _ []string) {
 		if testInitUseTmpfs {
 			viper.Set("test.use_tmpfs", true)
+			viper.Set("test.tmpfs_size", testInitTmpfsSize)
 			var conf config.OroConfig
 			if err := viper.Unmarshal(&conf); err == nil {
 				conf.Test.UseTmpfs = true
+				conf.Test.TmpfsSize = testInitTmpfsSize
 				data, err := yamlv3.Marshal(&conf)
 				if err == nil {
 					_ = os.WriteFile(".orobox.yaml", data, 0644)
@@ -112,5 +115,6 @@ var testInitCmd = &cobra.Command{
 
 func init() {
 	testInitCmd.Flags().BoolVar(&testInitUseTmpfs, "tmpfs", false, "Initialize in RAM the database instead of disk")
+	testInitCmd.Flags().StringVar(&testInitTmpfsSize, "tmpfs-size", "1g", "Size of the tmpfs mount")
 	rootCmd.AddCommand(testInitCmd)
 }
