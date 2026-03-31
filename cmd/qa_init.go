@@ -21,6 +21,20 @@ var qaInitCmd = &cobra.Command{
 			utils.PrintError("The 'qa-init' command is not available for demo instances.")
 			return
 		}
+
+		var conf config.OroConfig
+		if err := viper.Unmarshal(&conf); err != nil {
+			utils.PrintError(fmt.Sprintf("Error reading config: %v", err))
+			return
+		}
+
+		services := []string{"up", "-d", "db_test", "application_test"}
+
+		if err := docker.RunComposeCommandSilently("Starting services for test environment...", services...); err != nil {
+			utils.PrintError(fmt.Sprintf("Failed to start services: %v", err))
+			return
+		}
+
 		utils.PrintInfo("Initializing QA tools...")
 		runQaInitCommand()
 	},
@@ -58,7 +72,7 @@ func runQaInitCommand() {
 		composerArgs = append(composerArgs, "-T")
 	}
 	// Use bash -c to pipe 'yes' into composer to automatically accept file creation from the plugin
-	cmdLine := "echo 'n' | composer require --dev algoritma/php-coding-standards vincentlanglet/twig-cs-fixer"
+	cmdLine := "yes y | composer require --dev algoritma/php-coding-standards vincentlanglet/twig-cs-fixer"
 	composerArgs = append(composerArgs, "application_test", "bash", "-c", cmdLine)
 
 	if err := docker.RunComposeCommand("", composerArgs...); err != nil {
