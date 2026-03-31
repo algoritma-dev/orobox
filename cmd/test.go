@@ -51,8 +51,8 @@ func runTestCommand() {
 	utils.StartLoader("Checking test environment...")
 	databases, err := docker.RunComposeCommandWithOutput(checkArgs...)
 
-	// Cerca il db_name nell'output
-	dbName := "oro_db_test"
+	// Cerca il db_name nell'output (può essere sovrascritto da ORO_DB_NAME_TEST)
+	_, _, dbName := docker.GetDatabaseTestCredentials()
 	found := false
 	for _, line := range strings.Split(string(databases), "\n") {
 		fields := strings.Split(line, "|")
