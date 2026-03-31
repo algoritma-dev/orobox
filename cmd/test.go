@@ -4,6 +4,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
@@ -41,11 +42,28 @@ func runTestCommand() {
 	}
 
 	// Check if database schema exists
-	checkArgs := []string{"exec", "-T", "application_test", "php", "bin/console", "doctrine:query:sql", "SELECT 1 FROM oro_user LIMIT 1", "--env=test"}
+	checkArgs := []string{
+		"exec", "-T", "db_test",
+		"psql",
+		"-U", "oro_db_user", // utente postgres
+		"-lqt", // lista database in formato quiet
+	}
 	utils.StartLoader("Checking test environment...")
-	_, err := docker.RunComposeCommandWithOutput(checkArgs...)
+	databases, err := docker.RunComposeCommandWithOutput(checkArgs...)
+
+	// Cerca il db_name nell'output
+	dbName := "oro_db_test"
+	found := false
+	for _, line := range strings.Split(string(databases), "\n") {
+		fields := strings.Split(line, "|")
+		if len(fields) > 0 && strings.TrimSpace(fields[0]) == dbName {
+			found = true
+			break
+		}
+	}
+
 	utils.StopLoader()
-	if err != nil {
+	if err != nil || !found {
 		utils.PrintError("Test database schema is not initialized or incomplete.")
 		utils.PrintInfo("Please run 'orobox test-init' to prepare the test environment.")
 		return

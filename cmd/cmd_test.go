@@ -144,7 +144,7 @@ func TestTestCommand(t *testing.T) {
 	docker.RunComposeCommandSilently = mockRunSilently
 
 	docker.RunComposeCommandWithOutput = func(_ ...string) ([]byte, error) {
-		return []byte("OK"), nil
+		return []byte("oro_db_test |"), nil
 	}
 
 	rootCmd.SetArgs([]string{"test"})
@@ -317,7 +317,7 @@ func TestTestCommandBundle(t *testing.T) {
 	docker.RunComposeCommandSilently = mockRunSilently
 
 	docker.RunComposeCommandWithOutput = func(_ ...string) ([]byte, error) {
-		return []byte("OK"), nil
+		return []byte("oro_db_test |"), nil
 	}
 
 	viper.Set("type", "bundle")
