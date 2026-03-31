@@ -110,6 +110,14 @@ var testInitCmd = &cobra.Command{
 		}
 
 		utils.PrintSuccess("Test environment initialized successfully!")
+
+		dbUser, dbPass, dbName := docker.GetDatabaseTestCredentials()
+		utils.PrintTitle("Test Database Connection (e.g. PhpStorm):")
+		fmt.Println("  - Host: localhost")
+		fmt.Println("  - Port: 5433")
+		fmt.Printf("  - User: %s\n", dbUser)
+		fmt.Printf("  - Password: %s\n", dbPass)
+		fmt.Printf("  - Database: %s\n", dbName)
 	},
 }
 

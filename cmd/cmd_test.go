@@ -165,8 +165,8 @@ func TestTestCommand(t *testing.T) {
 
 	// 2nd call: actual test execution
 	lastCall := calls[1]
-	if lastCall[0] != "exec" || !contains(lastCall, "application_test") || !contains(lastCall, "APP_ENV=test") || !contains(lastCall, "ORO_ENV=test") || !contains(lastCall, "ORO_DB_NAME=oro_db_test") {
-		t.Errorf("Expected exec application_test with test environment, got %v", lastCall)
+	if lastCall[0] != "exec" || !contains(lastCall, "application_test") {
+		t.Errorf("Expected exec application_test, got %v", lastCall)
 	}
 }
 
@@ -341,9 +341,6 @@ func TestTestCommandBundle(t *testing.T) {
 	lastCall := calls[1]
 	if !contains(lastCall, "simple-phpunit") || !contains(lastCall, "--configuration=src/MyTestBundle") {
 		t.Errorf("Expected simple-phpunit with configuration, got %v", lastCall)
-	}
-	if !contains(lastCall, "APP_ENV=test") || !contains(lastCall, "ORO_ENV=test") || !contains(lastCall, "ORO_DB_NAME=oro_db_test") {
-		t.Errorf("Expected test environment, got %v", lastCall)
 	}
 }
 

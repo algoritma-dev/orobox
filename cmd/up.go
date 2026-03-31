@@ -63,6 +63,13 @@ var upCmd = &cobra.Command{
 			fmt.Println("  - http://localhost:8081")
 			dbUser, dbPass, dbName := docker.GetDatabaseCredentials()
 			fmt.Printf("  - Credentials: %s / %s (Database: %s)\n", dbUser, dbPass, dbName)
+
+			utils.PrintTitle("External Database Connection (e.g. PhpStorm):")
+			fmt.Println("  - Host: localhost")
+			fmt.Println("  - Port: 5432")
+			fmt.Printf("  - User: %s\n", dbUser)
+			fmt.Printf("  - Password: %s\n", dbPass)
+			fmt.Printf("  - Database: %s\n", dbName)
 		}
 
 		if viper.GetBool("services.redis") {

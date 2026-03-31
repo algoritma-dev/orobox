@@ -32,10 +32,7 @@ services:
       - .env
       - .env.test
     environment:
-      ORO_ENV: test
       ORO_XDEBUG_ENABLED: "false"
-      ORO_DB_HOST: db_test
-      ORO_DB_NAME: ${ORO_DB_NAME_TEST:-oro_db_test}
     volumes: *volumes-app
     depends_on:
       db_test:

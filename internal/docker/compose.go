@@ -88,13 +88,27 @@ func GetApplicationURLs() []string {
 
 // GetDatabaseCredentials returns the credentials to access the database.
 func GetDatabaseCredentials() (user string, pass string, dbname string) {
+	return GetDatabaseCredentialsFor(false)
+}
+
+// GetDatabaseTestCredentials returns the credentials to access the test database.
+func GetDatabaseTestCredentials() (user string, pass string, dbname string) {
+	return GetDatabaseCredentialsFor(true)
+}
+
+// GetDatabaseCredentialsFor returns the credentials to access the specified database environment.
+func GetDatabaseCredentialsFor(test bool) (user string, pass string, dbname string) {
 	internalDir := config.GetInternalDir()
 	envFile := filepath.Join(internalDir, ".env")
 
 	// Default values if anything fails
 	user = "oro_db_user"
 	pass = "oro_db_pass"
-	dbname = "oro_db"
+	if test {
+		dbname = "oro_db_test"
+	} else {
+		dbname = "oro_db"
+	}
 
 	v := viper.New()
 	v.SetConfigFile(envFile)
@@ -106,8 +120,14 @@ func GetDatabaseCredentials() (user string, pass string, dbname string) {
 		if p := v.GetString("ORO_DB_PASSWORD"); p != "" {
 			pass = p
 		}
-		if db := v.GetString("ORO_DB_NAME"); db != "" {
-			dbname = db
+		if test {
+			if db := v.GetString("ORO_DB_NAME_TEST"); db != "" {
+				dbname = db
+			}
+		} else {
+			if db := v.GetString("ORO_DB_NAME"); db != "" {
+				dbname = db
+			}
 		}
 	}
 
@@ -118,8 +138,14 @@ func GetDatabaseCredentials() (user string, pass string, dbname string) {
 	if p := os.Getenv("ORO_DB_PASSWORD"); p != "" {
 		pass = p
 	}
-	if db := os.Getenv("ORO_DB_NAME"); db != "" {
-		dbname = db
+	if test {
+		if db := os.Getenv("ORO_DB_NAME_TEST"); db != "" {
+			dbname = db
+		}
+	} else {
+		if db := os.Getenv("ORO_DB_NAME"); db != "" {
+			dbname = db
+		}
 	}
 
 	return user, pass, dbname
