@@ -14,6 +14,9 @@ import (
 	"golang.org/x/term"
 )
 
+var filter string
+var testsuite string
+
 var testCmd = &cobra.Command{
 	Use:   "test",
 	Short: "Run tests (PHPUnit)",
@@ -25,12 +28,15 @@ var testCmd = &cobra.Command{
 }
 
 func init() {
+	testCmd.Flags().StringVarP(&filter, "filter", "f", "", "Filter tests by name")
+	testCmd.Flags().StringVarP(&testsuite, "testsuite", "t", "", "Run specific test suite")
 	rootCmd.AddCommand(testCmd)
 }
 
 func runTestCommand() {
 	// Ensure application_test container is running
-	if err := docker.RunComposeCommandSilently("Starting test application...", "up", "-d", "application_test"); err != nil {
+	upArgs := []string{"up", "-d", "db_test", "application_test"}
+	if err := docker.RunComposeCommandSilently("Starting test application...", upArgs...); err != nil {
 		utils.PrintWarning(fmt.Sprintf("failed to ensure application_test is running: %v", err))
 	}
 
@@ -53,11 +59,6 @@ func runTestCommand() {
 		args = append(args, "-T")
 	}
 
-	// Set test environment
-	args = append(args, "-e", "APP_ENV=test")
-	args = append(args, "-e", "ORO_ENV=test")
-	args = append(args, "-e", "ORO_DB_NAME=oro_db_test")
-
 	args = append(args, "application_test")
 
 	if viper.GetString("type") == "bundle" {
@@ -65,6 +66,13 @@ func runTestCommand() {
 		args = append(args, "./bin/simple-phpunit", "--configuration="+bundlePath)
 	} else {
 		args = append(args, "php", "bin/phpunit")
+	}
+
+	if filter != "" {
+		args = append(args, "--filter", filter)
+	}
+	if testsuite != "" {
+		args = append(args, "--testsuite", testsuite)
 	}
 
 	err = docker.RunComposeCommand("", args...)

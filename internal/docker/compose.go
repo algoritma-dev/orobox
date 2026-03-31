@@ -166,6 +166,7 @@ func EnsureDockerCompose() bool {
 		CertsPath            string
 		Xdebug               bool
 		UserRuntime          string
+		UseTmpfs             bool
 	}{
 		Type:            viper.GetString("type"),
 		InternalDir:     internalDir,
@@ -175,6 +176,7 @@ func EnsureDockerCompose() bool {
 		MemoryLimit:     "2048M", // Default
 		PhpFpmPort:      "9000",
 		UserRuntime:     "www-data",
+		UseTmpfs:        viper.GetBool("test.use_tmpfs"),
 	}
 
 	if runtime.GOOS == "linux" {

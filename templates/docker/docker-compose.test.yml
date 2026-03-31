@@ -34,4 +34,36 @@ services:
     environment:
       ORO_ENV: test
       ORO_XDEBUG_ENABLED: "false"
+      ORO_DB_HOST: db_test
+      ORO_DB_NAME: ${ORO_DB_NAME_TEST:-oro_db_test}
     volumes: *volumes-app
+    depends_on:
+      db_test:
+        condition: service_healthy
+
+  db_test:
+    image: "postgres:{{.PostgresVersion}}"
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: ${ORO_DB_NAME_TEST:-oro_db_test}
+      POSTGRES_USER: ${ORO_DB_USER:-oro_db_user}
+      POSTGRES_PASSWORD: ${ORO_DB_PASSWORD:-oro_db_pass}
+      POSTGRES_ROOT_PASSWORD: ${ORO_DB_ROOT_PASSWORD:-oro_db_pass}
+    {{if .UseTmpfs -}}
+    tmpfs:
+      - /var/lib/postgresql/data
+    volumes:
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    {{else -}}
+    volumes:
+      - pg_data_test:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    {{- end}}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      start_period: 60s
+    restart: unless-stopped
+
+volumes:
+  pg_data_test:

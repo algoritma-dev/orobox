@@ -11,12 +11,27 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	yamlv3 "gopkg.in/yaml.v3"
 )
+
+var testInitUseTmpfs bool
 
 var testInitCmd = &cobra.Command{
 	Use:   "test-init",
 	Short: "Initialize or reset the test environment",
 	Run: func(_ *cobra.Command, _ []string) {
+		if testInitUseTmpfs {
+			viper.Set("test.use_tmpfs", true)
+			var conf config.OroConfig
+			if err := viper.Unmarshal(&conf); err == nil {
+				conf.Test.UseTmpfs = true
+				data, err := yamlv3.Marshal(&conf)
+				if err == nil {
+					_ = os.WriteFile(".orobox.yaml", data, 0644)
+				}
+			}
+		}
+
 		docker.EnsureDockerCompose()
 
 		var conf config.OroConfig
@@ -25,7 +40,7 @@ var testInitCmd = &cobra.Command{
 			return
 		}
 
-		services := []string{"up", "-d", "db", "application_test"}
+		services := []string{"up", "-d", "db_test", "application_test"}
 		if conf.Services.Redis {
 			services = append(services, "redis")
 		}
@@ -65,7 +80,7 @@ var testInitCmd = &cobra.Command{
 
 		// Try psql first with FORCE (requires Postgres 13+)
 		dropSQL := "DROP DATABASE IF EXISTS oro_db_test WITH (FORCE);"
-		dropArgs := []string{"exec", "-T", "db", "psql", "-U", dbUser, "-d", "postgres", "-c", dropSQL}
+		dropArgs := []string{"exec", "-T", "db_test", "psql", "-U", dbUser, "-d", "postgres", "-c", dropSQL}
 		if err := docker.RunComposeCommandSilently("Dropping test database...", dropArgs...); err != nil {
 			utils.PrintWarning(fmt.Sprintf("failed to drop test database using psql: %v. Trying via doctrine...", err))
 			dropCmd := []string{"exec", "-T", "application_test", "php", "bin/console", "doctrine:database:drop", "--force", "--env=test", "--if-exists"}
@@ -96,5 +111,6 @@ var testInitCmd = &cobra.Command{
 }
 
 func init() {
+	testInitCmd.Flags().BoolVar(&testInitUseTmpfs, "tmpfs", false, "Initialize in RAM the database instead of disk")
 	rootCmd.AddCommand(testInitCmd)
 }

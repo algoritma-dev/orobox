@@ -276,6 +276,9 @@ func generateConfig() {
 			Kibana:        kibanaEnabled,
 			Adminer:       adminerEnabled,
 		},
+		Test: config.TestConfig{
+			UseTmpfs: false,
+		},
 	}
 
 	data, err := yamlv3.Marshal(&conf)

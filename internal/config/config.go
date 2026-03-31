@@ -36,6 +36,11 @@ type ServicesConfig struct {
 	Adminer       bool      `yaml:"adminer" mapstructure:"adminer"`
 }
 
+// TestConfig represents the configuration for the test environment.
+type TestConfig struct {
+	UseTmpfs bool `yaml:"use_tmpfs" mapstructure:"use_tmpfs"`
+}
+
 // OroVersions defines the versions of components for a specific OroCommerce version.
 type OroVersions struct {
 	PHP           string
@@ -116,6 +121,7 @@ type OroConfig struct {
 	OroVersion string         `yaml:"oro_version" mapstructure:"oro_version"`
 	Domains    []DomainConfig `yaml:"domains" mapstructure:"domains"`
 	Services   ServicesConfig `yaml:"services" mapstructure:"services"`
+	Test       TestConfig     `yaml:"test" mapstructure:"test"`
 }
 
 // Install types for OroCommerce.
