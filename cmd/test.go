@@ -45,13 +45,13 @@ func runTestCommand() {
 	checkArgs := []string{
 		"exec", "-T", "db_test",
 		"psql",
-		"-U", "oro_db_user", // utente postgres
-		"-lqt", // lista database in formato quiet
+		"-U", "oro_db_user", // postgres user
+		"-lqt", // list databases in quiet format
 	}
 	utils.StartLoader("Checking test environment...")
 	databases, err := docker.RunComposeCommandWithOutput(checkArgs...)
 
-	// Cerca il db_name nell'output (può essere sovrascritto da ORO_DB_NAME_TEST)
+	// Find db_name in output (can be overridden by ORO_DB_NAME_TEST)
 	_, _, dbName := docker.GetDatabaseTestCredentials()
 	found := false
 	for _, line := range strings.Split(string(databases), "\n") {
@@ -96,6 +96,7 @@ func runTestCommand() {
 	err = docker.RunComposeCommand("", args...)
 	if err != nil {
 		utils.PrintError(fmt.Sprintf("Tests reported errors: %v", err))
+		os.Exit(1)
 	} else {
 		utils.PrintSuccess("Tests completed successfully!")
 	}

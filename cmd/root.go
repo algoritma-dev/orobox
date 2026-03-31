@@ -43,7 +43,7 @@ func init() {
 	cobra.OnInitialize(initConfig)
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is .orobox.yaml)")
-	rootCmd.PersistentFlags().BoolP("debug", "d", false, "mostra tutto l'output di docker")
+	rootCmd.PersistentFlags().BoolP("debug", "d", false, "show all docker output")
 	_ = viper.BindPFlag("debug", rootCmd.PersistentFlags().Lookup("debug"))
 }
 
