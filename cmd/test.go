@@ -83,9 +83,8 @@ func runTestCommand() {
 	if err != nil {
 		utils.PrintError(fmt.Sprintf("Tests reported errors: %v", err))
 		os.Exit(1)
-	} else {
-		utils.PrintSuccess("Tests completed successfully!")
 	}
+	utils.PrintSuccess("Tests completed successfully!")
 }
 
 func isTTY() bool {
