@@ -16,8 +16,8 @@ import (
 var (
 	qaPhpstan     bool
 	qaRector      bool
-	qaPhpCsFixer  bool
-	qaTwigCsFixer bool
+	qaPhpCSFixer  bool
+	qaTwigCSFixer bool
 	qaEslint      bool
 	qaStylelint   bool
 )
@@ -41,8 +41,8 @@ func init() {
 
 	qaCmd.Flags().BoolVar(&qaPhpstan, "phpstan", false, "Run PHPStan")
 	qaCmd.Flags().BoolVar(&qaRector, "rector", false, "Run Rector")
-	qaCmd.Flags().BoolVar(&qaPhpCsFixer, "php-cs-fixer", false, "Run PHP-CS-Fixer")
-	qaCmd.Flags().BoolVar(&qaTwigCsFixer, "twig-cs-fixer", false, "Run Twig-CS-Fixer")
+	qaCmd.Flags().BoolVar(&qaPhpCSFixer, "php-cs-fixer", false, "Run PHP-CS-Fixer")
+	qaCmd.Flags().BoolVar(&qaTwigCSFixer, "twig-cs-fixer", false, "Run Twig-CS-Fixer")
 	qaCmd.Flags().BoolVar(&qaEslint, "eslint", false, "Run ESLint")
 	qaCmd.Flags().BoolVar(&qaStylelint, "stylelint", false, "Run Stylelint")
 }
@@ -72,8 +72,8 @@ func runQaCommand() {
 	allTools := []tool{
 		{"phpstan", []string{"vendor/bin/phpstan", "analyze"}, qaPhpstan},
 		{"rector", []string{"vendor/bin/rector", "process"}, qaRector},
-		{"php-cs-fixer", []string{"vendor/bin/php-cs-fixer", "fix"}, qaPhpCsFixer},
-		{"twig-cs-fixer", []string{"vendor/bin/twig-cs-fixer", "lint", twigTarget}, qaTwigCsFixer},
+		{"php-cs-fixer", []string{"vendor/bin/php-cs-fixer", "fix"}, qaPhpCSFixer},
+		{"twig-cs-fixer", []string{"vendor/bin/twig-cs-fixer", "lint", twigTarget}, qaTwigCSFixer},
 	}
 
 	if isBundle {

@@ -64,8 +64,8 @@ func TestQaCommand(t *testing.T) {
 			// Reset global flags before each run
 			qaPhpstan = false
 			qaRector = false
-			qaPhpCsFixer = false
-			qaTwigCsFixer = false
+			qaPhpCSFixer = false
+			qaTwigCSFixer = false
 			qaEslint = false
 			qaStylelint = false
 
@@ -124,8 +124,8 @@ func TestQaBundleCommand(t *testing.T) {
 	docker.ResetEnsuredServices()
 	qaPhpstan = false
 	qaRector = false
-	qaPhpCsFixer = false
-	qaTwigCsFixer = false
+	qaPhpCSFixer = false
+	qaTwigCSFixer = false
 	qaEslint = true
 	qaStylelint = true
 
@@ -160,7 +160,7 @@ func TestQaBundleCommand(t *testing.T) {
 
 	// Verify Stylelint calls
 	foundStylelint := false
-	foundStylelintCss := false
+	foundStylelintCSS := false
 	for _, call := range calls {
 		// Both calls contain "stylelint"
 		if contains(call, "stylelint") {
@@ -171,7 +171,7 @@ func TestQaBundleCommand(t *testing.T) {
 				}
 			}
 			if contains(call, "/var/www/oro/.stylelintrc-css.yml") {
-				foundStylelintCss = true
+				foundStylelintCSS = true
 				if !contains(call, "/var/www/oro/.stylelintignore-css") {
 					t.Errorf("Stylelint-css call missing .stylelintignore-css: %v", call)
 				}
@@ -181,7 +181,7 @@ func TestQaBundleCommand(t *testing.T) {
 	if !foundStylelint {
 		t.Error("Stylelint (non-CSS) call not found")
 	}
-	if !foundStylelintCss {
+	if !foundStylelintCSS {
 		t.Error("Stylelint (CSS) call not found")
 	}
 }
