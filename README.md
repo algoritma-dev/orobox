@@ -189,15 +189,13 @@ Orobox includes Xdebug preinstalled, but disabled by default to maintain perform
 
 ### 1. Enabling/Disabling Xdebug
 
-You can enable or disable Xdebug using the `xdebug` command:
+You can enable or disable Xdebug in currently running containers using the `xdebug` command:
 
 ```bash
 orobox xdebug enable
 ```
 
 This command will:
-- Update your `.orobox.yaml` configuration.
-- Regenerate the necessary Docker files.
 - Apply the change immediately to running containers ("hot-patching").
 
 To disable Xdebug:
@@ -211,21 +209,10 @@ orobox xdebug enable --dev   # Development environment (default)
 orobox xdebug enable --test  # Test environment
 ```
 
-### 2. Manual Configuration (Optional)
-If you prefer, you can still manually enable Xdebug in `.orobox.yaml`:
+*Note: Since the configuration is not persistent, Xdebug will be disabled again after a container restart or `orobox up`.*
 
-```yaml
-services:
-  php:
-    xdebug: true
-```
-
-After changing this setting, run `orobox up` to apply the configuration.
-
-### 3. Xdebug for CLI, Consumer, and Cron
-By default, enabling Xdebug in `.orobox.yaml` activates it for FPM (web requests) and interactive CLI commands (e.g., `orobox console`). 
-
-For debugging background processes, you can manually set these variables in your `.env` file:
+### 2. Xdebug for CLI, Consumer, and Cron
+For debugging background processes or to have Xdebug enabled by default, you can set these variables in your `.env` file:
 - `ORO_CONSUMER_XDEBUG_ENABLED=true`: For Message Queue consumers.
 - `ORO_CRON_XDEBUG_ENABLED=true`: For Cron jobs.
 

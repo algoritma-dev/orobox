@@ -190,7 +190,6 @@ func EnsureDockerCompose() bool {
 		PhpFpmPort           string
 		HasSsl               bool
 		CertsPath            string
-		Xdebug               bool
 		UserRuntime          string
 		UseTmpfs             bool
 		TmpfsSize            string
@@ -278,7 +277,6 @@ func EnsureDockerCompose() bool {
 	}
 
 	data.Mailpit = viper.GetBool("services.mailpit")
-	data.Xdebug = viper.GetBool("services.php.xdebug")
 
 	data.Adminer = data.Postgres
 	if viper.IsSet("services.adminer") {

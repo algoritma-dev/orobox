@@ -167,7 +167,6 @@ services:
     environment:
       ORO_ENV: {{if eq .Type "demo"}}prod{{else}}${ORO_ENV:-dev}{{end}}
       ORO_LOG_PATH: php://stderr
-      ORO_XDEBUG_ENABLED: "{{.Xdebug}}"
     depends_on:
       "php-fpm-app":
         condition: service_healthy

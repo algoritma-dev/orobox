@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/algoritma-dev/orobox/internal/certificates"
-	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
 	"github.com/algoritma-dev/orobox/internal/utils"
 	"github.com/spf13/viper"
@@ -93,18 +92,6 @@ var upCmd = &cobra.Command{
 			fmt.Printf("	- ORO_SEARCH_URL=http://elasticsearch:9200\n")
 		}
 
-		if viper.GetBool("services.php.xdebug") {
-			utils.PrintTitle("Xdebug is ENABLED")
-			fmt.Println("To debug in PhpStorm:")
-			fmt.Println("  1. Ensure the 'Phone' icon (Listener) is ON.")
-			fmt.Println("  2. Configure Path Mappings in Settings -> PHP -> Servers:")
-			fmt.Printf("     - Host: %s\n", config.GetFirstDomainHost())
-			fmt.Printf("     - Local Path: %s\n", config.GetHostBundlePath())
-			fmt.Printf("       Remote Path: /var/www/oro/src/%s\n", config.GetBundlePath())
-			fmt.Println("\nTo debug background processes, set in your .env:")
-			fmt.Println("  - ORO_CONSUMER_XDEBUG_ENABLED=true (for message queue)")
-			fmt.Println("  - ORO_CRON_XDEBUG_ENABLED=true (for cron jobs)")
-		}
 	},
 }
 

@@ -19,21 +19,15 @@ type DomainConfig struct {
 	Ssl  bool   `yaml:"ssl" mapstructure:"ssl"`
 }
 
-// PhpConfig represents the configuration for PHP.
-type PhpConfig struct {
-	Xdebug bool `yaml:"xdebug,omitempty" mapstructure:"xdebug"`
-}
-
 // ServicesConfig represents the configuration for various services.
 type ServicesConfig struct {
-	Redis         bool      `yaml:"redis" mapstructure:"redis"`
-	Mailpit       bool      `yaml:"mailpit" mapstructure:"mailpit"`
-	Php           PhpConfig `yaml:"php,omitempty" mapstructure:"php"`
-	RabbitMQ      bool      `yaml:"rabbitmq" mapstructure:"rabbitmq"`
-	Elasticsearch bool      `yaml:"elasticsearch" mapstructure:"elasticsearch"`
-	RedisInsight  bool      `yaml:"redisinsight" mapstructure:"redisinsight"`
-	Kibana        bool      `yaml:"kibana" mapstructure:"kibana"`
-	Adminer       bool      `yaml:"adminer" mapstructure:"adminer"`
+	Redis         bool `yaml:"redis" mapstructure:"redis"`
+	Mailpit       bool `yaml:"mailpit" mapstructure:"mailpit"`
+	RabbitMQ      bool `yaml:"rabbitmq" mapstructure:"rabbitmq"`
+	Elasticsearch bool `yaml:"elasticsearch" mapstructure:"elasticsearch"`
+	RedisInsight  bool `yaml:"redisinsight" mapstructure:"redisinsight"`
+	Kibana        bool `yaml:"kibana" mapstructure:"kibana"`
+	Adminer       bool `yaml:"adminer" mapstructure:"adminer"`
 }
 
 // TestConfig represents the configuration for the test environment.

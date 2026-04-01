@@ -6,12 +6,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
 	"github.com/algoritma-dev/orobox/internal/utils"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 var (
@@ -44,13 +42,7 @@ var xdebugCmd = &cobra.Command{
 			xdebugTest = true
 		}
 
-		// 1. Update persistent configuration
-		updatePersistentConfig(enable)
-
-		// 2. Regenerate docker files
-		docker.EnsureDockerCompose()
-
-		// 3. Hot-patch running containers
+		// 1. Hot-patch running containers
 		if xdebugDev {
 			applyXdebugHotfix(enable, "php-fpm-app", true)
 			applyXdebugHotfix(enable, "application", false)
@@ -71,37 +63,6 @@ func init() {
 	rootCmd.AddCommand(xdebugCmd)
 	xdebugCmd.Flags().BoolVar(&xdebugDev, "dev", false, "Apply to development environment")
 	xdebugCmd.Flags().BoolVar(&xdebugTest, "test", false, "Apply to test environment")
-}
-
-func updatePersistentConfig(enable bool) {
-	configFile := viper.ConfigFileUsed()
-	if configFile == "" {
-		configFile = ".orobox.yaml"
-	}
-
-	if _, err := os.Stat(configFile); os.IsNotExist(err) {
-		return
-	}
-
-	data, err := os.ReadFile(configFile)
-	if err != nil {
-		utils.PrintWarning(fmt.Sprintf("Could not read config file: %v", err))
-		return
-	}
-
-	conf, err := config.ParseConfig(data)
-	if err != nil {
-		utils.PrintWarning(fmt.Sprintf("Could not parse config: %v", err))
-		return
-	}
-
-	conf.Services.Php.Xdebug = enable
-	err = config.SaveConfig(configFile, conf)
-	if err != nil {
-		utils.PrintWarning(fmt.Sprintf("Could not save config: %v", err))
-	} else {
-		utils.PrintInfo("Configuration updated in " + configFile)
-	}
 }
 
 func applyXdebugHotfix(enable bool, service string, reloadFpm bool) {
@@ -157,14 +118,6 @@ func isServiceRunning(serviceName string) bool {
 
 func showXdebugStatus() {
 	utils.PrintInfo("Checking Xdebug status...")
-
-	// 1. Config status
-	xdebugEnabled := viper.GetBool("services.php.xdebug")
-	statusStr := "DISABLED"
-	if xdebugEnabled {
-		statusStr = "ENABLED"
-	}
-	utils.PrintInfo(fmt.Sprintf("Configuration (persistent): %s", statusStr))
 
 	showAll := !xdebugDev && !xdebugTest
 
