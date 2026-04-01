@@ -63,17 +63,30 @@ func runQaCommand() {
 		twigTarget = "."
 	}
 
-	allTools := []struct {
+	type tool struct {
 		name    string
 		args    []string
 		enabled bool
-	}{
+	}
+
+	allTools := []tool{
 		{"phpstan", []string{"vendor/bin/phpstan", "analyze"}, qaPhpstan},
 		{"rector", []string{"vendor/bin/rector", "process"}, qaRector},
 		{"php-cs-fixer", []string{"vendor/bin/php-cs-fixer", "fix"}, qaPhpCsFixer},
 		{"twig-cs-fixer", []string{"vendor/bin/twig-cs-fixer", "lint", twigTarget}, qaTwigCsFixer},
-		{"eslint", []string{"npx", "--yes", "eslint", "--ignore-path", ".eslintignore", "--fix", "--quiet", jsTarget}, qaEslint},
-		{"stylelint", []string{"npx", "--yes", "stylelint", cssTarget, "--ignore-path", ".stylelintignore", "--fix", "--quiet", "--allow-empty-input"}, qaStylelint},
+	}
+
+	if isBundle {
+		allTools = append(allTools,
+			tool{"eslint", []string{"npx", "--yes", "eslint", "--config", config.OroRootDir + "/.eslintrc.yml", "--ignore-path", config.OroRootDir + "/.eslintignore", "--fix", "--quiet", jsTarget}, qaEslint},
+			tool{"stylelint", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.{scss,less,sass,html}", "--config", config.OroRootDir + "/.stylelintrc.yml", "--ignore-path", config.OroRootDir + "/.stylelintignore", "--fix", "--quiet", "--allow-empty-input"}, qaStylelint},
+			tool{"stylelint-css", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.css", "--config", config.OroRootDir + "/.stylelintrc-css.yml", "--ignore-path", config.OroRootDir + "/.stylelintignore-css", "--fix", "--quiet", "--allow-empty-input"}, qaStylelint},
+		)
+	} else {
+		allTools = append(allTools,
+			tool{"eslint", []string{"npx", "--yes", "eslint", "--ignore-path", ".eslintignore", "--fix", "--quiet", jsTarget}, qaEslint},
+			tool{"stylelint", []string{"npx", "--yes", "stylelint", cssTarget, "--ignore-path", ".stylelintignore", "--fix", "--quiet", "--allow-empty-input"}, qaStylelint},
+		)
 	}
 
 	anyEnabled := false

@@ -94,3 +94,94 @@ func TestQaCommand(t *testing.T) {
 		})
 	}
 }
+
+func TestQaBundleCommand(t *testing.T) {
+	oldRun := docker.RunComposeCommand
+	oldRunSilently := docker.RunComposeCommandSilently
+	oldRunWithOutput := docker.RunComposeCommandWithOutput
+	defer func() {
+		docker.RunComposeCommand = oldRun
+		docker.RunComposeCommandSilently = oldRunSilently
+		docker.RunComposeCommandWithOutput = oldRunWithOutput
+	}()
+
+	var calls [][]string
+	mockRun := func(_ string, args ...string) error {
+		calls = append(calls, args)
+		return nil
+	}
+	docker.RunComposeCommand = mockRun
+	docker.RunComposeCommandSilently = mockRun
+	docker.RunComposeCommandWithOutput = func(_ ...string) ([]byte, error) {
+		return []byte("[]"), nil
+	}
+
+	viper.Set("type", "bundle")
+	viper.Set("namespace", "Test\\MyBundle")
+	defer viper.Set("type", nil)
+	defer viper.Set("namespace", nil)
+
+	docker.ResetEnsuredServices()
+	qaPhpstan = false
+	qaRector = false
+	qaPhpCsFixer = false
+	qaTwigCsFixer = false
+	qaEslint = true
+	qaStylelint = true
+
+	rootCmd.SetArgs([]string{"qa"})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("rootCmd.Execute() failed: %v", err)
+	}
+
+	// 1 for up + 1 for eslint + 2 for stylelint (now split)
+	expectedCount := 4
+	if len(calls) != expectedCount {
+		t.Errorf("Expected %d calls, got %d. Calls: %v", expectedCount, len(calls), calls)
+	}
+
+	// Verify ESLint call
+	foundEslint := false
+	for _, call := range calls {
+		if contains(call, "eslint") {
+			foundEslint = true
+			if !contains(call, "/var/www/oro/.eslintrc.yml") {
+				t.Errorf("ESLint call missing .eslintrc.yml: %v", call)
+			}
+			if !contains(call, "/var/www/oro/.eslintignore") {
+				t.Errorf("ESLint call missing .eslintignore: %v", call)
+			}
+		}
+	}
+	if !foundEslint {
+		t.Error("ESLint call not found")
+	}
+
+	// Verify Stylelint calls
+	foundStylelint := false
+	foundStylelintCss := false
+	for _, call := range calls {
+		// Both calls contain "stylelint"
+		if contains(call, "stylelint") {
+			if contains(call, "/var/www/oro/.stylelintrc.yml") {
+				foundStylelint = true
+				if !contains(call, "/var/www/oro/.stylelintignore") {
+					t.Errorf("Stylelint call missing .stylelintignore: %v", call)
+				}
+			}
+			if contains(call, "/var/www/oro/.stylelintrc-css.yml") {
+				foundStylelintCss = true
+				if !contains(call, "/var/www/oro/.stylelintignore-css") {
+					t.Errorf("Stylelint-css call missing .stylelintignore-css: %v", call)
+				}
+			}
+		}
+	}
+	if !foundStylelint {
+		t.Error("Stylelint (non-CSS) call not found")
+	}
+	if !foundStylelintCss {
+		t.Error("Stylelint (CSS) call not found")
+	}
+}
