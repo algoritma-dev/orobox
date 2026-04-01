@@ -55,6 +55,9 @@ services:
   elasticsearch: false
   kibana: false
   adminer: true
+test:
+  use_tmpfs: true
+  tmpfs_size: 1g
 ```
 
 ### Configuration Fields
@@ -76,6 +79,9 @@ services:
     - `adminer`: (bool) Enable/disable Adminer (PostgreSQL manager).
     - `php`:
         - `xdebug`: (bool) Enable/disable Xdebug.
+- `test`:
+    - `use_tmpfs`: (bool) If enabled, uses RAM (tmpfs) for database files in the test container, significantly improving performance but data is lost on container restart.
+    - `tmpfs_size`: (string) Size of the tmpfs mount (e.g., "1g", "512m").
 
 *Note: Versions of PHP, PostgreSQL, Node.js, and other components are automatically determined by the `oro_version` setting and cannot be changed manually.*
 
@@ -147,7 +153,33 @@ Runs PHPUnit tests within the configured environment.
 orobox test
 ```
 
-### 8. Total Cleanup (`clean`)
+### 8. QA Tools Initialization (`qa-init`)
+Configures and installs the necessary QA tools (PHPStan, coding standards, ESLint, Stylelint) in your bundle or project.
+```bash
+orobox qa-init
+```
+*Note: This command is not available in `type: demo` mode.*
+
+### 9. Run QA Tools (`qa`)
+Executes the QA analysis tools. By default, it runs all tools if no specific flag is provided.
+```bash
+orobox qa
+```
+Options:
+- `--phpstan`: Run PHPStan analysis.
+- `--rector`: Run Rector process.
+- `--php-cs-fixer`: Run PHP-CS-Fixer fix.
+- `--twig-cs-fixer`: Run Twig-CS-Fixer lint.
+- `--eslint`: Run ESLint analysis.
+- `--stylelint`: Run Stylelint analysis.
+
+Example:
+```bash
+orobox qa --phpstan --eslint
+```
+*Note: This command is not available in `type: demo` mode.*
+
+### 10. Total Cleanup (`clean`)
 Removes all associated containers and volumes to start from scratch.
 ```bash
 orobox clean
