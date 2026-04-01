@@ -32,7 +32,7 @@ services:
       - .env
       - .env.test
     environment:
-      ORO_XDEBUG_ENABLED: "false"
+      ORO_XDEBUG_ENABLED: "{{.Xdebug}}"
     volumes: *volumes-app
     depends_on:
       db_test:

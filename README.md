@@ -49,8 +49,6 @@ services:
   redis: true
   redisinsight: true
   mailpit: true
-  php:
-    xdebug: true
   rabbitmq: true
   elasticsearch: false
   kibana: false
@@ -77,8 +75,6 @@ test:
     - `elasticsearch`: (bool) Enable/disable Elasticsearch/OpenSearch.
     - `kibana`: (bool) Enable/disable Kibana (only if Elasticsearch is enabled).
     - `adminer`: (bool) Enable/disable Adminer (PostgreSQL manager).
-    - `php`:
-        - `xdebug`: (bool) Enable/disable Xdebug.
 - `test`:
     - `use_tmpfs`: (bool) If enabled, uses RAM (tmpfs) for database files in the test container, significantly improving performance but data is lost on container restart.
     - `tmpfs_size`: (string) Size of the tmpfs mount (e.g., "1g", "512m").
@@ -191,8 +187,32 @@ Orobox includes Xdebug preinstalled, but disabled by default to maintain perform
 
 **Note:** Xdebug is always disabled in `type: demo` mode.
 
-### 1. Enabling Xdebug
-To enable Xdebug for your environment, set `xdebug: true` under `services.php` in the `.orobox.yaml` file:
+### 1. Enabling/Disabling Xdebug
+
+You can enable or disable Xdebug using the `xdebug` command:
+
+```bash
+orobox xdebug enable
+```
+
+This command will:
+- Update your `.orobox.yaml` configuration.
+- Regenerate the necessary Docker files.
+- Apply the change immediately to running containers ("hot-patching").
+
+To disable Xdebug:
+```bash
+orobox xdebug disable
+```
+
+You can specify which environment to target:
+```bash
+orobox xdebug enable --dev   # Development environment (default)
+orobox xdebug enable --test  # Test environment
+```
+
+### 2. Manual Configuration (Optional)
+If you prefer, you can still manually enable Xdebug in `.orobox.yaml`:
 
 ```yaml
 services:
@@ -202,7 +222,7 @@ services:
 
 After changing this setting, run `orobox up` to apply the configuration.
 
-### 2. Xdebug for CLI, Consumer, and Cron
+### 3. Xdebug for CLI, Consumer, and Cron
 By default, enabling Xdebug in `.orobox.yaml` activates it for FPM (web requests) and interactive CLI commands (e.g., `orobox console`). 
 
 For debugging background processes, you can manually set these variables in your `.env` file:

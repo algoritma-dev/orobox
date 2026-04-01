@@ -265,12 +265,9 @@ func generateConfig() {
 			},
 		},
 		Services: config.ServicesConfig{
-			Redis:        redisEnabled,
-			RedisInsight: redisInsightEnabled,
-			Mailpit:      mailpit,
-			Php: config.PhpConfig{
-				Xdebug: false,
-			},
+			Redis:         redisEnabled,
+			RedisInsight:  redisInsightEnabled,
+			Mailpit:       mailpit,
 			RabbitMQ:      rabbitmqEnabled,
 			Elasticsearch: elasticsearchEnabled,
 			Kibana:        kibanaEnabled,

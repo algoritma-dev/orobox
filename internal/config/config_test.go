@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/viper"
@@ -131,6 +132,65 @@ services:
 	}
 	if !config.Services.Php.Xdebug {
 		t.Errorf("Expected xdebug to be true")
+	}
+}
+
+func TestSaveConfig(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "saveconfig")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	configPath := filepath.Join(tmpDir, ".orobox.yaml")
+
+	conf := &OroConfig{
+		Namespace:  "MyNamespace",
+		OroVersion: "6.1",
+		Domains: []DomainConfig{
+			{Host: "example.com"},
+		},
+		Services: ServicesConfig{
+			Mailpit: true,
+			Php: PhpConfig{
+				Xdebug: false, // Should be omitted
+			},
+		},
+	}
+
+	err = SaveConfig(configPath, conf)
+	if err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("Read saved config failed: %v", err)
+	}
+
+	content := string(data)
+	if strings.Contains(content, "xdebug") {
+		t.Errorf("Expected xdebug to be omitted from YAML, but found it in:\n%s", content)
+	}
+	if strings.Contains(content, "php:") {
+		t.Errorf("Expected php section to be omitted from YAML if empty, but found it in:\n%s", content)
+	}
+
+	// Now try with Xdebug: true
+	conf.Services.Php.Xdebug = true
+	err = SaveConfig(configPath, conf)
+	if err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	data, err = os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("Read saved config failed: %v", err)
+	}
+
+	content = string(data)
+	if !strings.Contains(content, "xdebug: true") {
+		t.Errorf("Expected xdebug: true to be in YAML, but not found in:\n%s", content)
 	}
 }
 

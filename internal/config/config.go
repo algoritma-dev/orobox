@@ -21,14 +21,14 @@ type DomainConfig struct {
 
 // PhpConfig represents the configuration for PHP.
 type PhpConfig struct {
-	Xdebug bool `yaml:"xdebug" mapstructure:"xdebug"`
+	Xdebug bool `yaml:"xdebug,omitempty" mapstructure:"xdebug"`
 }
 
 // ServicesConfig represents the configuration for various services.
 type ServicesConfig struct {
 	Redis         bool      `yaml:"redis" mapstructure:"redis"`
 	Mailpit       bool      `yaml:"mailpit" mapstructure:"mailpit"`
-	Php           PhpConfig `yaml:"php" mapstructure:"php"`
+	Php           PhpConfig `yaml:"php,omitempty" mapstructure:"php"`
 	RabbitMQ      bool      `yaml:"rabbitmq" mapstructure:"rabbitmq"`
 	Elasticsearch bool      `yaml:"elasticsearch" mapstructure:"elasticsearch"`
 	RedisInsight  bool      `yaml:"redisinsight" mapstructure:"redisinsight"`
@@ -173,6 +173,15 @@ func ParseConfig(data []byte) (*OroConfig, error) {
 		return nil, err
 	}
 	return &c, nil
+}
+
+// SaveConfig saves the configuration to the specified path.
+func SaveConfig(path string, c *OroConfig) error {
+	data, err := yamlv3.Marshal(c)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }
 
 // GetNamespace returns the project namespace.
