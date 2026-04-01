@@ -48,6 +48,21 @@ func init() {
 }
 
 func runQaCommand() {
+	isBundle := viper.GetString("type") == config.InstallTypeBundle
+	workingDir := config.OroRootDir
+	if isBundle {
+		workingDir = config.OroRootDir + "/src/" + config.GetBundlePath()
+	}
+
+	jsTarget := "src"
+	cssTarget := "src/**/*.{css,scss,less,sass,html}"
+	twigTarget := "src"
+	if isBundle {
+		jsTarget = "Resources/public"
+		cssTarget = "Resources/public/**/*.{css,scss,less,sass,html}"
+		twigTarget = "."
+	}
+
 	allTools := []struct {
 		name    string
 		args    []string
@@ -56,9 +71,9 @@ func runQaCommand() {
 		{"phpstan", []string{"vendor/bin/phpstan", "analyze"}, qaPhpstan},
 		{"rector", []string{"vendor/bin/rector", "process"}, qaRector},
 		{"php-cs-fixer", []string{"vendor/bin/php-cs-fixer", "fix"}, qaPhpCsFixer},
-		{"twig-cs-fixer", []string{"vendor/bin/twig-cs-fixer", "lint"}, qaTwigCsFixer},
-		{"eslint", []string{"npx", "eslint", "--ignore-path", ".eslintignore", "--fix"}, qaEslint},
-		{"stylelint", []string{"npx", "stylelint", "--ignore-path", ".stylelintignore", "--fix"}, qaStylelint},
+		{"twig-cs-fixer", []string{"vendor/bin/twig-cs-fixer", "lint", twigTarget}, qaTwigCsFixer},
+		{"eslint", []string{"npx", "--yes", "eslint", "--ignore-path", ".eslintignore", "--fix", "--quiet", jsTarget}, qaEslint},
+		{"stylelint", []string{"npx", "--yes", "stylelint", cssTarget, "--ignore-path", ".stylelintignore", "--fix", "--quiet", "--allow-empty-input"}, qaStylelint},
 	}
 
 	anyEnabled := false
@@ -69,11 +84,6 @@ func runQaCommand() {
 		}
 	}
 
-	isBundle := viper.GetString("type") == config.InstallTypeBundle
-	workingDir := config.OroRootDir
-	if isBundle {
-		workingDir = config.OroRootDir + "/src/" + config.GetBundlePath()
-	}
 	utils.PrintInfo("Running QA tools in " + workingDir + "...")
 	if err := docker.EnsureServiceRunning("application_test"); err != nil {
 		utils.PrintError(fmt.Sprintf("Failed to ensure application_test service is running: %v", err))

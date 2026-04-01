@@ -79,12 +79,12 @@ func runQaInitCommand() {
 	}
 
 	// 3. Install NPM packages
-	utils.PrintInfo("Installing NPM QA packages (eslint@^8.57.0, stylelint@^15.11.0, oro-stylelint-config)...")
+	utils.PrintInfo("Installing NPM QA packages (eslint@^8.57.0, eslint-plugin-no-jquery, stylelint@^15.11.0, @oroinc/oro-stylelint-config, eslint-plugin-import)...")
 	npmArgs := []string{"exec", "-w", workingDir}
 	if !isTTY() {
 		npmArgs = append(npmArgs, "-T")
 	}
-	npmArgs = append(npmArgs, "application_test", "npm", "install", "--save-dev", "eslint@^8.57.0", "stylelint@^15.11.0", "@oroinc/oro-stylelint-config")
+	npmArgs = append(npmArgs, "application_test", "npm", "install", "--save-dev", "eslint@^8.57.0", "eslint-plugin-no-jquery", "stylelint@^15.11.0", "@oroinc/oro-stylelint-config", "eslint-plugin-import")
 
 	if err := docker.RunComposeCommand("", npmArgs...); err != nil {
 		utils.PrintError(fmt.Sprintf("Failed to install NPM packages: %v", err))
