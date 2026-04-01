@@ -9,12 +9,23 @@ import (
 
 func TestQaCommand(t *testing.T) {
 	oldRun := docker.RunComposeCommand
-	defer func() { docker.RunComposeCommand = oldRun }()
+	oldRunSilently := docker.RunComposeCommandSilently
+	oldRunWithOutput := docker.RunComposeCommandWithOutput
+	defer func() {
+		docker.RunComposeCommand = oldRun
+		docker.RunComposeCommandSilently = oldRunSilently
+		docker.RunComposeCommandWithOutput = oldRunWithOutput
+	}()
 
 	var calls [][]string
-	docker.RunComposeCommand = func(_ string, args ...string) error {
+	mockRun := func(_ string, args ...string) error {
 		calls = append(calls, args)
 		return nil
+	}
+	docker.RunComposeCommand = mockRun
+	docker.RunComposeCommandSilently = mockRun
+	docker.RunComposeCommandWithOutput = func(_ ...string) ([]byte, error) {
+		return []byte("[]"), nil
 	}
 
 	viper.Set("type", "project")
@@ -29,19 +40,19 @@ func TestQaCommand(t *testing.T) {
 		{
 			"All tools by default",
 			[]string{"qa"},
-			6,
+			7, // 1 for up + 6 for tools
 			[]string{"phpstan", "rector", "php-cs-fixer", "twig-cs-fixer", "eslint", "stylelint"},
 		},
 		{
 			"Only PHPStan",
 			[]string{"qa", "--phpstan"},
-			1,
+			2, // 1 for up + 1 for phpstan
 			[]string{"phpstan"},
 		},
 		{
 			"PHPStan and Rector",
 			[]string{"qa", "--phpstan", "--rector"},
-			2,
+			3, // 1 for up + 2 for tools
 			[]string{"phpstan", "rector"},
 		},
 	}
@@ -49,6 +60,7 @@ func TestQaCommand(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			calls = nil
+			docker.ResetEnsuredServices()
 			// Reset global flags before each run
 			qaPhpstan = false
 			qaRector = false

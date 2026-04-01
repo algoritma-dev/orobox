@@ -799,6 +799,157 @@ var RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
 	return output, err
 }
 
+// ServiceStatus represents the status of a Docker Compose service.
+type ServiceStatus struct {
+	Service string `json:"Service"`
+	State   string `json:"State"`
+	Health  string `json:"Health"`
+}
+
+var (
+	ensuredServices      = make(map[string]bool)
+	ensuredServicesMu    sync.Mutex
+	dbInitializedCache   = make(map[bool]bool)
+	dbInitializedCacheMu sync.Mutex
+)
+
+// ResetEnsuredServices resets the cache of ensured services and database states.
+// This is primarily used for testing.
+func ResetEnsuredServices() {
+	ensuredServicesMu.Lock()
+	defer ensuredServicesMu.Unlock()
+	ensuredServices = make(map[string]bool)
+
+	dbInitializedCacheMu.Lock()
+	defer dbInitializedCacheMu.Unlock()
+	dbInitializedCache = make(map[bool]bool)
+}
+
+// EnsureServiceRunning checks if the service is running and healthy.
+// If it's not, it starts the service with 'up -d'.
+func EnsureServiceRunning(serviceName string) error {
+	return EnsureServicesRunning([]string{serviceName})
+}
+
+// EnsureServicesRunning checks if the services are running and healthy.
+// If any are not, it starts them with 'up -d'.
+func EnsureServicesRunning(serviceNames []string) error {
+	var servicesToStart []string
+	var servicesToCheck []string
+
+	ensuredServicesMu.Lock()
+	for _, name := range serviceNames {
+		if !ensuredServices[name] {
+			servicesToCheck = append(servicesToCheck, name)
+		}
+	}
+	ensuredServicesMu.Unlock()
+
+	if len(servicesToCheck) == 0 {
+		return nil
+	}
+
+	// Use docker compose ps --format json to check status of all services at once
+	args := append([]string{"ps", "--format", "json"}, servicesToCheck...)
+	output, err := RunComposeCommandWithOutput(args...)
+
+	statusMap := make(map[string]ServiceStatus)
+	if err == nil {
+		var statuses []ServiceStatus
+		if jsonErr := json.Unmarshal(output, &statuses); jsonErr == nil {
+			for _, s := range statuses {
+				statusMap[s.Service] = s
+			}
+		} else {
+			// Fallback for older versions: try to parse line-delimited JSON or single object
+			lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+			for _, line := range lines {
+				var s ServiceStatus
+				if jsonErr := json.Unmarshal([]byte(line), &s); jsonErr == nil {
+					statusMap[s.Service] = s
+				}
+			}
+		}
+	}
+
+	for _, name := range servicesToCheck {
+		status, ok := statusMap[name]
+		if ok && status.State == "running" && (status.Health == "" || status.Health == "healthy" || status.Health == "starting") {
+			ensuredServicesMu.Lock()
+			ensuredServices[name] = true
+			ensuredServicesMu.Unlock()
+		} else {
+			servicesToStart = append(servicesToStart, name)
+		}
+	}
+
+	if len(servicesToStart) == 0 {
+		return nil
+	}
+
+	// If any service is not running/healthy, start them
+	upArgs := append([]string{"up", "-d"}, servicesToStart...)
+	msg := fmt.Sprintf("Starting services %s...", strings.Join(servicesToStart, ", "))
+	if err := RunComposeCommandSilently(msg, upArgs...); err != nil {
+		return err
+	}
+
+	ensuredServicesMu.Lock()
+	for _, name := range servicesToStart {
+		ensuredServices[name] = true
+	}
+	ensuredServicesMu.Unlock()
+
+	return nil
+}
+
+// IsDatabaseInitialized checks if the database is initialized.
+func IsDatabaseInitialized(test bool) (bool, error) {
+	dbInitializedCacheMu.Lock()
+	if initialized, ok := dbInitializedCache[test]; ok {
+		dbInitializedCacheMu.Unlock()
+		return initialized, nil
+	}
+	dbInitializedCacheMu.Unlock()
+
+	dbUser, _, dbName := GetDatabaseCredentialsFor(test)
+	container := "db"
+	if test {
+		container = "db_test"
+	}
+
+	checkArgs := []string{
+		"exec", "-T", container,
+		"psql",
+		"-U", dbUser,
+		"-d", dbName,
+		"-c", "SELECT text_value FROM oro_config_value WHERE name = 'is_installed' AND section = 'oro_distribution';",
+		"-t", "-A",
+	}
+
+	output, err := RunComposeCommandWithOutput(checkArgs...)
+	if err != nil {
+		// If the error is that the table doesn't exist, it's not initialized
+		if strings.Contains(string(output), "relation \"oro_config_value\" does not exist") ||
+			strings.Contains(string(output), "database \""+dbName+"\" does not exist") {
+			SetDatabaseInitializedCache(test, false)
+			return false, nil
+		}
+		return false, err
+	}
+
+	isInstalled := strings.TrimSpace(string(output)) == "1"
+	SetDatabaseInitializedCache(test, isInstalled)
+	return isInstalled, nil
+}
+
+// SetDatabaseInitializedCache updates the in-memory cache for the database state.
+func SetDatabaseInitializedCache(test bool, initialized bool) {
+	dbInitializedCacheMu.Lock()
+	defer dbInitializedCacheMu.Unlock()
+	dbInitializedCache[test] = initialized
+}
+
 func writeDockerfile(internalDir string, data any) bool {
 	src := "templates/docker/Dockerfile"
 	dockerfileContent, err := fs.ReadFile(Templates, src)

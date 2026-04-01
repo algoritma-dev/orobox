@@ -43,28 +43,33 @@ var testInitCmd = &cobra.Command{
 			return
 		}
 
-		services := []string{"up", "-d", "db_test", "application_test"}
+		serviceNames := []string{"db_test", "application_test"}
 		if conf.Services.Redis {
-			services = append(services, "redis")
+			serviceNames = append(serviceNames, "redis")
 		}
 		if conf.Services.RabbitMQ {
-			services = append(services, "rabbitmq")
+			serviceNames = append(serviceNames, "rabbitmq")
 		}
 		if conf.Services.Elasticsearch {
-			services = append(services, "elasticsearch")
+			serviceNames = append(serviceNames, "elasticsearch")
 		}
 
-		if err := docker.RunComposeCommandSilently("Starting services for test environment...", services...); err != nil {
+		if err := docker.EnsureServicesRunning(serviceNames); err != nil {
 			utils.PrintError(fmt.Sprintf("Failed to start services: %v", err))
 			return
 		}
 
 		// Check if already initialized
-		checkArgs := []string{"exec", "-T", "application_test", "php", "bin/console", "doctrine:query:sql", "SELECT 1 FROM oro_user LIMIT 1", "--env=test"}
+		dbUser, dbPass, dbName := docker.GetDatabaseTestCredentials()
 		utils.StartLoader("Checking for existing installation...")
-		_, err := docker.RunComposeCommandWithOutput(checkArgs...)
+		isInstalled, err := docker.IsDatabaseInitialized(true)
 		utils.StopLoader()
-		if err == nil {
+
+		if err != nil {
+			utils.PrintWarning(fmt.Sprintf("failed to check database status: %v", err))
+		}
+
+		if isInstalled {
 			reader := bufio.NewReader(os.Stdin)
 			if !utils.AskYesNo(reader, "Test environment is already initialized. Do you want to reset it?", false) {
 				utils.PrintInfo("Aborted.")
@@ -73,16 +78,10 @@ var testInitCmd = &cobra.Command{
 		}
 
 		// Drop and create database to ensure clean state
-		dbUser := viper.GetString("db_user")
-		if dbUser == "" {
-			dbUser = os.Getenv("ORO_DB_USER")
-		}
-		if dbUser == "" {
-			dbUser = "oro_db_user"
-		}
+		docker.SetDatabaseInitializedCache(true, false)
 
 		// Try psql first with FORCE (requires Postgres 13+)
-		dropSQL := "DROP DATABASE IF EXISTS oro_db_test WITH (FORCE);"
+		dropSQL := fmt.Sprintf("DROP DATABASE IF EXISTS %s WITH (FORCE);", dbName)
 		dropArgs := []string{"exec", "-T", "db_test", "psql", "-U", dbUser, "-d", "postgres", "-c", dropSQL}
 		if err := docker.RunComposeCommandSilently("Dropping test database...", dropArgs...); err != nil {
 			utils.PrintWarning(fmt.Sprintf("failed to drop test database using psql: %v. Trying via doctrine...", err))
@@ -109,9 +108,9 @@ var testInitCmd = &cobra.Command{
 			return
 		}
 
+		docker.SetDatabaseInitializedCache(true, true)
 		utils.PrintSuccess("Test environment initialized successfully!")
 
-		dbUser, dbPass, dbName := docker.GetDatabaseTestCredentials()
 		utils.PrintTitle("Test Database Connection (e.g. PhpStorm):")
 		fmt.Println("  - Host: localhost")
 		fmt.Println("  - Port: 5433")

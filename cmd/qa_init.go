@@ -28,10 +28,8 @@ var qaInitCmd = &cobra.Command{
 			return
 		}
 
-		services := []string{"up", "-d", "db_test", "application_test"}
-
-		if err := docker.RunComposeCommandSilently("Starting services for test environment...", services...); err != nil {
-			utils.PrintError(fmt.Sprintf("Failed to start services: %v", err))
+		if err := docker.EnsureServiceRunning("application_test"); err != nil {
+			utils.PrintError(fmt.Sprintf("Failed to ensure application_test service is running: %v", err))
 			return
 		}
 

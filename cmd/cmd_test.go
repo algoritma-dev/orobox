@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"bytes"
-	"fmt"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -144,9 +143,10 @@ func TestTestCommand(t *testing.T) {
 	docker.RunComposeCommandSilently = mockRunSilently
 
 	docker.RunComposeCommandWithOutput = func(_ ...string) ([]byte, error) {
-		return []byte("oro_db_test |"), nil
+		return []byte("1"), nil
 	}
 
+	docker.ResetEnsuredServices()
 	rootCmd.SetArgs([]string{"test"})
 	err := rootCmd.Execute()
 	if err != nil {
@@ -317,7 +317,7 @@ func TestTestCommandBundle(t *testing.T) {
 	docker.RunComposeCommandSilently = mockRunSilently
 
 	docker.RunComposeCommandWithOutput = func(_ ...string) ([]byte, error) {
-		return []byte("oro_db_test |"), nil
+		return []byte("1"), nil
 	}
 
 	viper.Set("type", "bundle")
@@ -327,6 +327,7 @@ func TestTestCommandBundle(t *testing.T) {
 		viper.Set("namespace", nil)
 	}()
 
+	docker.ResetEnsuredServices()
 	rootCmd.SetArgs([]string{"test"})
 	err := rootCmd.Execute()
 	if err != nil {
@@ -378,9 +379,10 @@ func TestTestInitCommand(t *testing.T) {
 
 	// Simula ambiente NON inizializzato per evitare prompt
 	docker.RunComposeCommandWithOutput = func(_ ...string) ([]byte, error) {
-		return nil, fmt.Errorf("not initialized")
+		return []byte("0"), nil
 	}
 
+	docker.ResetEnsuredServices()
 	rootCmd.SetArgs([]string{"test-init"})
 	err := rootCmd.Execute()
 	if err != nil {

@@ -4,7 +4,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
@@ -35,36 +34,23 @@ func init() {
 }
 
 func runTestCommand() {
-	// Ensure application_test container is running
-	upArgs := []string{"up", "-d", "db_test", "application_test"}
-	if err := docker.RunComposeCommandSilently("Starting test application...", upArgs...); err != nil {
-		utils.PrintWarning(fmt.Sprintf("failed to ensure application_test is running: %v", err))
+	// Ensure services are running
+	if err := docker.EnsureServicesRunning([]string{"db_test", "application_test"}); err != nil {
+		utils.PrintWarning(fmt.Sprintf("failed to ensure services are running: %v", err))
 	}
 
-	// Check if database schema exists
-	checkArgs := []string{
-		"exec", "-T", "db_test",
-		"psql",
-		"-U", "oro_db_user", // postgres user
-		"-lqt", // list databases in quiet format
-	}
+	// Check if database is initialized
 	utils.StartLoader("Checking test environment...")
-	databases, err := docker.RunComposeCommandWithOutput(checkArgs...)
+	isInstalled, err := docker.IsDatabaseInitialized(true)
+	utils.StopLoader()
 
-	// Find db_name in output (can be overridden by ORO_DB_NAME_TEST)
-	_, _, dbName := docker.GetDatabaseTestCredentials()
-	found := false
-	for _, line := range strings.Split(string(databases), "\n") {
-		fields := strings.Split(line, "|")
-		if len(fields) > 0 && strings.TrimSpace(fields[0]) == dbName {
-			found = true
-			break
-		}
+	if err != nil {
+		utils.PrintWarning(fmt.Sprintf("failed to check database status: %v", err))
+		// We proceed anyway, PHPUnit will fail later with a better error message if it's really down
 	}
 
-	utils.StopLoader()
-	if err != nil || !found {
-		utils.PrintError("Test database schema is not initialized or incomplete.")
+	if !isInstalled {
+		utils.PrintError("Test database is not initialized.")
 		utils.PrintInfo("Please run 'orobox test-init' to prepare the test environment.")
 		return
 	}

@@ -75,6 +75,10 @@ func runQaCommand() {
 		workingDir = config.OroRootDir + "/src/" + config.GetBundlePath()
 	}
 	utils.PrintInfo("Running QA tools in " + workingDir + "...")
+	if err := docker.EnsureServiceRunning("application_test"); err != nil {
+		utils.PrintError(fmt.Sprintf("Failed to ensure application_test service is running: %v", err))
+		os.Exit(1)
+	}
 	for _, tool := range allTools {
 		if anyEnabled && !tool.enabled {
 			continue
