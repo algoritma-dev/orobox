@@ -130,9 +130,8 @@ type OroConfig struct {
 
 // Install types for OroCommerce.
 const (
-	InstallTypeBundle  = "bundle"
-	InstallTypeProject = "project"
-	InstallTypeDemo    = "demo"
+	InstallTypeBundle = "bundle"
+	// InstallTypeProject and InstallTypeDemo are moved to separate branches
 )
 
 // OroRootDir is the base directory for OroCommerce in the container.
@@ -147,10 +146,8 @@ func (c *OroConfig) Validate() error {
 		c.Type = InstallTypeBundle
 	}
 
-	if c.Type == InstallTypeBundle {
-		if c.Namespace == "" {
-			return errors.New("config error: field 'namespace' is required (did you use 'bundle_namespace' by mistake?)")
-		}
+	if c.Namespace == "" {
+		return errors.New("config error: field 'namespace' is required (did you use 'bundle_namespace' by mistake?)")
 	}
 
 	if c.OroVersion == "" {

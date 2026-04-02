@@ -1,6 +1,6 @@
 # Orobox - CLI Tool for OroCommerce Development
 
-Orobox is a command-line tool (CLI) developed in Go to quickly set up an isolated and reproducible development environment for OroCommerce. It supports the development of individual **bundles**, the entire **application project**, or the creation of a **local demo/production** environment.
+Orobox is a command-line tool (CLI) developed in Go to quickly set up an isolated and reproducible development environment for OroCommerce. It supports the development of individual **bundles**.
 
 ## ⚠️ Important Disclaimer
 **WARNING: This tool is designed EXCLUSIVELY for local development. It MUST NOT be used in production environments.** Orobox configures the environment to facilitate debugging and development, which may not comply with security requirements and best practices necessary for a production environment.
@@ -33,11 +33,11 @@ mkdir -Force "$HOME\.local\bin"; iwr "https://github.com/algoritma-dev/orobox/re
 
 ## Configuration (`.orobox.yaml`)
 
-Orobox uses a configuration file called `.orobox.yaml` in the root of your bundle or project. If the file does not exist, the `init` command will guide you through its interactive creation.
+Orobox uses a configuration file called `.orobox.yaml` in the root of your bundle. If the file does not exist, the `init` command will guide you through its interactive creation.
 
 Example `.orobox.yaml` file:
 ```yaml
-type: bundle # Can be: bundle, project, demo
+type: bundle
 class: MyBundle
 namespace: MyVendor\Bundle\MyBundle
 oro_version: "6.1"
@@ -64,12 +64,9 @@ commands:
 ```
 
 ### Configuration Fields
-- `type`: Defines the installation type.
-- `bundle` (default): Optimized for developing a single bundle. Maps local code to `/var/www/oro/src/<Namespace>`.
-- `project`: For developing an entire OroCommerce application. Maps the entire local project to `/var/www/oro`.
-- `demo`: Environment similar to production (`ORO_ENV=prod`). Xdebug, Mailpit, and other dev tools are disabled.
-- `class`: (Only for `type: bundle`) Name of the bundle class.
-- `namespace`: (Only for `type: bundle`) PHP namespace of the bundle.
+- `type`: Defines the installation type (currently only `bundle` is supported in the main branch).
+- `class`: Name of the bundle class.
+- `namespace`: PHP namespace of the bundle.
 - `oro_version`: OroCommerce version (e.g., "7.0", "6.1", "6.0", "5.1").
 - `domains`: List of domains for the environment.
 - `services`: Configuration for optional services and tools:
@@ -100,7 +97,7 @@ These options can be used with any command:
 The main command is `oro` (or `orobox`, depending on how you installed it).
 
 ### 1. Initialization (`init`)
-Prepares the development environment in your bundle or project repository.
+Prepares the development environment in your bundle repository.
 ```bash
 orobox init
 ```
@@ -110,7 +107,6 @@ This command:
 - Configures the necessary Docker files.
 
 Options:
-- `--type`, `-t`: Installation type (`bundle`, `project`, `demo`).
 - `--bundle-path`, `-b`: Bundle path (default ".").
 - `--oro-version`, `-v`: OroCommerce version to use (default "6.1").
 - `--bundle-namespace`, `-n`: Bundle namespace (e.g., "MyVendor/Bundle/MyBundle").
@@ -123,7 +119,7 @@ orobox up
 The command dynamically generates the `docker-compose.yml` file, starts the services, and proceeds with the environment installation or update.
 
 ### 3. Stop Environment (`down`)
-Shuts down the Docker services associated with the project.
+Shuts down the Docker services associated with the bundle.
 ```bash
 orobox down
 ```
@@ -160,11 +156,10 @@ orobox test
 ```
 
 ### 8. QA Tools Initialization (`qa-init`)
-Configures and installs the necessary QA tools (PHPStan, coding standards, ESLint, Stylelint) in your bundle or project.
+Configures and installs the necessary QA tools (PHPStan, coding standards, ESLint, Stylelint) in your bundle.
 ```bash
 orobox qa-init
 ```
-*Note: This command is not available in `type: demo` mode.*
 
 ### 9. Run QA Tools (`qa`)
 Executes the QA analysis tools. By default, it runs all tools if no specific flag is provided.
@@ -183,7 +178,6 @@ Example:
 ```bash
 orobox qa --phpstan --eslint
 ```
-*Note: This command is not available in `type: demo` mode.*
 
 ### 10. Total Cleanup (`clean`)
 Removes all associated containers and volumes to start from scratch.
@@ -210,7 +204,6 @@ If you run `orobox run --help`, you will see a dynamic list of all commands conf
 
 Orobox includes Xdebug preinstalled, but disabled by default to maintain performance.
 
-**Note:** Xdebug is always disabled in `type: demo` mode.
 
 ### 1. Enabling/Disabling Xdebug
 
@@ -251,10 +244,8 @@ To debug with PHPStorm:
     - **Port**: `80` (or `443` if using SSL).
     - **Debugger**: Xdebug.
 3.  **Path Mappings**: Enable "Use path mappings" and configure:
-    - **Local Path**: The root folder of your bundle or project on the host machine.
-    - **Remote Path**: 
-        - For `type: bundle`: `/var/www/oro/src/<BundleNamespace>` (e.g., `/var/www/oro/src/MyVendor/Bundle/MyBundle`).
-        - For `type: project`: `/var/www/oro`.
+    - **Local Path**: The root folder of your bundle on the host machine.
+    - **Remote Path**: `/var/www/oro/src/<BundleNamespace>` (e.g., `/var/www/oro/src/MyVendor/Bundle/MyBundle`).
 4.  **Xdebug Port**: Ensure the port in `Settings -> PHP -> Debug` is set to `9003`.
 
 ## Internal Structure

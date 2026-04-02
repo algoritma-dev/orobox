@@ -7,18 +7,12 @@ x-templates:
       - "host.docker.internal:host-gateway"
 
   volumes-oro: &volumes-oro
-                 {{if eq .Type "project" -}}
-                 - "{{.BundlePath}}:/var/www/oro"
-    {{- else -}}
-                 - "oro_app:/var/www/oro"
-                 {{if eq .Type "bundle" -}}
-                 - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
-                 - "{{.BundlePath}}/vendor-oro:/var/www/oro/vendor"
-                 {{- end}}
-                 - "cache:/var/www/oro/var/cache"
-                 - "public_storage:/var/www/oro/public/media"
-                 - "private_storage:/var/www/oro/var/data"
-    {{- end}}
+    - "oro_app:/var/www/oro"
+    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
+    - "{{.BundlePath}}/vendor-oro:/var/www/oro/vendor"
+    - "cache:/var/www/oro/var/cache"
+    - "public_storage:/var/www/oro/public/media"
+    - "private_storage:/var/www/oro/var/data"
 
 services:
   application:
@@ -72,18 +66,12 @@ services:
       - /opt/oro-nginx
     volumes:
       - "./nginx.conf:/etc/nginx/http.d/default.conf:ro"
-      {{if eq .Type "project" -}}
-      - "{{.BundlePath}}:/var/www/oro"
-      {{- else -}}
       - "oro_app:/var/www/oro"
-      {{if eq .Type "bundle" -}}
       - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
       - "{{.BundlePath}}/vendor-oro:/var/www/oro/vendor"
-      {{- end}}
       - "cache:/var/www/oro/var/cache:ro"
       - "public_storage:/var/www/oro/public/media:ro"
       - "private_storage:/var/www/oro/var/data:ro"
-      {{- end}}
       {{if .HasSsl -}}
       - "{{.CertsPath}}:/etc/nginx/certs:ro"
       {{- end}}
@@ -97,33 +85,23 @@ services:
       - |
         echo "Initializing volumes and permissions for ${ORO_USER_RUNTIME:-www-data}..."
         mkdir -p bin config public src templates translations var assets var/cache var/logs var/data public/media vendor
-        {{if eq .Type "bundle" -}}
         if [ -d /vendor-host ] && [ -z "$$(ls -A /vendor-host)" ]; then
             echo "Populating vendor folder on host from container..."
             cp -rp vendor/. /vendor-host/
         fi
-        {{- end}}
         chown -R ${ORO_USER_RUNTIME:-www-data} . bin config public src templates translations var assets var/cache var/logs var/data public/media vendor 2>/dev/null || true
-        {{if eq .Type "bundle" -}}
         [ -d /vendor-host ] && chown -R ${ORO_USER_RUNTIME:-www-data} /vendor-host 2>/dev/null || true
-        {{- end}}
         chmod -R 777 var/cache var/logs var/data 2>/dev/null || true
         true
     environment:
       ORO_XDEBUG_ENABLED: "false"
     volumes:
-                 {{if eq .Type "project" -}}
-                 - "{{.BundlePath}}:/var/www/oro"
-    {{- else -}}
-                 - "oro_app:/var/www/oro"
-                 {{if eq .Type "bundle" -}}
-                 - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
-                 - "{{.BundlePath}}/vendor-oro:/vendor-host"
-                 {{- end}}
-                 - "cache:/var/www/oro/var/cache"
-                 - "public_storage:/var/www/oro/public/media"
-                 - "private_storage:/var/www/oro/var/data"
-    {{- end}}
+      - "oro_app:/var/www/oro"
+      - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
+      - "{{.BundlePath}}/vendor-oro:/vendor-host"
+      - "cache:/var/www/oro/var/cache"
+      - "public_storage:/var/www/oro/public/media"
+      - "private_storage:/var/www/oro/var/data"
 
   web-init:
     <<: *oro-app
@@ -154,7 +132,7 @@ services:
       timeout: 30s
       start_period: 15s
     environment:
-      ORO_ENV: {{if eq .Type "demo"}}prod{{else}}${ORO_ENV:-dev}{{end}}
+      ORO_ENV: ${ORO_ENV:-dev}
       ORO_LOG_PATH: php://stderr
     depends_on:
       {{if .Postgres -}}
@@ -188,7 +166,7 @@ services:
     user: ${ORO_USER_RUNTIME:-www-data}
     init: true
     environment:
-      ORO_ENV: {{if eq .Type "demo"}}prod{{else}}${ORO_ENV:-dev}{{end}}
+      ORO_ENV: ${ORO_ENV:-dev}
       ORO_LOG_PATH: php://stderr
     depends_on:
       "php-fpm-app":
@@ -202,7 +180,7 @@ services:
     user: ${ORO_USER_RUNTIME:-www-data}
     init: true
     environment:
-      ORO_ENV: {{if eq .Type "demo"}}prod{{else}}${ORO_ENV:-dev}{{end}}
+      ORO_ENV: ${ORO_ENV:-dev}
       ORO_LOG_PATH: php://stderr
       ORO_XDEBUG_ENABLED: ${ORO_CONSUMER_XDEBUG_ENABLED:-false}
     depends_on:
@@ -220,7 +198,7 @@ services:
         soft: 1024
         hard: 1048576
     environment:
-      ORO_ENV: {{if eq .Type "demo"}}prod{{else}}${ORO_ENV:-dev}{{end}}
+      ORO_ENV: ${ORO_ENV:-dev}
       ORO_LOG_PATH: php://stderr
       ORO_XDEBUG_ENABLED: ${ORO_CRON_XDEBUG_ENABLED:-false}
     volumes: *volumes-oro
@@ -265,7 +243,7 @@ services:
       retries: 5
     restart: unless-stopped
   {{end}}
-  {{if and .RedisInsight (ne .Type "demo")}}
+  {{if .RedisInsight}}
   redisinsight:
     image: redis/redisinsight:latest
     ports:
@@ -294,7 +272,7 @@ services:
       timeout: 5s
       retries: 5
     ports:
-      {{if ne .Type "demo" -}}
+      {{if true -}}
       - "15672:15672"
       {{- end}}
       - "5672:5672"
@@ -333,7 +311,7 @@ services:
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://127.0.0.1:3000/health" ]
     restart: on-failure
-  {{if and .Adminer (ne .Type "demo")}}
+  {{if .Adminer}}
   adminer:
     image: adminer:latest
     ports:
@@ -342,7 +320,7 @@ services:
     depends_on:
       - db
   {{end}}
-  {{if and .Kibana (ne .Type "demo")}}
+  {{if .Kibana}}
   kibana:
     image: "kibana:{{.ElasticsearchVersion}}"
     ports:

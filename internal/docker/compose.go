@@ -256,7 +256,7 @@ func EnsureDockerCompose() bool {
 		data.ElasticsearchVersion = versions.Elasticsearch
 	}
 
-	data.Kibana = data.Elasticsearch && data.Type != "demo"
+	data.Kibana = data.Elasticsearch
 	if viper.IsSet("services.kibana") {
 		data.Kibana = viper.GetBool("services.kibana")
 	}
@@ -267,9 +267,7 @@ func EnsureDockerCompose() bool {
 	}
 	data.BundlePath = absBundlePath
 
-	if data.Type == config.InstallTypeBundle {
-		_ = os.MkdirAll(filepath.Join(data.BundlePath, "vendor"), 0755)
-	}
+	_ = os.MkdirAll(filepath.Join(data.BundlePath, "vendor"), 0755)
 
 	data.Redis = viper.GetBool("services.redis")
 	if data.Redis {
