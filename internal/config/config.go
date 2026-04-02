@@ -130,9 +130,8 @@ type OroConfig struct {
 
 // Install types for OroCommerce.
 const (
-	InstallTypeBundle  = "bundle"
-	InstallTypeProject = "project"
-	InstallTypeDemo    = "demo"
+	InstallTypeBundle = "bundle"
+	InstallTypeDemo   = "demo"
 )
 
 // OroRootDir is the base directory for OroCommerce in the container.

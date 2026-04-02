@@ -1,6 +1,6 @@
 # Orobox - CLI Tool for OroCommerce Development
 
-Orobox is a command-line tool (CLI) developed in Go to quickly set up an isolated and reproducible development environment for OroCommerce. It supports the development of individual **bundles**, the entire **application project**, or the creation of a **local demo/production** environment.
+Orobox is a command-line tool (CLI) developed in Go to quickly set up an isolated and reproducible development environment for OroCommerce. It supports the development of individual **bundles** or the creation of a **local demo/production** environment.
 
 ## ⚠️ Important Disclaimer
 **WARNING: This tool is designed EXCLUSIVELY for local development. It MUST NOT be used in production environments.** Orobox configures the environment to facilitate debugging and development, which may not comply with security requirements and best practices necessary for a production environment.
@@ -37,7 +37,7 @@ Orobox uses a configuration file called `.orobox.yaml` in the root of your bundl
 
 Example `.orobox.yaml` file:
 ```yaml
-type: bundle # Can be: bundle, project, demo
+type: bundle # Can be: bundle, demo
 class: MyBundle
 namespace: MyVendor\Bundle\MyBundle
 oro_version: "6.1"
@@ -66,7 +66,6 @@ commands:
 ### Configuration Fields
 - `type`: Defines the installation type.
 - `bundle` (default): Optimized for developing a single bundle. Maps local code to `/var/www/oro/src/<Namespace>`.
-- `project`: For developing an entire OroCommerce application. Maps the entire local project to `/var/www/oro`.
 - `demo`: Environment similar to production (`ORO_ENV=prod`). Xdebug, Mailpit, and other dev tools are disabled.
 - `class`: (Only for `type: bundle`) Name of the bundle class.
 - `namespace`: (Only for `type: bundle`) PHP namespace of the bundle.
@@ -110,7 +109,7 @@ This command:
 - Configures the necessary Docker files.
 
 Options:
-- `--type`, `-t`: Installation type (`bundle`, `project`, `demo`).
+- `--type`, `-t`: Installation type (`bundle`, `demo`).
 - `--bundle-path`, `-b`: Bundle path (default ".").
 - `--oro-version`, `-v`: OroCommerce version to use (default "6.1").
 - `--bundle-namespace`, `-n`: Bundle namespace (e.g., "MyVendor/Bundle/MyBundle").

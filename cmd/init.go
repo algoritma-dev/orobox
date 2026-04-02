@@ -3,12 +3,10 @@ package cmd
 
 import (
 	"bufio"
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -82,35 +80,7 @@ func performInstallation() bool {
 	}
 
 	// 1. Download sources (git clone)
-	if conf.Type == config.InstallTypeProject {
-		if _, err := os.Stat("composer.json"); os.IsNotExist(err) {
-			utils.PrintInfo(fmt.Sprintf("Cloning OroCommerce %s...", resolvedVersion))
-			// Use a temporary directory to clone, then move to avoid "directory not empty" errors (like .orobox.yaml)
-			tmpDir, err := os.MkdirTemp("", "oro-app-*")
-			if err != nil {
-				utils.PrintError(fmt.Sprintf("Temp dir creation failed: %v", err))
-				return false
-			}
-			defer os.RemoveAll(tmpDir)
-
-			cloneCmd := exec.Command("git", "clone", "-b", resolvedVersion, oroRepo, tmpDir)
-			// Hidden output for git clone as well, unless error
-			var stderr bytes.Buffer
-			cloneCmd.Stderr = &stderr
-			if err := cloneCmd.Run(); err != nil {
-				utils.PrintError(fmt.Sprintf("Clone failed: %v\n%s", err, stderr.String()))
-				return false
-			}
-
-			utils.PrintInfo("Extracting OroCommerce sources...")
-			// Use cp -r to merge directories and copy hidden files
-			cpCmd := exec.Command("cp", "-r", tmpDir+"/.", ".")
-			if err := cpCmd.Run(); err != nil {
-				utils.PrintError(fmt.Sprintf("Extract sources failed: %v", err))
-				return false
-			}
-		}
-	}
+	// (Project support removed from this branch)
 
 	// 2. Ensure environment is ready
 	services := []string{"up", "-d", "db"}
@@ -136,26 +106,18 @@ func performInstallation() bool {
 		utils.PrintWarning(fmt.Sprintf("volume-init failed: %v", err))
 	}
 
-	// 3. For bundle or demo, we might need to clone into the volume if not project
-	if conf.Type != config.InstallTypeProject {
-		// Always try to clone if composer.json is missing in the container
-		checkCmd := []string{"run", "--rm", "-T", "application", "test", "-f", "composer.json"}
-		utils.StartLoader("Checking for OroCommerce installation...")
-		_, err := docker.RunComposeCommandWithOutput(checkCmd...)
-		utils.StopLoader()
-		if err != nil {
-			// Use a temporary directory to clone, then move to avoid "directory not empty" errors if bundle is mounted
-			cloneCmd := []string{"run", "--rm", "-T", "application", "bash", "-c",
-				fmt.Sprintf("git clone -b %s --depth 1 %s /tmp/oro-app && cp -r /tmp/oro-app/. . && rm -rf /tmp/oro-app && composer install", resolvedVersion, oroRepo)}
-			if err := docker.RunComposeCommandSilently("Downloading and installing OroCommerce into volume...", cloneCmd...); err != nil {
-				utils.PrintError(fmt.Sprintf("Download/Install into volume failed: %v", err))
-				return false
-			}
-		}
-	} else {
-		// Project mode: just composer install
-		if err := docker.RunComposeCommandSilently("Running composer install...", "run", "--rm", "-T", "application", "composer", "install"); err != nil {
-			utils.PrintError(fmt.Sprintf("Composer install failed: %v", err))
+	// 3. For bundle or demo, we need to clone into the volume
+	// Always try to clone if composer.json is missing in the container
+	checkCmd := []string{"run", "--rm", "-T", "application", "test", "-f", "composer.json"}
+	utils.StartLoader("Checking for OroCommerce installation...")
+	_, err = docker.RunComposeCommandWithOutput(checkCmd...)
+	utils.StopLoader()
+	if err != nil {
+		// Use a temporary directory to clone, then move to avoid "directory not empty" errors if bundle is mounted
+		cloneCmd := []string{"run", "--rm", "-T", "application", "bash", "-c",
+			fmt.Sprintf("git clone -b %s --depth 1 %s /tmp/oro-app && cp -r /tmp/oro-app/. . && rm -rf /tmp/oro-app && composer install", resolvedVersion, oroRepo)}
+		if err := docker.RunComposeCommandSilently("Downloading and installing OroCommerce into volume...", cloneCmd...); err != nil {
+			utils.PrintError(fmt.Sprintf("Download/Install into volume failed: %v", err))
 			return false
 		}
 	}
@@ -176,7 +138,7 @@ func init() {
 	initCmd.Flags().StringVarP(&bundlePath, "bundle-path", "b", ".", "Bundle path")
 	initCmd.Flags().StringVarP(&oroVersion, "oro-version", "v", "6.1", "OroCommerce version")
 	initCmd.Flags().StringVarP(&bundleNamespace, "bundle-namespace", "n", "", "Bundle namespace")
-	initCmd.Flags().StringVarP(&installType, "type", "t", "bundle", "Installation type (bundle, project, demo)")
+	initCmd.Flags().StringVarP(&installType, "type", "t", "bundle", "Installation type (bundle, demo)")
 }
 
 func generateConfig() {
@@ -195,7 +157,7 @@ func generateConfig() {
 	utils.PrintTitle("Config file .orobox.yaml not found or invalid. Let's create it interactively.")
 	reader := bufio.NewReader(stdin)
 
-	typeOfInstall := utils.AskSelection(reader, "Installation type", []string{config.InstallTypeBundle, config.InstallTypeProject, config.InstallTypeDemo}, installType)
+	typeOfInstall := utils.AskSelection(reader, "Installation type", []string{config.InstallTypeBundle, config.InstallTypeDemo}, installType)
 
 	var className, namespace string
 	if typeOfInstall == config.InstallTypeBundle {

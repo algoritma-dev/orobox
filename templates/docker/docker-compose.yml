@@ -7,18 +7,14 @@ x-templates:
       - "host.docker.internal:host-gateway"
 
   volumes-oro: &volumes-oro
-                 {{if eq .Type "project" -}}
-                 - "{{.BundlePath}}:/var/www/oro"
-    {{- else -}}
-                 - "oro_app:/var/www/oro"
-                 {{if eq .Type "bundle" -}}
-                 - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
-                 - "{{.BundlePath}}/vendor-oro:/var/www/oro/vendor"
-                 {{- end}}
-                 - "cache:/var/www/oro/var/cache"
-                 - "public_storage:/var/www/oro/public/media"
-                 - "private_storage:/var/www/oro/var/data"
+    - "oro_app:/var/www/oro"
+    {{if eq .Type "bundle" -}}
+    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
+    - "{{.BundlePath}}/vendor-oro:/var/www/oro/vendor"
     {{- end}}
+    - "cache:/var/www/oro/var/cache"
+    - "public_storage:/var/www/oro/public/media"
+    - "private_storage:/var/www/oro/var/data"
 
 services:
   application:
@@ -72,9 +68,6 @@ services:
       - /opt/oro-nginx
     volumes:
       - "./nginx.conf:/etc/nginx/http.d/default.conf:ro"
-      {{if eq .Type "project" -}}
-      - "{{.BundlePath}}:/var/www/oro"
-      {{- else -}}
       - "oro_app:/var/www/oro"
       {{if eq .Type "bundle" -}}
       - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
@@ -83,7 +76,6 @@ services:
       - "cache:/var/www/oro/var/cache:ro"
       - "public_storage:/var/www/oro/public/media:ro"
       - "private_storage:/var/www/oro/var/data:ro"
-      {{- end}}
       {{if .HasSsl -}}
       - "{{.CertsPath}}:/etc/nginx/certs:ro"
       {{- end}}
@@ -112,18 +104,14 @@ services:
     environment:
       ORO_XDEBUG_ENABLED: "false"
     volumes:
-                 {{if eq .Type "project" -}}
-                 - "{{.BundlePath}}:/var/www/oro"
-    {{- else -}}
-                 - "oro_app:/var/www/oro"
-                 {{if eq .Type "bundle" -}}
-                 - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
-                 - "{{.BundlePath}}/vendor-oro:/vendor-host"
-                 {{- end}}
-                 - "cache:/var/www/oro/var/cache"
-                 - "public_storage:/var/www/oro/public/media"
-                 - "private_storage:/var/www/oro/var/data"
-    {{- end}}
+      - "oro_app:/var/www/oro"
+      {{if eq .Type "bundle" -}}
+      - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
+      - "{{.BundlePath}}/vendor-oro:/vendor-host"
+      {{- end}}
+      - "cache:/var/www/oro/var/cache"
+      - "public_storage:/var/www/oro/public/media"
+      - "private_storage:/var/www/oro/var/data"
 
   web-init:
     <<: *oro-app
