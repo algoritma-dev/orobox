@@ -4,6 +4,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
@@ -26,6 +27,7 @@ var qaCmd = &cobra.Command{
 	Use:   "qa",
 	Short: "Run QA tools (PHPStan, Rector, PHP-CS-Fixer, Twig-CS-Fixer, ESLint, Stylelint)",
 	Run: func(_ *cobra.Command, _ []string) {
+		docker.SetIncludeTestFiles(true)
 		docker.EnsureDockerCompose()
 		if viper.GetString("type") == config.InstallTypeDemo {
 			utils.PrintError("The 'qa' command is not available for demo instances.")
@@ -98,30 +100,51 @@ func runQaCommand() {
 	}
 
 	utils.PrintInfo("Running QA tools in " + workingDir + "...")
-	if err := docker.EnsureServiceRunning("application_test"); err != nil {
-		utils.PrintError(fmt.Sprintf("Failed to ensure application_test service is running: %v", err))
+
+	var enabledTools []tool
+	for _, t := range allTools {
+		if !anyEnabled || t.enabled {
+			enabledTools = append(enabledTools, t)
+		}
+	}
+
+	if len(enabledTools) == 0 {
+		utils.PrintWarning("No QA tools enabled.")
+		return
+	}
+
+	// Optimization: use "exec" because the application must be already running.
+	// If it's not running, we tell the user to run "orobox up" first.
+	if !docker.IsServiceRunning("application") {
+		utils.PrintError("Service 'application' is not running.")
+		utils.PrintInfo("Please run 'orobox up' first to start the development environment.")
 		os.Exit(1)
 	}
-	for _, tool := range allTools {
-		if anyEnabled && !tool.enabled {
-			continue
-		}
 
-		utils.PrintInfo(fmt.Sprintf("Running %s...", tool.name))
-
-		args := []string{"exec", "-w", workingDir}
-		if !isTTY() {
-			args = append(args, "-T")
+	var compositeCmd strings.Builder
+	for i, t := range enabledTools {
+		if i > 0 {
+			compositeCmd.WriteString(" && ")
 		}
-		args = append(args, "application_test")
-		args = append(args, tool.args...)
+		// Wrap each command with an echo for better visibility
+		compositeCmd.WriteString(fmt.Sprintf("echo '--- Running %s ---' && ", t.name))
+		compositeCmd.WriteString(strings.Join(t.args, " "))
+	}
 
-		err := docker.RunComposeCommand("", args...)
-		if err != nil {
-			utils.PrintError(fmt.Sprintf("%s reported errors or warnings. Stopping execution.", tool.name))
-			os.Exit(1)
-		}
-		utils.PrintSuccess(fmt.Sprintf("%s completed successfully.", tool.name))
+	args := []string{"exec"}
+	args = append(args, "-w", workingDir)
+	if !isTTY() {
+		args = append(args, "-T")
+	}
+
+	// Always set ORO_ENV to test for QA tools
+	args = append(args, "-e", "ORO_ENV=test")
+	args = append(args, "application", "sh", "-c", compositeCmd.String())
+
+	err := docker.RunComposeCommand("", args...)
+	if err != nil {
+		utils.PrintError("QA tools reported errors or warnings.")
+		os.Exit(1)
 	}
 
 	utils.PrintSuccess("All selected QA tools passed!")

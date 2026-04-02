@@ -1,64 +1,19 @@
-x-templates:
-  oro-app: &oro-app
-    image: "algoritmadev/orobox:{{.OroVersion}}-{{.Type}}-latest"
-    env_file: .env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
-  volumes-app: &volumes-app
-    {{if eq .Type "project" -}}
-    - "{{.BundlePath}}:/var/www/oro"
-    {{- else -}}
-    - "oro_app:/var/www/oro"
-    {{if eq .Type "bundle" -}}
-    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
-    {{- end}}
-    {{- end}}
-    - "cache:/var/www/oro/var/cache"
-    - "public_storage:/var/www/oro/public/media"
-    - "private_storage:/var/www/oro/var/data"
-
 services:
-  application_test:
-    <<: *oro-app
-    user: ${ORO_USER_RUNTIME:-www-data}
-    command:
-      - bash
-      - -c
-      - |
-        echo "Test application is running..."
-        exec tail -f /dev/null
+  application:
     env_file:
       - .env
       - .env.test
-    volumes: *volumes-app
     depends_on:
-      db_test:
+      db:
         condition: service_healthy
 
-  db_test:
-    image: "postgres:{{.PostgresVersion}}"
-    ports:
-      - "5433:5432"
+  db:
     environment:
       POSTGRES_DB: ${ORO_DB_NAME_TEST:-oro_db_test}
-      POSTGRES_USER: ${ORO_DB_USER:-oro_db_user}
-      POSTGRES_PASSWORD: ${ORO_DB_PASSWORD:-oro_db_pass}
-      POSTGRES_ROOT_PASSWORD: ${ORO_DB_ROOT_PASSWORD:-oro_db_pass}
     {{if .UseTmpfs -}}
     tmpfs:
       - /var/lib/postgresql/data:size={{.TmpfsSize}}
-    volumes:
-      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
-    {{else -}}
-    volumes:
-      - pg_data_test:/var/lib/postgresql/data
-      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
     {{- end}}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       start_period: 60s
-    restart: unless-stopped
-
-volumes:
-  pg_data_test:

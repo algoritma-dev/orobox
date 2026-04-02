@@ -16,6 +16,7 @@ var qaInitCmd = &cobra.Command{
 	Use:   "qa-init",
 	Short: "Initialize QA tools in the project or bundle",
 	Run: func(_ *cobra.Command, _ []string) {
+		docker.SetIncludeTestFiles(true)
 		docker.EnsureDockerCompose()
 		if viper.GetString("type") == config.InstallTypeDemo {
 			utils.PrintError("The 'qa-init' command is not available for demo instances.")
@@ -25,11 +26,6 @@ var qaInitCmd = &cobra.Command{
 		var conf config.OroConfig
 		if err := viper.Unmarshal(&conf); err != nil {
 			utils.PrintError(fmt.Sprintf("Error reading config: %v", err))
-			return
-		}
-
-		if err := docker.EnsureServiceRunning("application_test"); err != nil {
-			utils.PrintError(fmt.Sprintf("Failed to ensure application_test service is running: %v", err))
 			return
 		}
 
@@ -43,6 +39,12 @@ func init() {
 }
 
 func runQaInitCommand() {
+	if !docker.IsServiceRunning("application") {
+		utils.PrintError("Service 'application' is not running.")
+		utils.PrintInfo("Please run 'orobox up' first to start the development environment.")
+		return
+	}
+
 	isBundle := viper.GetString("type") == config.InstallTypeBundle
 	workingDir := config.OroRootDir
 	if isBundle {
@@ -56,7 +58,7 @@ func runQaInitCommand() {
 		if !isTTY() {
 			configArgs = append(configArgs, "-T")
 		}
-		configArgs = append(configArgs, "application_test", "composer", "config", "--no-plugins", "allow-plugins."+plugin, "true")
+		configArgs = append(configArgs, "application", "composer", "config", "--no-plugins", "allow-plugins."+plugin, "true")
 		if err := docker.RunComposeCommand("", configArgs...); err != nil {
 			utils.PrintError(fmt.Sprintf("Failed to configure plugin %s: %v", plugin, err))
 			return
@@ -71,7 +73,7 @@ func runQaInitCommand() {
 	}
 	// Use bash -c to pipe 'yes' into composer to automatically accept file creation from the plugin
 	cmdLine := "yes y | composer require --dev algoritma/php-coding-standards vincentlanglet/twig-cs-fixer"
-	composerArgs = append(composerArgs, "application_test", "bash", "-c", cmdLine)
+	composerArgs = append(composerArgs, "application", "bash", "-c", cmdLine)
 
 	if err := docker.RunComposeCommand("", composerArgs...); err != nil {
 		utils.PrintError(fmt.Sprintf("Failed to install Composer packages: %v", err))
@@ -84,7 +86,7 @@ func runQaInitCommand() {
 	if !isTTY() {
 		npmArgs = append(npmArgs, "-T")
 	}
-	npmArgs = append(npmArgs, "application_test", "npm", "install", "--save-dev", "eslint@^8.57.0", "eslint-plugin-no-jquery", "stylelint@^15.11.0", "@oroinc/oro-stylelint-config", "eslint-plugin-import")
+	npmArgs = append(npmArgs, "application", "npm", "install", "--save-dev", "eslint@^8.57.0", "eslint-plugin-no-jquery", "stylelint@^15.11.0", "@oroinc/oro-stylelint-config", "eslint-plugin-import")
 
 	if err := docker.RunComposeCommand("", npmArgs...); err != nil {
 		utils.PrintError(fmt.Sprintf("Failed to install NPM packages: %v", err))

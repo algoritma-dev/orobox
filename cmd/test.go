@@ -21,6 +21,7 @@ var testCmd = &cobra.Command{
 	Use:   "test",
 	Short: "Run tests (PHPUnit)",
 	Run: func(_ *cobra.Command, _ []string) {
+		docker.SetIncludeTestFiles(true)
 		docker.EnsureDockerCompose()
 		utils.PrintInfo("Running tests...")
 		runTestCommand()
@@ -34,8 +35,8 @@ func init() {
 }
 
 func runTestCommand() {
-	// Ensure services are running
-	if err := docker.EnsureServicesRunning([]string{"db_test", "application_test"}); err != nil {
+	// Ensure test database is running
+	if err := docker.EnsureServicesRunning([]string{"db"}); err != nil {
 		utils.PrintWarning(fmt.Sprintf("failed to ensure services are running: %v", err))
 	}
 
@@ -56,6 +57,15 @@ func runTestCommand() {
 	}
 
 	var args []string
+
+	// Optimization: use "exec" because the application must be already running.
+	// If it's not running, we tell the user to run "orobox up" first.
+	if !docker.IsServiceRunning("application") {
+		utils.PrintError("Service 'application' is not running.")
+		utils.PrintInfo("Please run 'orobox up' first to start the development environment.")
+		os.Exit(1)
+	}
+
 	args = append(args, "exec")
 
 	// Check if we have a TTY
@@ -63,7 +73,10 @@ func runTestCommand() {
 		args = append(args, "-T")
 	}
 
-	args = append(args, "application_test")
+	// Always set ORO_ENV to test for test command
+	args = append(args, "-e", "ORO_ENV=test")
+
+	args = append(args, "application")
 
 	if viper.GetString("type") == "bundle" {
 		bundlePath := "src/" + config.GetBundlePath()

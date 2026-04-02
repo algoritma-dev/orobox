@@ -42,6 +42,13 @@ var xdebugCmd = &cobra.Command{
 			xdebugTest = true
 		}
 
+		// Ensure application is running if we are targeting it
+		if !docker.IsServiceRunning("application") {
+			utils.PrintError("Service 'application' is not running.")
+			utils.PrintInfo("Please run 'orobox up' first to start the development environment.")
+			os.Exit(1)
+		}
+
 		// 1. Hot-patch running containers
 		if xdebugDev {
 			applyXdebugHotfix(enable, "php-fpm-app", true)
@@ -52,7 +59,8 @@ var xdebugCmd = &cobra.Command{
 		}
 
 		if xdebugTest {
-			applyXdebugHotfix(enable, "application_test", false)
+			docker.SetIncludeTestFiles(true)
+			applyXdebugHotfix(enable, "application", false)
 		}
 
 		utils.PrintSuccess(fmt.Sprintf("Xdebug %s completed successfully!", action))
@@ -66,7 +74,7 @@ func init() {
 }
 
 func applyXdebugHotfix(enable bool, service string, reloadFpm bool) {
-	if !isServiceRunning(service) {
+	if !docker.IsServiceRunning(service) {
 		return
 	}
 
@@ -101,21 +109,6 @@ func applyXdebugHotfix(enable bool, service string, reloadFpm bool) {
 	}
 }
 
-func isServiceRunning(serviceName string) bool {
-	output, err := docker.RunComposeCommandWithOutput("ps", "--services", "--filter", "status=running")
-	if err != nil {
-		return false
-	}
-
-	services := strings.Split(string(output), "\n")
-	for _, s := range services {
-		if strings.TrimSpace(s) == serviceName {
-			return true
-		}
-	}
-	return false
-}
-
 func showXdebugStatus() {
 	utils.PrintInfo("Checking Xdebug status...")
 
@@ -128,12 +121,13 @@ func showXdebugStatus() {
 
 	// 3. Test environment status
 	if showAll || xdebugTest {
-		checkXdebugStatus("application_test", "Test (application_test)")
+		docker.SetIncludeTestFiles(true)
+		checkXdebugStatus("application", "Test (application with test override)")
 	}
 }
 
 func checkXdebugStatus(service, label string) {
-	if !isServiceRunning(service) {
+	if !docker.IsServiceRunning(service) {
 		utils.PrintInfo(fmt.Sprintf("%s: container not running", label))
 		return
 	}

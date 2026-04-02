@@ -21,6 +21,7 @@ var testInitCmd = &cobra.Command{
 	Use:   "test-init",
 	Short: "Initialize or reset the test environment",
 	Run: func(_ *cobra.Command, _ []string) {
+		docker.SetIncludeTestFiles(true)
 		if testInitUseTmpfs {
 			viper.Set("test.use_tmpfs", true)
 			viper.Set("test.tmpfs_size", testInitTmpfsSize)
@@ -43,7 +44,7 @@ var testInitCmd = &cobra.Command{
 			return
 		}
 
-		serviceNames := []string{"db_test", "application_test"}
+		serviceNames := []string{"db"}
 		if conf.Services.Redis {
 			serviceNames = append(serviceNames, "redis")
 		}
@@ -77,32 +78,38 @@ var testInitCmd = &cobra.Command{
 			}
 		}
 
+		if !docker.IsServiceRunning("application") {
+			utils.PrintError("Service 'application' is not running.")
+			utils.PrintInfo("Please run 'orobox up' first to start the development environment.")
+			return
+		}
+
 		// Drop and create database to ensure clean state
 		docker.SetDatabaseInitializedCache(true, false)
 
 		// Try psql first with FORCE (requires Postgres 13+)
 		dropSQL := fmt.Sprintf("DROP DATABASE IF EXISTS %s WITH (FORCE);", dbName)
-		dropArgs := []string{"exec", "-T", "db_test", "psql", "-U", dbUser, "-d", "postgres", "-c", dropSQL}
+		dropArgs := []string{"exec", "-T", "db", "psql", "-U", dbUser, "-d", "postgres", "-c", dropSQL}
 		if err := docker.RunComposeCommandSilently("Dropping test database...", dropArgs...); err != nil {
 			utils.PrintWarning(fmt.Sprintf("failed to drop test database using psql: %v. Trying via doctrine...", err))
-			dropCmd := []string{"exec", "-T", "application_test", "php", "bin/console", "doctrine:database:drop", "--force", "--env=test", "--if-exists"}
+			dropCmd := []string{"exec", "-T", "application", "php", "bin/console", "doctrine:database:drop", "--force", "--env=test", "--if-exists"}
 			if err := docker.RunComposeCommandSilently("Dropping test database...", dropCmd...); err != nil {
 				utils.PrintWarning(fmt.Sprintf("failed to drop test database: %v", err))
 			}
 		}
 
-		createCmd := []string{"exec", "-T", "application_test", "php", "bin/console", "doctrine:database:create", "--env=test"}
+		createCmd := []string{"exec", "-T", "application", "php", "bin/console", "doctrine:database:create", "--env=test"}
 		if err := docker.RunComposeCommandSilently("Creating test database...", createCmd...); err != nil {
 			utils.PrintError(fmt.Sprintf("failed to create test database: %v", err))
 			return
 		}
 
-		clearCacheCmd := []string{"exec", "-T", "application_test", "bash", "-c", "rm -rf var/cache/test"}
+		clearCacheCmd := []string{"exec", "-T", "application", "bash", "-c", "rm -rf var/cache/test"}
 		if err := docker.RunComposeCommandSilently("Clearing cache for test environment...", clearCacheCmd...); err != nil {
 			utils.PrintWarning(fmt.Sprintf("failed to clear cache: %v", err))
 		}
 
-		installCmd := []string{"exec", "-T", "application_test", "php", "bin/console", "oro:install", "--no-interaction", "--env=test", "--skip-translations"}
+		installCmd := []string{"exec", "-T", "application", "php", "bin/console", "oro:install", "--no-interaction", "--env=test", "--skip-translations"}
 		if err := docker.RunComposeCommandSilently("Running Oro installation for test environment (this may take several minutes)...", installCmd...); err != nil {
 			utils.PrintError(fmt.Sprintf("test environment installation failed: %v", err))
 			return

@@ -60,14 +60,14 @@ commands:
   - name: "otr"
     command: "php bin/console oro:test:run"
     description: "Runs the Shippy Pro tests suite"
-    service: "application_test"
+    service: "application"
 ```
 
 ### Configuration Fields
 - `type`: Defines the installation type.
-    - `bundle` (default): Optimized for developing a single bundle. Maps local code to `/var/www/oro/src/<Namespace>`.
-    - `project`: For developing an entire OroCommerce application. Maps the entire local project to `/var/www/oro`.
-    - `demo`: Environment similar to production (`ORO_ENV=prod`). Xdebug, Mailpit, and other dev tools are disabled.
+- `bundle` (default): Optimized for developing a single bundle. Maps local code to `/var/www/oro/src/<Namespace>`.
+- `project`: For developing an entire OroCommerce application. Maps the entire local project to `/var/www/oro`.
+- `demo`: Environment similar to production (`ORO_ENV=prod`). Xdebug, Mailpit, and other dev tools are disabled.
 - `class`: (Only for `type: bundle`) Name of the bundle class.
 - `namespace`: (Only for `type: bundle`) PHP namespace of the bundle.
 - `oro_version`: OroCommerce version (e.g., "7.0", "6.1", "6.0", "5.1").
@@ -87,7 +87,7 @@ commands:
     - `name`: (string) Name of the command (e.g., `otr`).
     - `command`: (string) The actual command to execute (e.g., `php bin/console oro:test:run`).
     - `description`: (string) Description of the command (displayed in help).
-    - `service`: (string, optional) Default service to run the command in (e.g., `application_test`).
+    - `service`: (string, optional) Default service to run the command in (e.g., `application`).
 
 *Note: Versions of PHP, PostgreSQL, Node.js, and other components are automatically determined by the `oro_version` setting and cannot be changed manually.*
 
@@ -201,8 +201,8 @@ Example:
 orobox run otr
 ```
 Options:
-- `--service`, `-s`: Specify a custom service to run the command in (e.g., `application_test`).
-- `--test`, `-t`: Quick flag to run the command in the `application_test` service.
+- `--service`, `-s`: Specify a custom service to run the command in (e.g., `application`).
+- `--test`, `-t`: Quick flag to run the command in the `application` service with test environment override.
 
 If you run `orobox run --help`, you will see a dynamic list of all commands configured in your `.orobox.yaml`.
 

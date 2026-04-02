@@ -37,6 +37,9 @@ var runCmd = &cobra.Command{
 			return
 		}
 
+		if runTest {
+			docker.SetIncludeTestFiles(true)
+		}
 		docker.EnsureDockerCompose()
 
 		commandName := args[0]
@@ -63,13 +66,11 @@ var runCmd = &cobra.Command{
 		service := "application"
 		if runService != "" {
 			service = runService
-		} else if runTest {
-			service = "application_test"
 		} else if foundCommand.Service != "" {
 			service = foundCommand.Service
 		}
 
-		executeCustomCommand(service, foundCommand.Command)
+		executeCustomCommand(service, foundCommand.Command, runTest)
 	},
 }
 
@@ -77,7 +78,7 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 
 	runCmd.Flags().StringVarP(&runService, "service", "s", "", "Service to run the command in")
-	runCmd.Flags().BoolVarP(&runTest, "test", "t", false, "Run in test environment (uses application_test service)")
+	runCmd.Flags().BoolVarP(&runTest, "test", "t", false, "Run in test environment (uses application service with test override)")
 
 	// Dynamic help
 	runCmd.SetHelpFunc(func(cmd *cobra.Command, _ []string) {
@@ -101,7 +102,7 @@ func init() {
 	})
 }
 
-func executeCustomCommand(service, customCommand string) {
+func executeCustomCommand(service, customCommand string, isTest bool) {
 	composeCmd := docker.GetComposeCommand()
 	binary, err := exec.LookPath(composeCmd[0])
 	if err != nil {
@@ -111,9 +112,29 @@ func executeCustomCommand(service, customCommand string) {
 
 	baseArgs := docker.GetBaseComposeArgs()
 	args := append(composeCmd, baseArgs...)
-	// We use "exec" to run the command in the specified container.
+
+	// Optimization: use "exec" because the service must be already running.
+	// If it's not running, we tell the user to run "orobox up" first.
+	if !docker.IsServiceRunning(service) {
+		utils.PrintError(fmt.Sprintf("Service '%s' is not running.", service))
+		utils.PrintInfo("Please run 'orobox up' first to start the environment.")
+		os.Exit(1)
+	}
+
+	args = append(args, "exec")
+
+	// Check if we have a TTY
+	if !isTTY() {
+		args = append(args, "-T")
+	}
+
+	// Set ORO_ENV=test if explicitly requested via --test flag
+	if isTest && service == "application" {
+		args = append(args, "-e", "ORO_ENV=test")
+	}
+
 	// We use "sh -c" to allow multiple commands and pipes if specified in the config.
-	args = append(args, "exec", service, "sh", "-c", customCommand)
+	args = append(args, service, "sh", "-c", customCommand)
 	env := os.Environ()
 
 	err = syscall.Exec(binary, args, env)

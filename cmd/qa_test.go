@@ -24,7 +24,10 @@ func TestQaCommand(t *testing.T) {
 	}
 	docker.RunComposeCommand = mockRun
 	docker.RunComposeCommandSilently = mockRun
-	docker.RunComposeCommandWithOutput = func(_ ...string) ([]byte, error) {
+	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "ps" {
+			return []byte(`{"Service": "application", "State": "running"}`), nil
+		}
 		return []byte("[]"), nil
 	}
 
@@ -40,19 +43,19 @@ func TestQaCommand(t *testing.T) {
 		{
 			"All tools by default",
 			[]string{"qa"},
-			7, // 1 for up + 6 for tools
+			1, // Now grouped in a single call
 			[]string{"phpstan", "rector", "php-cs-fixer", "twig-cs-fixer", "eslint", "stylelint"},
 		},
 		{
 			"Only PHPStan",
 			[]string{"qa", "--phpstan"},
-			2, // 1 for up + 1 for phpstan
+			1,
 			[]string{"phpstan"},
 		},
 		{
 			"PHPStan and Rector",
 			[]string{"qa", "--phpstan", "--rector"},
-			3, // 1 for up + 2 for tools
+			1, // Now grouped in a single call
 			[]string{"phpstan", "rector"},
 		},
 	}
@@ -112,7 +115,10 @@ func TestQaBundleCommand(t *testing.T) {
 	}
 	docker.RunComposeCommand = mockRun
 	docker.RunComposeCommandSilently = mockRun
-	docker.RunComposeCommandWithOutput = func(_ ...string) ([]byte, error) {
+	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "ps" {
+			return []byte(`{"Service": "application", "State": "running"}`), nil
+		}
 		return []byte("[]"), nil
 	}
 
@@ -135,8 +141,8 @@ func TestQaBundleCommand(t *testing.T) {
 		t.Fatalf("rootCmd.Execute() failed: %v", err)
 	}
 
-	// 1 for up + 1 for eslint + 2 for stylelint (now split)
-	expectedCount := 4
+	// Grouped in a single call
+	expectedCount := 1
 	if len(calls) != expectedCount {
 		t.Errorf("Expected %d calls, got %d. Calls: %v", expectedCount, len(calls), calls)
 	}

@@ -142,7 +142,11 @@ func TestTestCommand(t *testing.T) {
 	docker.RunComposeCommand = mockRun
 	docker.RunComposeCommandSilently = mockRunSilently
 
-	docker.RunComposeCommandWithOutput = func(_ ...string) ([]byte, error) {
+	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "ps" {
+			return []byte(`{"Service": "application", "State": "running"}`), nil
+		}
+		// Return 1 for database check
 		return []byte("1"), nil
 	}
 
@@ -158,15 +162,15 @@ func TestTestCommand(t *testing.T) {
 		return
 	}
 
-	// 1st call: up -d application_test
-	if calls[0][0] != "up" || !contains(calls[0], "application_test") {
-		t.Errorf("Expected first call to be up -d application_test, got %v", calls[0])
+	// 1st call: up -d db
+	if calls[0][0] != "up" || !contains(calls[0], "db") {
+		t.Errorf("Expected first call to be up -d db, got %v", calls[0])
 	}
 
 	// 2nd call: actual test execution
 	lastCall := calls[1]
-	if lastCall[0] != "exec" || !contains(lastCall, "application_test") {
-		t.Errorf("Expected exec application_test, got %v", lastCall)
+	if lastCall[0] != "exec" || !contains(lastCall, "application") {
+		t.Errorf("Expected exec application, got %v", lastCall)
 	}
 }
 
@@ -316,7 +320,10 @@ func TestTestCommandBundle(t *testing.T) {
 	docker.RunComposeCommand = mockRun
 	docker.RunComposeCommandSilently = mockRunSilently
 
-	docker.RunComposeCommandWithOutput = func(_ ...string) ([]byte, error) {
+	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "ps" {
+			return []byte(`{"Service": "application", "State": "running"}`), nil
+		}
 		return []byte("1"), nil
 	}
 
@@ -377,8 +384,11 @@ func TestTestInitCommand(t *testing.T) {
 	docker.RunComposeCommand = mockRun
 	docker.RunComposeCommandSilently = mockRunSilently
 
-	// Simula ambiente NON inizializzato per evitare prompt
-	docker.RunComposeCommandWithOutput = func(_ ...string) ([]byte, error) {
+	// Simula ambiente NON inizializzato per evitare prompt e container running
+	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "ps" {
+			return []byte(`{"Service": "application", "State": "running"}`), nil
+		}
 		return []byte("0"), nil
 	}
 
@@ -395,8 +405,8 @@ func TestTestInitCommand(t *testing.T) {
 		return
 	}
 
-	if calls[0][0] != "up" || !contains(calls[0], "application_test") {
-		t.Errorf("Expected first call to be up, got %v", calls[0])
+	if calls[0][0] != "up" || !contains(calls[0], "db") {
+		t.Errorf("Expected first call to be up db, got %v", calls[0])
 	}
 
 	foundDrop := false

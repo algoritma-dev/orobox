@@ -347,9 +347,11 @@ func GetBaseComposeArgs() []string {
 	if _, err := os.Stat(setupFile); err == nil {
 		args = append(args, "-f", setupFile)
 	}
-	testFile := filepath.Join(internalDir, "docker-compose.test.yml")
-	if _, err := os.Stat(testFile); err == nil {
-		args = append(args, "-f", testFile)
+	if includeTestFiles {
+		testFile := filepath.Join(internalDir, "docker-compose.test.yml")
+		if _, err := os.Stat(testFile); err == nil {
+			args = append(args, "-f", testFile)
+		}
 	}
 
 	return args
@@ -809,7 +811,23 @@ var (
 	ensuredServicesMu    sync.Mutex
 	dbInitializedCache   = make(map[bool]bool)
 	dbInitializedCacheMu sync.Mutex
+	includeTestFiles     = false
 )
+
+// SetIncludeTestFiles sets whether to include test-related compose files.
+func SetIncludeTestFiles(include bool) {
+	includeTestFiles = include
+}
+
+// GetServiceEnv returns the value of an environment variable inside a running service container.
+func GetServiceEnv(serviceName, variable string) (string, error) {
+	args := []string{"exec", "-T", serviceName, "sh", "-c", "echo $" + variable}
+	output, err := RunComposeCommandWithOutput(args...)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
 
 // ResetEnsuredServices resets the cache of ensured services and database states.
 // This is primarily used for testing.
@@ -821,6 +839,32 @@ func ResetEnsuredServices() {
 	dbInitializedCacheMu.Lock()
 	defer dbInitializedCacheMu.Unlock()
 	dbInitializedCache = make(map[bool]bool)
+}
+
+// IsServiceRunning checks if the service is currently running.
+func IsServiceRunning(serviceName string) bool {
+	args := []string{"ps", "--format", "json", serviceName}
+	output, err := RunComposeCommandWithOutput(args...)
+	if err != nil {
+		return false
+	}
+
+	var status ServiceStatus
+	if jsonErr := json.Unmarshal(output, &status); jsonErr == nil {
+		return status.State == "running"
+	}
+
+	// Fallback for list of objects or older formats
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	for _, line := range lines {
+		if jsonErr := json.Unmarshal([]byte(line), &status); jsonErr == nil {
+			if status.Service == serviceName || serviceName == "" {
+				return status.State == "running"
+			}
+		}
+	}
+
+	return false
 }
 
 // EnsureServiceRunning checks if the service is running and healthy.
@@ -912,9 +956,6 @@ func IsDatabaseInitialized(test bool) (bool, error) {
 
 	dbUser, _, dbName := GetDatabaseCredentialsFor(test)
 	container := "db"
-	if test {
-		container = "db_test"
-	}
 
 	checkArgs := []string{
 		"exec", "-T", container,
