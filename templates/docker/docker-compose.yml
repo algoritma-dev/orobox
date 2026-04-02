@@ -3,16 +3,17 @@ x-templates:
   oro-app: &oro-app
     image: "algoritmadev/orobox:{{.OroVersion}}-{{.Type}}-latest"
     env_file: .env
+    mem_limit: ${ORO_APP_MEM_LIMIT:-2g}
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
   volumes-oro: &volumes-oro
-    - "oro_app:/var/www/oro"
-    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
-    - "{{.BundlePath}}/vendor-oro:/var/www/oro/vendor"
-    - "cache:/var/www/oro/var/cache"
-    - "public_storage:/var/www/oro/public/media"
-    - "private_storage:/var/www/oro/var/data"
+    - "oro_app:/var/www/oro:delegated"
+    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}:cached"
+    - "{{.BundlePath}}/vendor-oro:/var/www/oro/vendor:delegated"
+    - "cache:/var/www/oro/var/cache:delegated"
+    - "public_storage:/var/www/oro/public/media:delegated"
+    - "private_storage:/var/www/oro/var/data:delegated"
 
 services:
   application:
@@ -66,9 +67,9 @@ services:
       - /opt/oro-nginx
     volumes:
       - "./nginx.conf:/etc/nginx/http.d/default.conf:ro"
-      - "oro_app:/var/www/oro"
-      - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
-      - "{{.BundlePath}}/vendor-oro:/var/www/oro/vendor"
+      - "oro_app:/var/www/oro:delegated"
+      - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}:cached"
+      - "{{.BundlePath}}/vendor-oro:/var/www/oro/vendor:delegated"
       - "cache:/var/www/oro/var/cache:ro"
       - "public_storage:/var/www/oro/public/media:ro"
       - "private_storage:/var/www/oro/var/data:ro"
@@ -96,12 +97,12 @@ services:
     environment:
       ORO_XDEBUG_ENABLED: "false"
     volumes:
-      - "oro_app:/var/www/oro"
-      - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
-      - "{{.BundlePath}}/vendor-oro:/vendor-host"
-      - "cache:/var/www/oro/var/cache"
-      - "public_storage:/var/www/oro/public/media"
-      - "private_storage:/var/www/oro/var/data"
+      - "oro_app:/var/www/oro:delegated"
+      - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}:cached"
+      - "{{.BundlePath}}/vendor-oro:/vendor-host:delegated"
+      - "cache:/var/www/oro/var/cache:delegated"
+      - "public_storage:/var/www/oro/public/media:delegated"
+      - "private_storage:/var/www/oro/var/data:delegated"
 
   web-init:
     <<: *oro-app
@@ -296,7 +297,7 @@ services:
       - discovery.type=single-node
       - xpack.security.enabled=false
       - cluster.routing.allocation.disk.threshold_enabled=false
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - "ES_JAVA_OPTS=-Xms${ORO_ES_MEM_LIMIT:-512m} -Xmx${ORO_ES_MEM_LIMIT:-512m}"
     ulimits:
       memlock:
         soft: -1

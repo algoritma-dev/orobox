@@ -120,6 +120,19 @@ func performInstallation() bool {
 			utils.PrintError(fmt.Sprintf("Download/Install into volume failed: %v", err))
 			return false
 		}
+	} else {
+		// Sources present: check for vendors (especially if vendor-oro was just added)
+		checkVendor := []string{"run", "--rm", "-T", "application", "test", "-f", "vendor/autoload.php"}
+		utils.StartLoader("Checking for vendors...")
+		_, errVendor := docker.RunComposeCommandWithOutput(checkVendor...)
+		utils.StopLoader()
+		if errVendor != nil {
+			installCmd := []string{"run", "--rm", "-T", "application", "composer", "install"}
+			if err := docker.RunComposeCommandSilently("Installing dependencies...", installCmd...); err != nil {
+				utils.PrintError(fmt.Sprintf("Composer install failed: %v", err))
+				return false
+			}
+		}
 	}
 
 	// 4. Run Oro installation

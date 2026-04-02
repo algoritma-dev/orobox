@@ -7,15 +7,16 @@ x-templates:
 
   volumes-setup: &volumes-setup
     {{if eq .Type "project" -}}
-    - "{{.BundlePath}}:/var/www/oro"
+    - "{{.BundlePath}}:/var/www/oro:cached"
     {{- else -}}
-    - "oro_app:/var/www/oro"
+    - "oro_app:/var/www/oro:delegated"
     {{if eq .Type "bundle" -}}
-    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
-    - "{{.BundlePath}}/vendor:/var/www/oro/vendor"
+    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}:cached"
+    - "{{.BundlePath}}/vendor-oro:/var/www/oro/vendor:delegated"
     {{- end}}
-    - "public_storage:/var/www/oro/public/media"
-    - "private_storage:/var/www/oro/var/data"
+    - "cache:/var/www/oro/var/cache:delegated"
+    - "public_storage:/var/www/oro/public/media:delegated"
+    - "private_storage:/var/www/oro/var/data:delegated"
     {{- end}}
 
 services:
@@ -44,15 +45,16 @@ services:
       ORO_XDEBUG_ENABLED: "false"
     volumes:
     {{if eq .Type "project" -}}
-    - "{{.BundlePath}}:/var/www/oro"
+    - "{{.BundlePath}}:/var/www/oro:cached"
     {{- else -}}
-    - "oro_app:/var/www/oro"
+    - "oro_app:/var/www/oro:delegated"
     {{if eq .Type "bundle" -}}
-    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
-    - "{{.BundlePath}}/vendor-oro:/vendor-host"
+    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}:cached"
+    - "{{.BundlePath}}/vendor-oro:/vendor-host:delegated"
     {{- end}}
-    - "public_storage:/var/www/oro/public/media"
-    - "private_storage:/var/www/oro/var/data"
+    - "cache:/var/www/oro/var/cache:delegated"
+    - "public_storage:/var/www/oro/public/media:delegated"
+    - "private_storage:/var/www/oro/var/data:delegated"
     {{- end}}
 
   install:

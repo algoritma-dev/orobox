@@ -485,10 +485,13 @@ func PullAllLocalOrobotImages() (bool, error) {
 		defer utils.StopLoader()
 	}
 
+	semaphore := make(chan struct{}, 4)
 	for _, img := range images {
 		wg.Add(1)
 		go func(imageName string) {
 			defer wg.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
 			if needsPull(imageName) {
 				mu.Lock()
 				toPull = append(toPull, imageName)
@@ -517,6 +520,8 @@ func PullAllLocalOrobotImages() (bool, error) {
 		wg.Add(1)
 		go func(imageName string) {
 			defer wg.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
 			pullCmd := exec.Command("docker", "pull", imageName)
 			if debug {
 				pullCmd.Stdout = os.Stdout
@@ -526,8 +531,6 @@ func PullAllLocalOrobotImages() (bool, error) {
 		}(img)
 	}
 	wg.Wait()
-
-	// Check IDs after pull
 	cmdAfter := exec.Command("docker", "images", "--filter", "reference=algoritmadev/orobox:*", "--format", "{{.Repository}}:{{.Tag}} {{.ID}}", "--no-trunc")
 	outputAfter, err := cmdAfter.Output()
 	if err != nil {
@@ -595,10 +598,13 @@ func PullProjectImages() (bool, error) {
 		defer utils.StopLoader()
 	}
 
+	semaphore := make(chan struct{}, 4)
 	for img := range projectImages {
 		wg.Add(1)
 		go func(imageName string) {
 			defer wg.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
 			if needsPull(imageName) {
 				mu.Lock()
 				toPull = append(toPull, imageName)
@@ -643,6 +649,8 @@ func PullProjectImages() (bool, error) {
 		wg.Add(1)
 		go func(imageName string) {
 			defer wg.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
 			pullCmd := exec.Command("docker", "pull", imageName)
 			if debug {
 				pullCmd.Stdout = os.Stdout
