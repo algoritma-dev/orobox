@@ -110,6 +110,11 @@ domains:
     ssl: true
 services:
   mailpit: true
+commands:
+  - name: "otr"
+    command: "php bin/console oro:test:run"
+    description: "Runs the Shippy Pro tests suite"
+    service: "test-app"
 `
 	config, err := ParseConfig([]byte(yamlData))
 	if err != nil {
@@ -127,6 +132,22 @@ services:
 	}
 	if !config.Services.Mailpit {
 		t.Errorf("Expected mailpit to be true")
+	}
+
+	if len(config.Commands) != 1 {
+		t.Fatalf("Expected 1 command, got %d", len(config.Commands))
+	}
+	if config.Commands[0].Name != "otr" {
+		t.Errorf("Expected command name otr, got %s", config.Commands[0].Name)
+	}
+	if config.Commands[0].Command != "php bin/console oro:test:run" {
+		t.Errorf("Expected command 'php bin/console oro:test:run', got %s", config.Commands[0].Command)
+	}
+	if config.Commands[0].Description != "Runs the Shippy Pro tests suite" {
+		t.Errorf("Expected description 'Runs the Shippy Pro tests suite', got %s", config.Commands[0].Description)
+	}
+	if config.Commands[0].Service != "test-app" {
+		t.Errorf("Expected service 'test-app', got %s", config.Commands[0].Service)
 	}
 }
 

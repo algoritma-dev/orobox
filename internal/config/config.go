@@ -36,6 +36,14 @@ type TestConfig struct {
 	TmpfsSize string `yaml:"tmpfs_size" mapstructure:"tmpfs_size"`
 }
 
+// CommandConfig represents a custom command that can be run in the container.
+type CommandConfig struct {
+	Name        string `yaml:"name" mapstructure:"name"`
+	Command     string `yaml:"command" mapstructure:"command"`
+	Description string `yaml:"description" mapstructure:"description"`
+	Service     string `yaml:"service" mapstructure:"service"`
+}
+
 // OroVersions defines the versions of components for a specific OroCommerce version.
 type OroVersions struct {
 	PHP           string
@@ -110,13 +118,14 @@ func GetVersionsForOro(oroVersion string) OroVersions {
 
 // OroConfig is the main configuration structure for Orobox.
 type OroConfig struct {
-	Type       string         `yaml:"type" mapstructure:"type" default:"bundle"`
-	Class      string         `yaml:"class" mapstructure:"class"`
-	Namespace  string         `yaml:"namespace" mapstructure:"namespace"`
-	OroVersion string         `yaml:"oro_version" mapstructure:"oro_version"`
-	Domains    []DomainConfig `yaml:"domains" mapstructure:"domains"`
-	Services   ServicesConfig `yaml:"services" mapstructure:"services"`
-	Test       TestConfig     `yaml:"test" mapstructure:"test"`
+	Type       string          `yaml:"type" mapstructure:"type" default:"bundle"`
+	Class      string          `yaml:"class" mapstructure:"class"`
+	Namespace  string          `yaml:"namespace" mapstructure:"namespace"`
+	OroVersion string          `yaml:"oro_version" mapstructure:"oro_version"`
+	Domains    []DomainConfig  `yaml:"domains" mapstructure:"domains"`
+	Services   ServicesConfig  `yaml:"services" mapstructure:"services"`
+	Test       TestConfig      `yaml:"test" mapstructure:"test"`
+	Commands   []CommandConfig `yaml:"commands" mapstructure:"commands"`
 }
 
 // Install types for OroCommerce.

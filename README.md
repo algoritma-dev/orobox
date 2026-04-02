@@ -56,6 +56,11 @@ services:
 test:
   use_tmpfs: true
   tmpfs_size: 1g
+commands:
+  - name: "otr"
+    command: "php bin/console oro:test:run"
+    description: "Runs the Shippy Pro tests suite"
+    service: "application_test"
 ```
 
 ### Configuration Fields
@@ -78,6 +83,11 @@ test:
 - `test`:
     - `use_tmpfs`: (bool) If enabled, uses RAM (tmpfs) for database files in the test container, significantly improving performance but data is lost on container restart.
     - `tmpfs_size`: (string) Size of the tmpfs mount (e.g., "1g", "512m").
+- `commands`: (list) List of custom commands that can be run in the container:
+    - `name`: (string) Name of the command (e.g., `otr`).
+    - `command`: (string) The actual command to execute (e.g., `php bin/console oro:test:run`).
+    - `description`: (string) Description of the command (displayed in help).
+    - `service`: (string, optional) Default service to run the command in (e.g., `application_test`).
 
 *Note: Versions of PHP, PostgreSQL, Node.js, and other components are automatically determined by the `oro_version` setting and cannot be changed manually.*
 
@@ -180,6 +190,21 @@ Removes all associated containers and volumes to start from scratch.
 ```bash
 orobox clean
 ```
+
+### 11. Run Custom Commands (`run`)
+Runs a custom command defined in your `.orobox.yaml` file.
+```bash
+orobox run <command-name>
+```
+Example:
+```bash
+orobox run otr
+```
+Options:
+- `--service`, `-s`: Specify a custom service to run the command in (e.g., `application_test`).
+- `--test`, `-t`: Quick flag to run the command in the `application_test` service.
+
+If you run `orobox run --help`, you will see a dynamic list of all commands configured in your `.orobox.yaml`.
 
 ## Debugging with Xdebug
 
