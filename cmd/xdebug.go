@@ -42,13 +42,6 @@ var xdebugCmd = &cobra.Command{
 			xdebugTest = true
 		}
 
-		// Ensure application is running if we are targeting it
-		if !docker.IsServiceRunning("application") {
-			utils.PrintError("Service 'application' is not running.")
-			utils.PrintInfo("Please run 'orobox up' first to start the development environment.")
-			os.Exit(1)
-		}
-
 		// 1. Hot-patch running containers
 		if xdebugDev {
 			applyXdebugHotfix(enable, "php-fpm-app", true)
@@ -74,10 +67,6 @@ func init() {
 }
 
 func applyXdebugHotfix(enable bool, service string, reloadFpm bool) {
-	if !docker.IsServiceRunning(service) {
-		return
-	}
-
 	source := "/usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini"
 	target := "/usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini.disabled"
 
@@ -127,11 +116,6 @@ func showXdebugStatus() {
 }
 
 func checkXdebugStatus(service, label string) {
-	if !docker.IsServiceRunning(service) {
-		utils.PrintInfo(fmt.Sprintf("%s: container not running", label))
-		return
-	}
-
 	execArgs := []string{"exec", "-u", "root"}
 	if !isTTY() {
 		execArgs = append(execArgs, "-T")

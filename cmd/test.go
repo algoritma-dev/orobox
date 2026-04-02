@@ -58,14 +58,6 @@ func runTestCommand() {
 
 	var args []string
 
-	// Optimization: use "exec" because the application must be already running.
-	// If it's not running, we tell the user to run "orobox up" first.
-	if !docker.IsServiceRunning("application") {
-		utils.PrintError("Service 'application' is not running.")
-		utils.PrintInfo("Please run 'orobox up' first to start the development environment.")
-		os.Exit(1)
-	}
-
 	args = append(args, "exec")
 
 	// Check if we have a TTY

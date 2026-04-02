@@ -12,6 +12,7 @@ x-templates:
     - "oro_app:/var/www/oro"
     {{if eq .Type "bundle" -}}
     - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
+    - "{{.BundlePath}}/vendor:/var/www/oro/vendor"
     {{- end}}
     - "public_storage:/var/www/oro/public/media"
     - "private_storage:/var/www/oro/var/data"
@@ -26,13 +27,33 @@ services:
       - -c
       - |
         echo "Initializing volumes and permissions for ${ORO_USER_RUNTIME:-www-data}..."
-        mkdir -p bin config public src templates translations var assets var/cache var/logs var/data public/media
-        chown -R ${ORO_USER_RUNTIME:-www-data} . bin config public src templates translations var assets var/cache var/logs var/data public/media 2>/dev/null || true
+        mkdir -p bin config public src templates translations var assets var/cache var/logs var/data public/media vendor
+        {{if eq .Type "bundle" -}}
+        if [ -d /vendor-host ] && [ -z "$$(ls -A /vendor-host)" ]; then
+            echo "Populating vendor folder on host from container..."
+            cp -rp vendor/. /vendor-host/
+        fi
+        {{- end}}
+        chown -R ${ORO_USER_RUNTIME:-www-data} . bin config public src templates translations var assets var/cache var/logs var/data public/media vendor 2>/dev/null || true
+        {{if eq .Type "bundle" -}}
+        [ -d /vendor-host ] && chown -R ${ORO_USER_RUNTIME:-www-data} /vendor-host 2>/dev/null || true
+        {{- end}}
         chmod -R 777 var/cache var/logs var/data 2>/dev/null || true
         true
     environment:
       ORO_XDEBUG_ENABLED: "false"
-    volumes: *volumes-setup
+    volumes:
+    {{if eq .Type "project" -}}
+    - "{{.BundlePath}}:/var/www/oro"
+    {{- else -}}
+    - "oro_app:/var/www/oro"
+    {{if eq .Type "bundle" -}}
+    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
+    - "{{.BundlePath}}/vendor-oro:/vendor-host"
+    {{- end}}
+    - "public_storage:/var/www/oro/public/media"
+    - "private_storage:/var/www/oro/var/data"
+    {{- end}}
 
   install:
     <<: *oro-app

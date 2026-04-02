@@ -266,6 +266,11 @@ func EnsureDockerCompose() bool {
 		absBundlePath = config.GetHostBundlePath()
 	}
 	data.BundlePath = absBundlePath
+
+	if data.Type == config.InstallTypeBundle {
+		_ = os.MkdirAll(filepath.Join(data.BundlePath, "vendor"), 0755)
+	}
+
 	data.Redis = viper.GetBool("services.redis")
 	if data.Redis {
 		data.RedisVersion = versions.Redis
@@ -841,32 +846,6 @@ func ResetEnsuredServices() {
 	dbInitializedCache = make(map[bool]bool)
 }
 
-// IsServiceRunning checks if the service is currently running.
-func IsServiceRunning(serviceName string) bool {
-	args := []string{"ps", "--format", "json", serviceName}
-	output, err := RunComposeCommandWithOutput(args...)
-	if err != nil {
-		return false
-	}
-
-	var status ServiceStatus
-	if jsonErr := json.Unmarshal(output, &status); jsonErr == nil {
-		return status.State == "running"
-	}
-
-	// Fallback for list of objects or older formats
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	for _, line := range lines {
-		if jsonErr := json.Unmarshal([]byte(line), &status); jsonErr == nil {
-			if status.Service == serviceName || serviceName == "" {
-				return status.State == "running"
-			}
-		}
-	}
-
-	return false
-}
-
 // EnsureServiceRunning checks if the service is running and healthy.
 // If it's not, it starts the service with 'up -d'.
 func EnsureServiceRunning(serviceName string) error {
@@ -897,15 +876,19 @@ func EnsureServicesRunning(serviceNames []string) error {
 
 	statusMap := make(map[string]ServiceStatus)
 	if err == nil {
+		// try to parse as array
 		var statuses []ServiceStatus
 		if jsonErr := json.Unmarshal(output, &statuses); jsonErr == nil {
 			for _, s := range statuses {
 				statusMap[s.Service] = s
 			}
 		} else {
-			// Fallback for older versions: try to parse line-delimited JSON or single object
+			// Fallback for line-delimited or single object
 			lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 			for _, line := range lines {
+				if line == "" {
+					continue
+				}
 				var s ServiceStatus
 				if jsonErr := json.Unmarshal([]byte(line), &s); jsonErr == nil {
 					statusMap[s.Service] = s

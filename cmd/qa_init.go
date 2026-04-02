@@ -39,12 +39,6 @@ func init() {
 }
 
 func runQaInitCommand() {
-	if !docker.IsServiceRunning("application") {
-		utils.PrintError("Service 'application' is not running.")
-		utils.PrintInfo("Please run 'orobox up' first to start the development environment.")
-		return
-	}
-
 	isBundle := viper.GetString("type") == config.InstallTypeBundle
 	workingDir := config.OroRootDir
 	if isBundle {

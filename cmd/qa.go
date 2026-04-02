@@ -113,14 +113,6 @@ func runQaCommand() {
 		return
 	}
 
-	// Optimization: use "exec" because the application must be already running.
-	// If it's not running, we tell the user to run "orobox up" first.
-	if !docker.IsServiceRunning("application") {
-		utils.PrintError("Service 'application' is not running.")
-		utils.PrintInfo("Please run 'orobox up' first to start the development environment.")
-		os.Exit(1)
-	}
-
 	var compositeCmd strings.Builder
 	for i, t := range enabledTools {
 		if i > 0 {

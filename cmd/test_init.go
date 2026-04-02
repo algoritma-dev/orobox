@@ -78,12 +78,6 @@ var testInitCmd = &cobra.Command{
 			}
 		}
 
-		if !docker.IsServiceRunning("application") {
-			utils.PrintError("Service 'application' is not running.")
-			utils.PrintInfo("Please run 'orobox up' first to start the development environment.")
-			return
-		}
-
 		// Drop and create database to ensure clean state
 		docker.SetDatabaseInitializedCache(true, false)
 

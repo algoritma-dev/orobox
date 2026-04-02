@@ -113,14 +113,6 @@ func executeCustomCommand(service, customCommand string, isTest bool) {
 	baseArgs := docker.GetBaseComposeArgs()
 	args := append(composeCmd, baseArgs...)
 
-	// Optimization: use "exec" because the service must be already running.
-	// If it's not running, we tell the user to run "orobox up" first.
-	if !docker.IsServiceRunning(service) {
-		utils.PrintError(fmt.Sprintf("Service '%s' is not running.", service))
-		utils.PrintInfo("Please run 'orobox up' first to start the environment.")
-		os.Exit(1)
-	}
-
 	args = append(args, "exec")
 
 	// Check if we have a TTY
