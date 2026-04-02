@@ -236,7 +236,7 @@ func TestFindPhpClass(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	shortName, namespace, found := FindPhpClass(className)
+	shortName, namespace, foundPath, found := FindPhpClass(".", className)
 	if !found {
 		t.Errorf("Expected to find PHP class %s", className)
 	}
@@ -246,8 +246,11 @@ func TestFindPhpClass(t *testing.T) {
 	if namespace != "MyNamespace" {
 		t.Errorf("Expected namespace MyNamespace, got %s", namespace)
 	}
+	if foundPath != "MyClass.php" {
+		t.Errorf("Expected foundPath MyClass.php, got %s", foundPath)
+	}
 
-	_, _, found = FindPhpClass("NonExistent")
+	_, _, _, found = FindPhpClass(".", "NonExistent")
 	if found {
 		t.Errorf("Expected not to find NonExistent class")
 	}

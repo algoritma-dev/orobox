@@ -199,6 +199,11 @@ func GetBundlePath() string {
 	return strings.ReplaceAll(ns, "\\", "/")
 }
 
+// GetBundleRootContainerPath returns the path to the bundle root in the container.
+func GetBundleRootContainerPath() string {
+	return OroRootDir + "/bundles/" + GetBundlePath()
+}
+
 // GetHostBundlePath returns the absolute path to the bundle on the host.
 func GetHostBundlePath() string {
 	configFile := viper.ConfigFileUsed()
@@ -248,28 +253,32 @@ func GetDomains() []DomainConfig {
 	return domains
 }
 
-// FindPhpClass tries to find a PHP class in the project directory.
-func FindPhpClass(className string) (string, string, bool) {
+// FindPhpClass tries to find a PHP class in the specified root directory.
+// It returns shortClassName, namespace, foundPath (relative to root), and a boolean indicating if it was found.
+func FindPhpClass(root string, className string) (string, string, string, bool) {
 	// If the user provides a full namespace like Algoritma\Bundle\ShippyProBundle\AlgoritmaShippyProBundle
 	parts := strings.Split(className, "\\")
 	shortClassName := parts[len(parts)-1]
 	namespace := strings.Join(parts[:len(parts)-1], "\\")
 
 	foundPath := ""
-	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 		if !info.IsDir() && info.Name() == shortClassName+".php" {
-			foundPath = path
-			return filepath.SkipDir // optimization? no, we want to find one.
+			relPath, err := filepath.Rel(root, path)
+			if err == nil {
+				foundPath = relPath
+				return filepath.SkipDir // optimization
+			}
 		}
 		return nil
 	})
 
 	if err == nil && foundPath != "" {
-		return shortClassName, namespace, true
+		return shortClassName, namespace, foundPath, true
 	}
 
-	return "", "", false
+	return "", "", "", false
 }

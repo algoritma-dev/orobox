@@ -9,7 +9,7 @@ x-templates:
 
   volumes-oro: &volumes-oro
     - "oro_app:/var/www/oro:delegated"
-    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}:cached"
+    - "{{.BundlePath}}:{{.BundleRootContainerPath}}:cached"
     - "{{.BundlePath}}/vendor-oro:/var/www/oro/vendor:delegated"
     - "cache:/var/www/oro/var/cache:delegated"
     - "public_storage:/var/www/oro/public/media:delegated"
@@ -68,7 +68,7 @@ services:
     volumes:
       - "./nginx.conf:/etc/nginx/http.d/default.conf:ro"
       - "oro_app:/var/www/oro:delegated"
-      - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}:cached"
+      - "{{.BundlePath}}:{{.BundleRootContainerPath}}:cached"
       - "{{.BundlePath}}/vendor-oro:/var/www/oro/vendor:delegated"
       - "cache:/var/www/oro/var/cache:ro"
       - "public_storage:/var/www/oro/public/media:ro"
@@ -98,7 +98,7 @@ services:
       ORO_XDEBUG_ENABLED: "false"
     volumes:
       - "oro_app:/var/www/oro:delegated"
-      - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}:cached"
+      - "{{.BundlePath}}:{{.BundleRootContainerPath}}:cached"
       - "{{.BundlePath}}/vendor-oro:/vendor-host:delegated"
       - "cache:/var/www/oro/var/cache:delegated"
       - "public_storage:/var/www/oro/public/media:delegated"

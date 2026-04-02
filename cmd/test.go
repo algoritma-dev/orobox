@@ -71,8 +71,7 @@ func runTestCommand() {
 	args = append(args, "application")
 
 	if viper.GetString("type") == "bundle" {
-		bundlePath := "src/" + config.GetBundlePath()
-		args = append(args, "./bin/simple-phpunit", "--configuration="+bundlePath)
+		args = append(args, "./bin/simple-phpunit", "--configuration="+config.GetBundleRootContainerPath())
 	} else {
 		args = append(args, "php", "bin/phpunit")
 	}

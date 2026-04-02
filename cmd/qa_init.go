@@ -35,7 +35,7 @@ func init() {
 }
 
 func runQaInitCommand() {
-	workingDir := config.OroRootDir + "/src/" + config.GetBundlePath()
+	workingDir := config.GetBundleRootContainerPath()
 
 	// 1. Configure Composer plugins
 	utils.PrintInfo("Configuring Composer plugins (phpstan/extension-installer, algoritma/php-coding-standards)...")

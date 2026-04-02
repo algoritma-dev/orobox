@@ -11,7 +11,7 @@ x-templates:
     {{- else -}}
     - "oro_app:/var/www/oro:delegated"
     {{if eq .Type "bundle" -}}
-    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}:cached"
+    - "{{.BundlePath}}:{{.BundleRootContainerPath}}:cached"
     - "{{.BundlePath}}/vendor-oro:/var/www/oro/vendor:delegated"
     {{- end}}
     - "cache:/var/www/oro/var/cache:delegated"
@@ -34,6 +34,16 @@ services:
             echo "Populating vendor folder on host from container..."
             cp -rp vendor/. /vendor-host/
         fi
+
+        if [ -n "{{.BundlePackageName}}" ]; then
+            echo "Configuring bundle {{.BundlePackageName}} as path repository..."
+            # Configure composer repository for the bundle
+            # Use relative path from /var/www/oro to the bundle root
+            composer config repositories.bundle '{"type": "path", "url": "bundles/{{.BundleNamespace}}", "options": {"symlink": true}}'
+            # Require the bundle package
+            # Note: we use --no-update because the full install/update will happen during oro:install or manually
+            composer require "{{.BundlePackageName}}:@dev" --no-interaction --no-scripts
+        fi
         {{- end}}
         chown -R ${ORO_USER_RUNTIME:-www-data} . bin config public src templates translations var assets var/cache var/logs var/data public/media vendor 2>/dev/null || true
         {{if eq .Type "bundle" -}}
@@ -49,7 +59,7 @@ services:
     {{- else -}}
     - "oro_app:/var/www/oro:delegated"
     {{if eq .Type "bundle" -}}
-    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}:cached"
+    - "{{.BundlePath}}:{{.BundleRootContainerPath}}:cached"
     - "{{.BundlePath}}/vendor-oro:/vendor-host:delegated"
     {{- end}}
     - "cache:/var/www/oro/var/cache:delegated"

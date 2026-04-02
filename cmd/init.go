@@ -177,7 +177,7 @@ func generateConfig() {
 
 	if bundleClass != "" {
 		var found bool
-		className, namespace, found = config.FindPhpClass(bundleClass)
+		className, namespace, _, found = config.FindPhpClass(".", bundleClass)
 		if !found {
 			utils.PrintWarning(fmt.Sprintf("PHP class for %s not found in current directory or subdirectories.", bundleClass))
 			// Manual parsing if not found

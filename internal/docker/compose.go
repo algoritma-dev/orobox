@@ -161,49 +161,52 @@ func EnsureDockerCompose() bool {
 	}
 
 	data := struct {
-		Type                 string
-		OroVersion           string
-		PHPVersion           string
-		NodeVersion          string
-		NpmVersion           string
-		BundlePath           string
-		Postgres             bool
-		PostgresVersion      string
-		Redis                bool
-		RedisVersion         string
-		Mailpit              bool
-		RabbitMQ             bool
-		RabbitMQVersion      string
-		Elasticsearch        bool
-		ElasticsearchVersion string
-		RedisInsight         bool
-		Kibana               bool
-		Adminer              bool
-		InternalDir          string
-		OroRootDir           string
-		CustomBundle         string
-		BundleNamespace      string
-		Domains              []config.DomainConfig
-		MemoryLimit          string
-		NginxHTTPPort        string
-		NginxHTTPSPort       string
-		PhpFpmPort           string
-		HasSsl               bool
-		CertsPath            string
-		UserRuntime          string
-		UseTmpfs             bool
-		TmpfsSize            string
+		Type                    string
+		OroVersion              string
+		PHPVersion              string
+		NodeVersion             string
+		NpmVersion              string
+		BundlePath              string
+		Postgres                bool
+		PostgresVersion         string
+		Redis                   bool
+		RedisVersion            string
+		Mailpit                 bool
+		RabbitMQ                bool
+		RabbitMQVersion         string
+		Elasticsearch           bool
+		ElasticsearchVersion    string
+		RedisInsight            bool
+		Kibana                  bool
+		Adminer                 bool
+		InternalDir             string
+		OroRootDir              string
+		CustomBundle            string
+		BundleNamespace         string
+		Domains                 []config.DomainConfig
+		MemoryLimit             string
+		NginxHTTPPort           string
+		NginxHTTPSPort          string
+		PhpFpmPort              string
+		HasSsl                  bool
+		CertsPath               string
+		UserRuntime             string
+		UseTmpfs                bool
+		TmpfsSize               string
+		BundleRootContainerPath string
+		BundlePackageName       string
 	}{
-		Type:            viper.GetString("type"),
-		InternalDir:     internalDir,
-		OroRootDir:      config.OroRootDir,
-		CustomBundle:    config.CustomBundlePath,
-		BundleNamespace: config.GetBundlePath(),
-		MemoryLimit:     "2048M", // Default
-		PhpFpmPort:      "9000",
-		UserRuntime:     "www-data",
-		UseTmpfs:        viper.GetBool("test.use_tmpfs"),
-		TmpfsSize:       viper.GetString("test.tmpfs_size"),
+		Type:                    viper.GetString("type"),
+		InternalDir:             internalDir,
+		OroRootDir:              config.OroRootDir,
+		CustomBundle:            config.CustomBundlePath,
+		BundleNamespace:         config.GetBundlePath(),
+		MemoryLimit:             "2048M", // Default
+		PhpFpmPort:              "9000",
+		UserRuntime:             "www-data",
+		UseTmpfs:                viper.GetBool("test.use_tmpfs"),
+		TmpfsSize:               viper.GetString("test.tmpfs_size"),
+		BundleRootContainerPath: config.GetBundleRootContainerPath(),
 	}
 
 	if data.TmpfsSize == "" {
@@ -266,6 +269,28 @@ func EnsureDockerCompose() bool {
 		absBundlePath = config.GetHostBundlePath()
 	}
 	data.BundlePath = absBundlePath
+
+	// Try to get package name from composer.json
+	composerJsonPath := filepath.Join(data.BundlePath, "composer.json")
+	if content, err := os.ReadFile(composerJsonPath); err == nil {
+		var composerData struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(content, &composerData); err == nil {
+			data.BundlePackageName = composerData.Name
+		}
+	}
+
+	bundleClass := viper.GetString("class")
+	bundleNamespace := viper.GetString("namespace")
+	if bundleClass != "" && bundleNamespace != "" {
+		_, _, _, found := config.FindPhpClass(data.BundlePath, bundleNamespace+"\\"+bundleClass)
+		if found {
+			// Logic to detect source path?
+			// No longer needed for volumes, but maybe for other things?
+			// Actually, let's just keep it simple.
+		}
+	}
 
 	_ = os.MkdirAll(filepath.Join(data.BundlePath, "vendor"), 0755)
 

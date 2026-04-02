@@ -45,7 +45,7 @@ func init() {
 }
 
 func runQaCommand() {
-	workingDir := config.OroRootDir + "/src/" + config.GetBundlePath()
+	workingDir := config.GetBundleRootContainerPath()
 
 	jsTarget := "Resources/public"
 	twigTarget := "."
