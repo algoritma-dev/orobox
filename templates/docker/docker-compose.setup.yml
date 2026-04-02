@@ -39,10 +39,10 @@ services:
             echo "Configuring bundle {{.BundlePackageName}} as path repository..."
             # Configure composer repository for the bundle
             # Use relative path from /var/www/oro to the bundle root
-            composer config repositories.bundle '{"type": "path", "url": "bundles/{{.BundleNamespace}}", "options": {"symlink": true}}'
+            COMPOSER_ALLOW_SUPERUSER=1 composer config repositories.bundle '{"type": "path", "url": "bundles/{{.BundleNamespace}}", "options": {"symlink": true}}'
             # Require the bundle package
-            # Note: we use --no-update because the full install/update will happen during oro:install or manually
-            composer require "{{.BundlePackageName}}:@dev" --no-interaction --no-scripts
+            # We use --no-scripts to avoid running OroCommerce scripts too early
+            COMPOSER_ALLOW_SUPERUSER=1 composer require "{{.BundlePackageName}}:@dev" --no-interaction --no-scripts
         fi
         {{- end}}
         chown -R ${ORO_USER_RUNTIME:-www-data} . bin config public src templates translations var assets var/cache var/logs var/data public/media vendor 2>/dev/null || true

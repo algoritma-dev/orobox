@@ -50,7 +50,10 @@ var initCmd = &cobra.Command{
 		generateConfig()
 
 		// Reload config after generation
-		_ = viper.ReadInConfig()
+		viper.SetConfigFile(".orobox.yaml")
+		if err := viper.ReadInConfig(); err != nil {
+			utils.PrintWarning(fmt.Sprintf("Could not read configuration: %v", err))
+		}
 
 		certificates.InstallSslCertificates()
 

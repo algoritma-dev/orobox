@@ -278,7 +278,11 @@ func EnsureDockerCompose() bool {
 		}
 		if err := json.Unmarshal(content, &composerData); err == nil {
 			data.BundlePackageName = composerData.Name
+		} else {
+			utils.PrintWarning(fmt.Sprintf("Could not parse composer.json in %s: %v", data.BundlePath, err))
 		}
+	} else if data.Type == config.InstallTypeBundle {
+		utils.PrintWarning(fmt.Sprintf("composer.json not found in %s. Bundle package name will be unknown.", data.BundlePath))
 	}
 
 	bundleClass := viper.GetString("class")
