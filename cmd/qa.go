@@ -29,10 +29,6 @@ var qaCmd = &cobra.Command{
 	Run: func(_ *cobra.Command, _ []string) {
 		docker.SetIncludeTestFiles(true)
 		docker.EnsureDockerCompose()
-		if viper.GetString("type") == config.InstallTypeDemo {
-			utils.PrintError("The 'qa' command is not available for demo instances.")
-			return
-		}
 		utils.PrintInfo("Running QA tools...")
 		runQaCommand()
 	},

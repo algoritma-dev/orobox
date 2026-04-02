@@ -195,7 +195,7 @@ func generateConfig() {
 	utils.PrintTitle("Config file .orobox.yaml not found or invalid. Let's create it interactively.")
 	reader := bufio.NewReader(stdin)
 
-	typeOfInstall := utils.AskSelection(reader, "Installation type", []string{config.InstallTypeBundle, config.InstallTypeProject, config.InstallTypeDemo}, installType)
+	typeOfInstall := utils.AskSelection(reader, "Installation type", []string{config.InstallTypeBundle, config.InstallTypeProject}, installType)
 
 	var className, namespace string
 	if typeOfInstall == config.InstallTypeBundle {
@@ -226,31 +226,23 @@ func generateConfig() {
 	root := utils.AskQuestion(reader, "Main domain root", "public")
 	ssl := utils.AskYesNo(reader, "Enable SSL?", true)
 
-	isDemo := typeOfInstall == config.InstallTypeDemo
-
 	redisEnabled := utils.AskYesNo(reader, "Enable Redis?", false)
 	redisInsightEnabled := false
-	if redisEnabled && !isDemo {
+	if redisEnabled {
 		redisInsightEnabled = utils.AskYesNo(reader, "Enable RedisInsight?", true)
 	}
 
-	mailpit := false
-	if !isDemo {
-		mailpit = utils.AskYesNo(reader, "Enable Mailpit?", true)
-	}
+	mailpit := utils.AskYesNo(reader, "Enable Mailpit?", true)
 
 	rabbitmqEnabled := utils.AskYesNo(reader, "Enable RabbitMQ?", false)
 	elasticsearchEnabled := utils.AskYesNo(reader, "Enable Elasticsearch?", false)
 
 	kibanaEnabled := false
-	if elasticsearchEnabled && !isDemo {
+	if elasticsearchEnabled {
 		kibanaEnabled = utils.AskYesNo(reader, "Enable Kibana?", true)
 	}
 
-	adminerEnabled := false
-	if !isDemo {
-		adminerEnabled = utils.AskYesNo(reader, "Enable Adminer?", true)
-	}
+	adminerEnabled := utils.AskYesNo(reader, "Enable Adminer?", true)
 
 	conf := config.OroConfig{
 		Type:       typeOfInstall,
