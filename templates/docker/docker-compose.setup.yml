@@ -43,6 +43,10 @@ services:
             # Require the bundle package
             # We use --no-scripts to avoid running OroCommerce scripts too early
             COMPOSER_ALLOW_SUPERUSER=1 composer require "{{.BundlePackageName}}:@dev" --no-interaction --no-scripts
+            if [ -d /vendor-host ]; then
+                echo "Syncing newly installed bundle to host vendor folder..."
+                cp -rp vendor/. /vendor-host/
+            fi
         fi
         {{- end}}
         chown -R ${ORO_USER_RUNTIME:-www-data} . bin config public src templates translations var assets var/cache var/logs var/data public/media vendor 2>/dev/null || true
@@ -100,3 +104,9 @@ services:
         condition: service_started
       {{- end}}
     volumes: *volumes-setup
+
+  gotenberg:
+    image: gotenberg/gotenberg:8.23.2
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://127.0.0.1:3000/health" ]
+    restart: on-failure
