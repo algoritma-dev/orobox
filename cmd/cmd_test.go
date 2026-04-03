@@ -384,7 +384,7 @@ func TestTestInitCommand(t *testing.T) {
 	docker.RunComposeCommand = mockRun
 	docker.RunComposeCommandSilently = mockRunSilently
 
-	// Simula ambiente NON inizializzato per evitare prompt e container running
+	// Simulates uninitialized environment to avoid prompts and running containers
 	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
 		if len(args) > 0 && args[0] == "ps" {
 			return []byte(`{"Service": "application", "State": "running"}`), nil
