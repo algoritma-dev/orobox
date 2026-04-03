@@ -1,23 +1,17 @@
 x-templates:
   oro-app: &oro-app
-    image: "algoritmadev/orobox:{{.OroVersion}}-{{.Type}}-latest"
+    image: "algoritmadev/orobox:{{.OroVersion}}-bundle-latest"
     env_file: .env
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
   volumes-setup: &volumes-setup
-    {{if eq .Type "project" -}}
-    - "{{.BundlePath}}:/var/www/oro:cached"
-    {{- else -}}
     - "oro_app:/var/www/oro:delegated"
-    {{if eq .Type "bundle" -}}
     - "{{.BundlePath}}:{{.BundleRootContainerPath}}:cached"
     - "{{.BundlePath}}/vendor-oro:/var/www/oro/vendor:delegated"
-    {{- end}}
     - "cache:/var/www/oro/var/cache:delegated"
     - "public_storage:/var/www/oro/public/media:delegated"
     - "private_storage:/var/www/oro/var/data:delegated"
-    {{- end}}
 
 services:
   volume-setup:
@@ -29,8 +23,7 @@ services:
       - |
         echo "Initializing volumes and permissions for ${ORO_USER_RUNTIME:-www-data}..."
         mkdir -p bin config public src templates translations var assets var/cache var/logs var/data public/media vendor
-        {{if eq .Type "bundle" -}}
-        if [ -d /vendor-host ] && [ -z "$$(ls -A /vendor-host)" ]; then
+        if [ -d /vendor-host ] && [ -z "$(ls -A /vendor-host)" ]; then
             echo "Populating vendor folder on host from container..."
             cp -rp vendor/. /vendor-host/
         fi
@@ -48,28 +41,19 @@ services:
                 cp -rp vendor/. /vendor-host/
             fi
         fi
-        {{- end}}
         chown -R ${ORO_USER_RUNTIME:-www-data} . bin config public src templates translations var assets var/cache var/logs var/data public/media vendor 2>/dev/null || true
-        {{if eq .Type "bundle" -}}
         [ -d /vendor-host ] && chown -R ${ORO_USER_RUNTIME:-www-data} /vendor-host 2>/dev/null || true
-        {{- end}}
         chmod -R 777 var/cache var/logs var/data 2>/dev/null || true
         true
     environment:
       ORO_XDEBUG_ENABLED: "false"
     volumes:
-    {{if eq .Type "project" -}}
-    - "{{.BundlePath}}:/var/www/oro:cached"
-    {{- else -}}
     - "oro_app:/var/www/oro:delegated"
-    {{if eq .Type "bundle" -}}
     - "{{.BundlePath}}:{{.BundleRootContainerPath}}:cached"
     - "{{.BundlePath}}/vendor-oro:/vendor-host:delegated"
-    {{- end}}
     - "cache:/var/www/oro/var/cache:delegated"
     - "public_storage:/var/www/oro/public/media:delegated"
     - "private_storage:/var/www/oro/var/data:delegated"
-    {{- end}}
 
   install:
     <<: *oro-app

@@ -1,7 +1,7 @@
 
 x-templates:
   oro-app: &oro-app
-    image: "algoritmadev/orobox:{{.OroVersion}}-{{.Type}}-latest"
+    image: "algoritmadev/orobox:{{.OroVersion}}-bundle-latest"
     env_file: .env
     mem_limit: ${ORO_APP_MEM_LIMIT:-2g}
     extra_hosts:
@@ -43,7 +43,7 @@ services:
     <<: *oro-app
     environment:
       ORO_XDEBUG_ENABLED: "false"
-      ORO_ENV: {{if eq .Type "demo"}}prod{{else}}${ORO_ENV:-dev}{{end}}
+      ORO_ENV: ${ORO_ENV:-dev}
     command: nginx
     restart: unless-stopped
     healthcheck:
