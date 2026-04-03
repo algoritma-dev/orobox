@@ -29,6 +29,8 @@ func InstallSslCertificates() {
 	}
 
 	// 0. Check if mkcert is installed
+	certsDirs := filepath.Join(config.GetInternalDir(), "certs")
+
 	if _, err := exec.LookPath("mkcert"); err != nil {
 		utils.PrintWarning("mkcert is not installed. SSL certificates will not be generated.")
 		utils.PrintInfo("Please install mkcert (https://github.com/FiloSottile/mkcert) and run 'mkcert -install'")
@@ -37,10 +39,11 @@ func InstallSslCertificates() {
 		} else if runtime.GOOS == "linux" {
 			utils.PrintInfo("On Linux, you can follow: https://github.com/FiloSottile/mkcert#linux")
 		}
+
+		// Ensure the directory is created anyway for consistency (e.g., tests or manual generation)
+		_ = os.MkdirAll(certsDirs, 0755)
 		return
 	}
-
-	certsDirs := filepath.Join(config.GetInternalDir(), "certs")
 
 	err := os.MkdirAll(certsDirs, 0755)
 	if err != nil {
