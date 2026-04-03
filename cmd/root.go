@@ -74,7 +74,9 @@ func initConfig() {
 			}
 		}
 
-		if ConfigError == nil {
+		debug := viper.GetBool("debug")
+
+		if ConfigError == nil && debug {
 			utils.PrintInfo("Using config file: " + configFile)
 		}
 	}
