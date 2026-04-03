@@ -151,6 +151,44 @@ commands:
 	}
 }
 
+func TestParseConfigWithDepends(t *testing.T) {
+	yamlData := `
+namespace: MyNamespace
+oro_version: "6.1"
+domains:
+  - host: example.com
+commands:
+  - name: "build"
+    command: "npm run build"
+  - name: "test"
+    command: "npm test"
+    depends: ["build"]
+`
+	config, err := ParseConfig([]byte(yamlData))
+	if err != nil {
+		t.Fatalf("ParseConfig failed: %v", err)
+	}
+
+	if len(config.Commands) != 2 {
+		t.Fatalf("Expected 2 commands, got %d", len(config.Commands))
+	}
+
+	var testCmd *CommandConfig
+	for i := range config.Commands {
+		if config.Commands[i].Name == "test" {
+			testCmd = &config.Commands[i]
+		}
+	}
+
+	if testCmd == nil {
+		t.Fatal("Command 'test' not found")
+	}
+
+	if len(testCmd.Depends) != 1 || testCmd.Depends[0] != "build" {
+		t.Errorf("Expected depends ['build'], got %v", testCmd.Depends)
+	}
+}
+
 func TestSaveConfig(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "saveconfig")
 	if err != nil {

@@ -43,16 +43,12 @@ var runCmd = &cobra.Command{
 		docker.EnsureDockerCompose()
 
 		commandName := args[0]
-		var foundCommand *config.CommandConfig
-		for _, cmd := range commands {
-			if cmd.Name == commandName {
-				foundCommand = &cmd
-				break
-			}
-		}
+		var executionList []*config.CommandConfig
+		visited := make(map[string]bool)
+		path := make(map[string]bool)
 
-		if foundCommand == nil {
-			utils.PrintError(fmt.Sprintf("Command '%s' not found in .orobox.yaml", commandName))
+		if err := resolveDependencies(commandName, commands, &executionList, visited, path); err != nil {
+			utils.PrintError(err.Error())
 
 			if len(commands) > 0 {
 				fmt.Println("\nAvailable commands:")
@@ -63,14 +59,29 @@ var runCmd = &cobra.Command{
 			return
 		}
 
-		service := "application"
-		if runService != "" {
-			service = runService
-		} else if foundCommand.Service != "" {
-			service = foundCommand.Service
-		}
+		for i, cmdToRun := range executionList {
+			service := "application"
+			if runService != "" {
+				service = runService
+			} else if cmdToRun.Service != "" {
+				service = cmdToRun.Service
+			}
 
-		executeCustomCommand(service, foundCommand.Command, runTest)
+			if i == len(executionList)-1 {
+				utils.StartLoader(fmt.Sprintf("Running: %s", cmdToRun.Command))
+				executeCustomCommand(service, cmdToRun.Command, runTest)
+				utils.StopLoader()
+			} else {
+				utils.StartLoader(fmt.Sprintf("Running dependency: %s", cmdToRun.Name))
+				if err := executeCommandWait(service, cmdToRun.Command, runTest); err != nil {
+					utils.PrintError(fmt.Sprintf("Dependency '%s' failed: %v", cmdToRun.Name, err))
+					os.Exit(1)
+				}
+				utils.StopLoader()
+				utils.PrintInfo(fmt.Sprintf("Running dependency: %s", cmdToRun.Name))
+				utils.PrintInfo(fmt.Sprintln("Done"))
+			}
+		}
 	},
 }
 
@@ -133,4 +144,70 @@ func executeCustomCommand(service, customCommand string, isTest bool) {
 	if err != nil {
 		utils.PrintError(fmt.Sprintf("Failed to execute command: %v", err))
 	}
+}
+
+func executeCommandWait(service, customCommand string, isTest bool) error {
+	composeCmd := docker.GetComposeCommand()
+	binary, err := exec.LookPath(composeCmd[0])
+	if err != nil {
+		return fmt.Errorf("docker compose not found: %v", err)
+	}
+
+	baseArgs := docker.GetBaseComposeArgs()
+	args := append(composeCmd, baseArgs...)
+	args = append(args, "exec")
+
+	// Check if we have a TTY
+	if !isTTY() {
+		args = append(args, "-T")
+	}
+
+	// Set ORO_ENV=test if explicitly requested via --test flag
+	if isTest && service == "application" {
+		args = append(args, "-e", "ORO_ENV=test")
+	}
+
+	// We use "sh -c" to allow multiple commands and pipes if specified in the config.
+	args = append(args, service, "sh", "-c", customCommand)
+
+	cmd := exec.Command(binary, args[1:]...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+
+	return cmd.Run()
+}
+
+func resolveDependencies(name string, commands []config.CommandConfig, executionList *[]*config.CommandConfig, visited map[string]bool, path map[string]bool) error {
+	if path[name] {
+		return fmt.Errorf("circular dependency detected for command '%s'", name)
+	}
+
+	if visited[name] {
+		return nil
+	}
+
+	var foundCommand *config.CommandConfig
+	for i := range commands {
+		if commands[i].Name == name {
+			foundCommand = &commands[i]
+			break
+		}
+	}
+
+	if foundCommand == nil {
+		return fmt.Errorf("command '%s' not found in .orobox.yaml", name)
+	}
+
+	path[name] = true
+	for _, depName := range foundCommand.Depends {
+		if err := resolveDependencies(depName, commands, executionList, visited, path); err != nil {
+			return err
+		}
+	}
+	delete(path, name)
+
+	visited[name] = true
+	*executionList = append(*executionList, foundCommand)
+	return nil
 }

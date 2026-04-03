@@ -38,10 +38,11 @@ type TestConfig struct {
 
 // CommandConfig represents a custom command that can be run in the container.
 type CommandConfig struct {
-	Name        string `yaml:"name" mapstructure:"name"`
-	Command     string `yaml:"command" mapstructure:"command"`
-	Description string `yaml:"description" mapstructure:"description"`
-	Service     string `yaml:"service" mapstructure:"service"`
+	Name        string   `yaml:"name" mapstructure:"name"`
+	Command     string   `yaml:"command" mapstructure:"command"`
+	Description string   `yaml:"description" mapstructure:"description"`
+	Service     string   `yaml:"service" mapstructure:"service"`
+	Depends     []string `yaml:"depends" mapstructure:"depends"`
 }
 
 // OroVersions defines the versions of components for a specific OroCommerce version.
