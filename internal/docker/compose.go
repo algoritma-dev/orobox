@@ -285,17 +285,6 @@ func EnsureDockerCompose() bool {
 		utils.PrintWarning(fmt.Sprintf("composer.json not found in %s. Bundle package name will be unknown.", data.BundlePath))
 	}
 
-	bundleClass := viper.GetString("class")
-	bundleNamespace := viper.GetString("namespace")
-	if bundleClass != "" && bundleNamespace != "" {
-		_, _, _, found := config.FindPhpClass(data.BundlePath, bundleNamespace+"\\"+bundleClass)
-		if found {
-			// Logic to detect source path?
-			// No longer needed for volumes, but maybe for other things?
-			// Actually, let's just keep it simple.
-		}
-	}
-
 	_ = os.MkdirAll(filepath.Join(data.BundlePath, "vendor"), 0755)
 
 	data.Redis = viper.GetBool("services.redis")
