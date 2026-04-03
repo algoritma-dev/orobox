@@ -38,7 +38,7 @@ var dbBackupCmd = &cobra.Command{
 	Use:   "backup [file]",
 	Short: "Backup the database to a file",
 	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, args []string) {
 		docker.EnsureDockerCompose()
 		backupFile := args[0]
 		backupDatabase(backupFile)
@@ -49,7 +49,7 @@ var dbRestoreCmd = &cobra.Command{
 	Use:   "restore [file]",
 	Short: "Restore the database from a file",
 	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, args []string) {
 		docker.EnsureDockerCompose()
 		restoreFile := args[0]
 		restoreDatabase(restoreFile)
