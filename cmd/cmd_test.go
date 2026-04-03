@@ -347,7 +347,7 @@ func TestTestCommandBundle(t *testing.T) {
 	}
 
 	lastCall := calls[1]
-	if !contains(lastCall, "simple-phpunit") || !contains(lastCall, "--configuration=src/MyTestBundle") {
+	if !contains(lastCall, "simple-phpunit") || !contains(lastCall, "--configuration=/var/www/oro/bundles/MyTestBundle") {
 		t.Errorf("Expected simple-phpunit with configuration, got %v", lastCall)
 	}
 }

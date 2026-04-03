@@ -35,11 +35,7 @@ func init() {
 }
 
 func runQaInitCommand() {
-	isBundle := viper.GetString("type") == config.InstallTypeBundle
-	workingDir := config.OroRootDir
-	if isBundle {
-		workingDir = config.OroRootDir + "/src/" + config.GetBundlePath()
-	}
+	workingDir := config.GetBundleRootContainerPath()
 
 	// 1. Configure Composer plugins
 	utils.PrintInfo("Configuring Composer plugins (phpstan/extension-installer, algoritma/php-coding-standards)...")

@@ -161,49 +161,52 @@ func EnsureDockerCompose() bool {
 	}
 
 	data := struct {
-		Type                 string
-		OroVersion           string
-		PHPVersion           string
-		NodeVersion          string
-		NpmVersion           string
-		BundlePath           string
-		Postgres             bool
-		PostgresVersion      string
-		Redis                bool
-		RedisVersion         string
-		Mailpit              bool
-		RabbitMQ             bool
-		RabbitMQVersion      string
-		Elasticsearch        bool
-		ElasticsearchVersion string
-		RedisInsight         bool
-		Kibana               bool
-		Adminer              bool
-		InternalDir          string
-		OroRootDir           string
-		CustomBundle         string
-		BundleNamespace      string
-		Domains              []config.DomainConfig
-		MemoryLimit          string
-		NginxHTTPPort        string
-		NginxHTTPSPort       string
-		PhpFpmPort           string
-		HasSsl               bool
-		CertsPath            string
-		UserRuntime          string
-		UseTmpfs             bool
-		TmpfsSize            string
+		Type                    string
+		OroVersion              string
+		PHPVersion              string
+		NodeVersion             string
+		NpmVersion              string
+		BundlePath              string
+		Postgres                bool
+		PostgresVersion         string
+		Redis                   bool
+		RedisVersion            string
+		Mailpit                 bool
+		RabbitMQ                bool
+		RabbitMQVersion         string
+		Elasticsearch           bool
+		ElasticsearchVersion    string
+		RedisInsight            bool
+		Kibana                  bool
+		Adminer                 bool
+		InternalDir             string
+		OroRootDir              string
+		CustomBundle            string
+		BundleNamespace         string
+		Domains                 []config.DomainConfig
+		MemoryLimit             string
+		NginxHTTPPort           string
+		NginxHTTPSPort          string
+		PhpFpmPort              string
+		HasSsl                  bool
+		CertsPath               string
+		UserRuntime             string
+		UseTmpfs                bool
+		TmpfsSize               string
+		BundleRootContainerPath string
+		BundlePackageName       string
 	}{
-		Type:            viper.GetString("type"),
-		InternalDir:     internalDir,
-		OroRootDir:      config.OroRootDir,
-		CustomBundle:    config.CustomBundlePath,
-		BundleNamespace: config.GetBundlePath(),
-		MemoryLimit:     "2048M", // Default
-		PhpFpmPort:      "9000",
-		UserRuntime:     "www-data",
-		UseTmpfs:        viper.GetBool("test.use_tmpfs"),
-		TmpfsSize:       viper.GetString("test.tmpfs_size"),
+		Type:                    viper.GetString("type"),
+		InternalDir:             internalDir,
+		OroRootDir:              config.OroRootDir,
+		CustomBundle:            config.CustomBundlePath,
+		BundleNamespace:         config.GetBundlePath(),
+		MemoryLimit:             "2048M", // Default
+		PhpFpmPort:              "9000",
+		UserRuntime:             "www-data",
+		UseTmpfs:                viper.GetBool("test.use_tmpfs"),
+		TmpfsSize:               viper.GetString("test.tmpfs_size"),
+		BundleRootContainerPath: config.GetBundleRootContainerPath(),
 	}
 
 	if data.TmpfsSize == "" {
@@ -256,7 +259,7 @@ func EnsureDockerCompose() bool {
 		data.ElasticsearchVersion = versions.Elasticsearch
 	}
 
-	data.Kibana = data.Elasticsearch && data.Type != "demo"
+	data.Kibana = data.Elasticsearch
 	if viper.IsSet("services.kibana") {
 		data.Kibana = viper.GetBool("services.kibana")
 	}
@@ -267,9 +270,33 @@ func EnsureDockerCompose() bool {
 	}
 	data.BundlePath = absBundlePath
 
-	if data.Type == config.InstallTypeBundle {
-		_ = os.MkdirAll(filepath.Join(data.BundlePath, "vendor"), 0755)
+	// Try to get package name from composer.json
+	composerJsonPath := filepath.Join(data.BundlePath, "composer.json")
+	if content, err := os.ReadFile(composerJsonPath); err == nil {
+		var composerData struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(content, &composerData); err == nil {
+			data.BundlePackageName = composerData.Name
+		} else {
+			utils.PrintWarning(fmt.Sprintf("Could not parse composer.json in %s: %v", data.BundlePath, err))
+		}
+	} else if data.Type == config.InstallTypeBundle {
+		utils.PrintWarning(fmt.Sprintf("composer.json not found in %s. Bundle package name will be unknown.", data.BundlePath))
 	}
+
+	bundleClass := viper.GetString("class")
+	bundleNamespace := viper.GetString("namespace")
+	if bundleClass != "" && bundleNamespace != "" {
+		_, _, _, found := config.FindPhpClass(data.BundlePath, bundleNamespace+"\\"+bundleClass)
+		if found {
+			// Logic to detect source path?
+			// No longer needed for volumes, but maybe for other things?
+			// Actually, let's just keep it simple.
+		}
+	}
+
+	_ = os.MkdirAll(filepath.Join(data.BundlePath, "vendor"), 0755)
 
 	data.Redis = viper.GetBool("services.redis")
 	if data.Redis {
@@ -487,10 +514,13 @@ func PullAllLocalOrobotImages() (bool, error) {
 		defer utils.StopLoader()
 	}
 
+	semaphore := make(chan struct{}, 4)
 	for _, img := range images {
 		wg.Add(1)
 		go func(imageName string) {
 			defer wg.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
 			if needsPull(imageName) {
 				mu.Lock()
 				toPull = append(toPull, imageName)
@@ -519,6 +549,8 @@ func PullAllLocalOrobotImages() (bool, error) {
 		wg.Add(1)
 		go func(imageName string) {
 			defer wg.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
 			pullCmd := exec.Command("docker", "pull", imageName)
 			if debug {
 				pullCmd.Stdout = os.Stdout
@@ -528,8 +560,6 @@ func PullAllLocalOrobotImages() (bool, error) {
 		}(img)
 	}
 	wg.Wait()
-
-	// Check IDs after pull
 	cmdAfter := exec.Command("docker", "images", "--filter", "reference=algoritmadev/orobox:*", "--format", "{{.Repository}}:{{.Tag}} {{.ID}}", "--no-trunc")
 	outputAfter, err := cmdAfter.Output()
 	if err != nil {
@@ -597,10 +627,13 @@ func PullProjectImages() (bool, error) {
 		defer utils.StopLoader()
 	}
 
+	semaphore := make(chan struct{}, 4)
 	for img := range projectImages {
 		wg.Add(1)
 		go func(imageName string) {
 			defer wg.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
 			if needsPull(imageName) {
 				mu.Lock()
 				toPull = append(toPull, imageName)
@@ -645,6 +678,8 @@ func PullProjectImages() (bool, error) {
 		wg.Add(1)
 		go func(imageName string) {
 			defer wg.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
 			pullCmd := exec.Command("docker", "pull", imageName)
 			if debug {
 				pullCmd.Stdout = os.Stdout

@@ -7,15 +7,16 @@ x-templates:
 
   volumes-setup: &volumes-setup
     {{if eq .Type "project" -}}
-    - "{{.BundlePath}}:/var/www/oro"
+    - "{{.BundlePath}}:/var/www/oro:cached"
     {{- else -}}
-    - "oro_app:/var/www/oro"
+    - "oro_app:/var/www/oro:delegated"
     {{if eq .Type "bundle" -}}
-    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
-    - "{{.BundlePath}}/vendor:/var/www/oro/vendor"
+    - "{{.BundlePath}}:{{.BundleRootContainerPath}}:cached"
+    - "{{.BundlePath}}/vendor-oro:/var/www/oro/vendor:delegated"
     {{- end}}
-    - "public_storage:/var/www/oro/public/media"
-    - "private_storage:/var/www/oro/var/data"
+    - "cache:/var/www/oro/var/cache:delegated"
+    - "public_storage:/var/www/oro/public/media:delegated"
+    - "private_storage:/var/www/oro/var/data:delegated"
     {{- end}}
 
 services:
@@ -33,6 +34,20 @@ services:
             echo "Populating vendor folder on host from container..."
             cp -rp vendor/. /vendor-host/
         fi
+
+        if [ -n "{{.BundlePackageName}}" ]; then
+            echo "Configuring bundle {{.BundlePackageName}} as path repository..."
+            # Configure composer repository for the bundle
+            # Use relative path from /var/www/oro to the bundle root
+            COMPOSER_ALLOW_SUPERUSER=1 composer config repositories.bundle '{"type": "path", "url": "bundles/{{.BundleNamespace}}", "options": {"symlink": true}}'
+            # Require the bundle package
+            # We use --no-scripts to avoid running OroCommerce scripts too early
+            COMPOSER_ALLOW_SUPERUSER=1 composer require "{{.BundlePackageName}}:@dev" --no-interaction --no-scripts
+            if [ -d /vendor-host ]; then
+                echo "Syncing newly installed bundle to host vendor folder..."
+                cp -rp vendor/. /vendor-host/
+            fi
+        fi
         {{- end}}
         chown -R ${ORO_USER_RUNTIME:-www-data} . bin config public src templates translations var assets var/cache var/logs var/data public/media vendor 2>/dev/null || true
         {{if eq .Type "bundle" -}}
@@ -44,15 +59,16 @@ services:
       ORO_XDEBUG_ENABLED: "false"
     volumes:
     {{if eq .Type "project" -}}
-    - "{{.BundlePath}}:/var/www/oro"
+    - "{{.BundlePath}}:/var/www/oro:cached"
     {{- else -}}
-    - "oro_app:/var/www/oro"
+    - "oro_app:/var/www/oro:delegated"
     {{if eq .Type "bundle" -}}
-    - "{{.BundlePath}}:/var/www/oro/src/{{.BundleNamespace}}"
-    - "{{.BundlePath}}/vendor-oro:/vendor-host"
+    - "{{.BundlePath}}:{{.BundleRootContainerPath}}:cached"
+    - "{{.BundlePath}}/vendor-oro:/vendor-host:delegated"
     {{- end}}
-    - "public_storage:/var/www/oro/public/media"
-    - "private_storage:/var/www/oro/var/data"
+    - "cache:/var/www/oro/var/cache:delegated"
+    - "public_storage:/var/www/oro/public/media:delegated"
+    - "private_storage:/var/www/oro/var/data:delegated"
     {{- end}}
 
   install:
@@ -88,3 +104,9 @@ services:
         condition: service_started
       {{- end}}
     volumes: *volumes-setup
+
+  gotenberg:
+    image: gotenberg/gotenberg:8.23.2
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://127.0.0.1:3000/health" ]
+    restart: on-failure

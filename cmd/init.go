@@ -3,12 +3,10 @@ package cmd
 
 import (
 	"bufio"
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -52,7 +50,10 @@ var initCmd = &cobra.Command{
 		generateConfig()
 
 		// Reload config after generation
-		_ = viper.ReadInConfig()
+		viper.SetConfigFile(".orobox.yaml")
+		if err := viper.ReadInConfig(); err != nil {
+			utils.PrintWarning(fmt.Sprintf("Could not read configuration: %v", err))
+		}
 
 		certificates.InstallSslCertificates()
 
@@ -82,35 +83,7 @@ func performInstallation() bool {
 	}
 
 	// 1. Download sources (git clone)
-	if conf.Type == config.InstallTypeProject {
-		if _, err := os.Stat("composer.json"); os.IsNotExist(err) {
-			utils.PrintInfo(fmt.Sprintf("Cloning OroCommerce %s...", resolvedVersion))
-			// Use a temporary directory to clone, then move to avoid "directory not empty" errors (like .orobox.yaml)
-			tmpDir, err := os.MkdirTemp("", "oro-app-*")
-			if err != nil {
-				utils.PrintError(fmt.Sprintf("Temp dir creation failed: %v", err))
-				return false
-			}
-			defer os.RemoveAll(tmpDir)
-
-			cloneCmd := exec.Command("git", "clone", "-b", resolvedVersion, oroRepo, tmpDir)
-			// Hidden output for git clone as well, unless error
-			var stderr bytes.Buffer
-			cloneCmd.Stderr = &stderr
-			if err := cloneCmd.Run(); err != nil {
-				utils.PrintError(fmt.Sprintf("Clone failed: %v\n%s", err, stderr.String()))
-				return false
-			}
-
-			utils.PrintInfo("Extracting OroCommerce sources...")
-			// Use cp -r to merge directories and copy hidden files
-			cpCmd := exec.Command("cp", "-r", tmpDir+"/.", ".")
-			if err := cpCmd.Run(); err != nil {
-				utils.PrintError(fmt.Sprintf("Extract sources failed: %v", err))
-				return false
-			}
-		}
-	}
+	// (Project support removed from main branch)
 
 	// 2. Ensure environment is ready
 	services := []string{"up", "-d", "db"}
@@ -136,27 +109,32 @@ func performInstallation() bool {
 		utils.PrintWarning(fmt.Sprintf("volume-init failed: %v", err))
 	}
 
-	// 3. For bundle or demo, we might need to clone into the volume if not project
-	if conf.Type != config.InstallTypeProject {
-		// Always try to clone if composer.json is missing in the container
-		checkCmd := []string{"run", "--rm", "-T", "application", "test", "-f", "composer.json"}
-		utils.StartLoader("Checking for OroCommerce installation...")
-		_, err := docker.RunComposeCommandWithOutput(checkCmd...)
-		utils.StopLoader()
-		if err != nil {
-			// Use a temporary directory to clone, then move to avoid "directory not empty" errors if bundle is mounted
-			cloneCmd := []string{"run", "--rm", "-T", "application", "bash", "-c",
-				fmt.Sprintf("git clone -b %s --depth 1 %s /tmp/oro-app && cp -r /tmp/oro-app/. . && rm -rf /tmp/oro-app && composer install", resolvedVersion, oroRepo)}
-			if err := docker.RunComposeCommandSilently("Downloading and installing OroCommerce into volume...", cloneCmd...); err != nil {
-				utils.PrintError(fmt.Sprintf("Download/Install into volume failed: %v", err))
-				return false
-			}
+	// 3. For bundle, we need to clone into the volume if not already there
+	// Always try to clone if composer.json is missing in the container
+	checkCmd := []string{"run", "--rm", "-T", "application", "test", "-f", "composer.json"}
+	utils.StartLoader("Checking for OroCommerce installation...")
+	_, err = docker.RunComposeCommandWithOutput(checkCmd...)
+	utils.StopLoader()
+	if err != nil {
+		// Use a temporary directory to clone, then move to avoid "directory not empty" errors if bundle is mounted
+		cloneCmd := []string{"run", "--rm", "-T", "application", "bash", "-c",
+			fmt.Sprintf("git clone -b %s --depth 1 %s /tmp/oro-app && cp -r /tmp/oro-app/. . && rm -rf /tmp/oro-app && composer install", resolvedVersion, oroRepo)}
+		if err := docker.RunComposeCommandSilently("Downloading and installing OroCommerce into volume...", cloneCmd...); err != nil {
+			utils.PrintError(fmt.Sprintf("Download/Install into volume failed: %v", err))
+			return false
 		}
 	} else {
-		// Project mode: just composer install
-		if err := docker.RunComposeCommandSilently("Running composer install...", "run", "--rm", "-T", "application", "composer", "install"); err != nil {
-			utils.PrintError(fmt.Sprintf("Composer install failed: %v", err))
-			return false
+		// Sources present: check for vendors (especially if vendor-oro was just added)
+		checkVendor := []string{"run", "--rm", "-T", "application", "test", "-f", "vendor/autoload.php"}
+		utils.StartLoader("Checking for vendors...")
+		_, errVendor := docker.RunComposeCommandWithOutput(checkVendor...)
+		utils.StopLoader()
+		if errVendor != nil {
+			installCmd := []string{"run", "--rm", "-T", "application", "composer", "install"}
+			if err := docker.RunComposeCommandSilently("Installing dependencies...", installCmd...); err != nil {
+				utils.PrintError(fmt.Sprintf("Composer install failed: %v", err))
+				return false
+			}
 		}
 	}
 
@@ -176,7 +154,7 @@ func init() {
 	initCmd.Flags().StringVarP(&bundlePath, "bundle-path", "b", ".", "Bundle path")
 	initCmd.Flags().StringVarP(&oroVersion, "oro-version", "v", "6.1", "OroCommerce version")
 	initCmd.Flags().StringVarP(&bundleNamespace, "bundle-namespace", "n", "", "Bundle namespace")
-	initCmd.Flags().StringVarP(&installType, "type", "t", "bundle", "Installation type (bundle, project, demo)")
+	// Type flag removed from main branch as only 'bundle' is supported here
 }
 
 func generateConfig() {
@@ -198,26 +176,24 @@ func generateConfig() {
 	typeOfInstall := utils.AskSelection(reader, "Installation type", []string{config.InstallTypeBundle, config.InstallTypeProject}, installType)
 
 	var className, namespace string
-	if typeOfInstall == config.InstallTypeBundle {
-		bundleClass := utils.AskQuestion(reader, "Full bundle class (eg: Algoritma\\Bundle\\TestBundle\\TestBundle)", "")
+	bundleClass := utils.AskQuestion(reader, "Full bundle class (eg: Algoritma\\Bundle\\TestBundle\\TestBundle)", "")
 
-		if bundleClass != "" {
-			var found bool
-			className, namespace, found = config.FindPhpClass(bundleClass)
-			if !found {
-				utils.PrintWarning(fmt.Sprintf("PHP class for %s not found in current directory or subdirectories.", bundleClass))
-				// Manual parsing if not found
-				lastSlash := strings.LastIndex(bundleClass, "\\")
-				if lastSlash != -1 {
-					className = bundleClass[lastSlash+1:]
-					namespace = bundleClass[:lastSlash]
-				} else {
-					className = bundleClass
-					namespace = ""
-				}
+	if bundleClass != "" {
+		var found bool
+		className, namespace, _, found = config.FindPhpClass(".", bundleClass)
+		if !found {
+			utils.PrintWarning(fmt.Sprintf("PHP class for %s not found in current directory or subdirectories.", bundleClass))
+			// Manual parsing if not found
+			lastSlash := strings.LastIndex(bundleClass, "\\")
+			if lastSlash != -1 {
+				className = bundleClass[lastSlash+1:]
+				namespace = bundleClass[:lastSlash]
 			} else {
-				utils.PrintInfo(fmt.Sprintf("Found class %s in namespace %s", className, namespace))
+				className = bundleClass
+				namespace = ""
 			}
+		} else {
+			utils.PrintInfo(fmt.Sprintf("Found class %s in namespace %s", className, namespace))
 		}
 	}
 

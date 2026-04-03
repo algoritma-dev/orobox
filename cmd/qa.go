@@ -11,7 +11,6 @@ import (
 	"github.com/algoritma-dev/orobox/internal/utils"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 var (
@@ -46,20 +45,10 @@ func init() {
 }
 
 func runQaCommand() {
-	isBundle := viper.GetString("type") == config.InstallTypeBundle
-	workingDir := config.OroRootDir
-	if isBundle {
-		workingDir = config.OroRootDir + "/src/" + config.GetBundlePath()
-	}
+	workingDir := config.GetBundleRootContainerPath()
 
-	jsTarget := "src"
-	cssTarget := "src/**/*.{css,scss,less,sass,html}"
-	twigTarget := "src"
-	if isBundle {
-		jsTarget = "Resources/public"
-		cssTarget = "Resources/public/**/*.{css,scss,less,sass,html}"
-		twigTarget = "."
-	}
+	jsTarget := "Resources/public"
+	twigTarget := "."
 
 	type tool struct {
 		name    string
@@ -74,18 +63,11 @@ func runQaCommand() {
 		{"twig-cs-fixer", []string{"vendor/bin/twig-cs-fixer", "lint", twigTarget}, qaTwigCSFixer},
 	}
 
-	if isBundle {
-		allTools = append(allTools,
-			tool{"eslint", []string{"npx", "--yes", "eslint", "--config", config.OroRootDir + "/.eslintrc.yml", "--ignore-path", config.OroRootDir + "/.eslintignore", "--fix", "--quiet", jsTarget}, qaEslint},
-			tool{"stylelint", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.{scss,less,sass,html}", "--config", config.OroRootDir + "/.stylelintrc.yml", "--ignore-path", config.OroRootDir + "/.stylelintignore", "--fix", "--quiet", "--allow-empty-input"}, qaStylelint},
-			tool{"stylelint-css", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.css", "--config", config.OroRootDir + "/.stylelintrc-css.yml", "--ignore-path", config.OroRootDir + "/.stylelintignore-css", "--fix", "--quiet", "--allow-empty-input"}, qaStylelint},
-		)
-	} else {
-		allTools = append(allTools,
-			tool{"eslint", []string{"npx", "--yes", "eslint", "--ignore-path", ".eslintignore", "--fix", "--quiet", jsTarget}, qaEslint},
-			tool{"stylelint", []string{"npx", "--yes", "stylelint", cssTarget, "--ignore-path", ".stylelintignore", "--fix", "--quiet", "--allow-empty-input"}, qaStylelint},
-		)
-	}
+	allTools = append(allTools,
+		tool{"eslint", []string{"npx", "--yes", "eslint", "--config", config.OroRootDir + "/.eslintrc.yml", "--ignore-path", config.OroRootDir + "/.eslintignore", "--fix", "--quiet", jsTarget}, qaEslint},
+		tool{"stylelint", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.{scss,less,sass,html}", "--config", config.OroRootDir + "/.stylelintrc.yml", "--ignore-path", config.OroRootDir + "/.stylelintignore", "--fix", "--quiet", "--allow-empty-input"}, qaStylelint},
+		tool{"stylelint-css", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.css", "--config", config.OroRootDir + "/.stylelintrc-css.yml", "--ignore-path", config.OroRootDir + "/.stylelintignore-css", "--fix", "--quiet", "--allow-empty-input"}, qaStylelint},
+	)
 
 	anyEnabled := false
 	for _, tool := range allTools {
