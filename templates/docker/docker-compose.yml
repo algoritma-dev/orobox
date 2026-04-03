@@ -214,6 +214,7 @@ services:
   {{if .Postgres}}
   db:
     image: "postgres:{{.PostgresVersion}}"
+    command: ["postgres", "-c", "max_locks_per_transaction=1024"]
     labels:
       com.symfony.server.service-prefix: ORO_DB
     ports:

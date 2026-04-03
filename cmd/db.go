@@ -76,7 +76,7 @@ func backupDatabase(file string) {
 	}
 	defer f.Close()
 
-	args := []string{"exec", "-T", "db", "pg_dump", "-U", dbUser, dbName}
+	args := []string{"exec", "-T", "db", "pg_dump", "-U", dbUser, "--clean", "--if-exists", dbName}
 
 	if err := dbExec(nil, f, args...); err != nil {
 		utils.StopLoader()
@@ -106,6 +106,30 @@ func restoreDatabase(file string) {
 
 	// 1. Restore the database
 	utils.StartLoader("Restoring database...")
+
+	// Clear the database before restoration to avoid "already exists" errors
+	// We use DROP DATABASE instead of DROP SCHEMA CASCADE to avoid "max_locks_per_transaction" issues with many tables
+	terminateQuery := fmt.Sprintf("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '%s' AND pid <> pg_backend_pid();", dbName)
+	dropQuery := fmt.Sprintf("DROP DATABASE IF EXISTS %s;", dbName)
+	createQuery := fmt.Sprintf("CREATE DATABASE %s;", dbName)
+	extensionQuery := "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"
+
+	for _, q := range []string{terminateQuery, dropQuery, createQuery} {
+		clearArgs := []string{"exec", "-T", "db", "psql", "-U", dbUser, "-d", "postgres", "-c", q}
+		if err := dbExec(nil, nil, clearArgs...); err != nil && q != terminateQuery {
+			utils.StopLoader()
+			utils.PrintError(fmt.Sprintf("Failed to clear database: %v", err))
+			return
+		}
+	}
+
+	extensionArgs := []string{"exec", "-T", "db", "psql", "-U", dbUser, "-d", dbName, "-c", extensionQuery}
+	if err := dbExec(nil, nil, extensionArgs...); err != nil {
+		utils.StopLoader()
+		utils.PrintError(fmt.Sprintf("Failed to create uuid-ossp extension: %v", err))
+		return
+	}
+
 	f, err := os.Open(file)
 	if err != nil {
 		utils.StopLoader()

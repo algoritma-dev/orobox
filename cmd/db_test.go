@@ -57,13 +57,29 @@ func TestDbCommand(t *testing.T) {
 
 	foundCacheClear := false
 	foundPlatformUpdate := false
+	foundDBClear := false
+	foundExtension := false
 	for _, call := range calls {
+		if contains(call, "DROP DATABASE") && contains(call, "postgres") {
+			foundDBClear = true
+		}
+		if contains(call, "CREATE EXTENSION") && contains(call, "uuid-ossp") {
+			foundExtension = true
+		}
 		if contains(call, "rm") && contains(call, "var/cache/dev") {
 			foundCacheClear = true
 		}
 		if contains(call, "oro:platform:update") {
 			foundPlatformUpdate = true
 		}
+	}
+
+	if !foundDBClear {
+		t.Errorf("Expected database clear command (DROP DATABASE) not found in calls")
+	}
+
+	if !foundExtension {
+		t.Errorf("Expected extension creation command (CREATE EXTENSION) not found in calls")
 	}
 
 	if !foundCacheClear {

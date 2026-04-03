@@ -46,9 +46,6 @@ var xdebugCmd = &cobra.Command{
 		if xdebugDev {
 			applyXdebugHotfix(enable, "php-fpm-app", true)
 			applyXdebugHotfix(enable, "application", false)
-			applyXdebugHotfix(enable, "consumer", false)
-			applyXdebugHotfix(enable, "cron", false)
-			applyXdebugHotfix(enable, "ws", false)
 		}
 
 		if xdebugTest {
