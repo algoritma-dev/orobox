@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -22,11 +23,29 @@ var dbExec = func(stdin io.Reader, stdout io.Writer, args ...string) error {
 
 	cmd := exec.Command(composeCmd[0], fullArgs...)
 	cmd.Stdin = stdin
-	cmd.Stdout = stdout
-	cmd.Stderr = os.Stderr
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	if stdout == nil {
+		cmd.Stdout = &stdoutBuf
+	} else {
+		cmd.Stdout = stdout
+	}
+	cmd.Stderr = &stderrBuf
+
 	cmd.Env = append(os.Environ(), "PGPASSWORD="+dbPass)
 
-	return cmd.Run()
+	err := cmd.Run()
+	if err != nil {
+		utils.StopLoader()
+		if stderrBuf.Len() > 0 {
+			fmt.Fprint(os.Stderr, stderrBuf.String())
+		}
+		if stdout == nil && stdoutBuf.Len() > 0 {
+			fmt.Fprint(os.Stdout, stdoutBuf.String())
+		}
+		return err
+	}
+	return nil
 }
 
 var dbCmd = &cobra.Command{

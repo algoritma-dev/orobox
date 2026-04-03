@@ -269,7 +269,7 @@ The Orobox environment typically includes:
 If you want to contribute to Orobox, you can use the provided `Makefile` to simplify common tasks.
 
 ### Prerequisites
-- **Go** (version 1.25 or later)
+- **Go** (version 1.26 or later)
 - **golangci-lint** (recommended version 1.64.0 or later)
 
 ### Available Commands

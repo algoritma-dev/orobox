@@ -38,21 +38,20 @@ func runQaInitCommand() {
 	workingDir := config.GetBundleRootContainerPath()
 
 	// 1. Configure Composer plugins
-	utils.PrintInfo("Configuring Composer plugins (phpstan/extension-installer, algoritma/php-coding-standards)...")
 	for _, plugin := range []string{"phpstan/extension-installer", "algoritma/php-coding-standards"} {
 		configArgs := []string{"exec", "-w", workingDir}
 		if !isTTY() {
 			configArgs = append(configArgs, "-T")
 		}
 		configArgs = append(configArgs, "application", "composer", "config", "--no-plugins", "allow-plugins."+plugin, "true")
-		if err := docker.RunComposeCommand("", configArgs...); err != nil {
+		if err := docker.RunComposeCommandSilently("Configuring Composer plugin "+plugin, configArgs...); err != nil {
 			utils.PrintError(fmt.Sprintf("Failed to configure plugin %s: %v", plugin, err))
 			return
 		}
 	}
+	utils.PrintSuccess("Composer plugins configured.")
 
 	// 2. Install Composer packages
-	utils.PrintInfo("Installing Composer QA packages (algoritma/php-coding-standards, vincentlanglet/twig-cs-fixer)...")
 	composerArgs := []string{"exec", "-w", workingDir}
 	if !isTTY() {
 		composerArgs = append(composerArgs, "-T")
@@ -61,23 +60,24 @@ func runQaInitCommand() {
 	cmdLine := "yes y | composer require --dev algoritma/php-coding-standards vincentlanglet/twig-cs-fixer"
 	composerArgs = append(composerArgs, "application", "bash", "-c", cmdLine)
 
-	if err := docker.RunComposeCommand("", composerArgs...); err != nil {
+	if err := docker.RunComposeCommandSilently("Installing Composer QA packages...", composerArgs...); err != nil {
 		utils.PrintError(fmt.Sprintf("Failed to install Composer packages: %v", err))
 		return
 	}
+	utils.PrintSuccess("Composer QA packages installed.")
 
 	// 3. Install NPM packages
-	utils.PrintInfo("Installing NPM QA packages (eslint@^8.57.0, eslint-plugin-no-jquery, stylelint@^15.11.0, @oroinc/oro-stylelint-config, eslint-plugin-import)...")
 	npmArgs := []string{"exec", "-w", workingDir}
 	if !isTTY() {
 		npmArgs = append(npmArgs, "-T")
 	}
 	npmArgs = append(npmArgs, "application", "npm", "install", "--save-dev", "eslint@^8.57.0", "eslint-plugin-no-jquery", "stylelint@^15.11.0", "@oroinc/oro-stylelint-config", "eslint-plugin-import")
 
-	if err := docker.RunComposeCommand("", npmArgs...); err != nil {
+	if err := docker.RunComposeCommandSilently("Installing NPM QA packages...", npmArgs...); err != nil {
 		utils.PrintError(fmt.Sprintf("Failed to install NPM packages: %v", err))
 		return
 	}
+	utils.PrintSuccess("NPM QA packages installed.")
 
 	utils.PrintSuccess("QA tools initialized successfully!")
 }

@@ -9,3 +9,4 @@ orobox
 /cmd/.orobox/Dockerfile
 /cmd/.orobox/init-db.sql
 /cmd/.orobox/nginx.conf
+/build/

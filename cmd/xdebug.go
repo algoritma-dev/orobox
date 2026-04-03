@@ -78,7 +78,7 @@ func applyXdebugHotfix(enable bool, service string, reloadFpm bool) {
 		execArgs = append(execArgs, "-T")
 	}
 	execArgs = append(execArgs, service, "bash", "-c", fmt.Sprintf("if [ -f %s ]; then mv %s %s; fi", source, source, target))
-	err := docker.RunComposeCommand("", execArgs...)
+	err := docker.RunComposeCommandSilently("Applying Xdebug patch...", execArgs...)
 	if err != nil {
 		utils.PrintWarning(fmt.Sprintf("Failed to patch %s: %v", service, err))
 		return
@@ -91,12 +91,13 @@ func applyXdebugHotfix(enable bool, service string, reloadFpm bool) {
 			reloadArgs = append(reloadArgs, "-T")
 		}
 		reloadArgs = append(reloadArgs, service, "kill", "-USR2", "1")
-		_ = docker.RunComposeCommand("", reloadArgs...)
+		_ = docker.RunComposeCommandSilently("Reloading PHP-FPM...", reloadArgs...)
 	}
 }
 
 func showXdebugStatus() {
-	utils.PrintInfo("Checking Xdebug status...")
+	utils.StartLoader("Checking Xdebug status...")
+	defer utils.StopLoader()
 
 	showAll := !xdebugDev && !xdebugTest
 

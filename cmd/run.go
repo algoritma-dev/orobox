@@ -3,9 +3,12 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
-	"syscall"
+	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
@@ -69,17 +72,22 @@ var runCmd = &cobra.Command{
 
 			if i == len(executionList)-1 {
 				utils.StartLoader(fmt.Sprintf("Running: %s", cmdToRun.Command))
-				executeCustomCommand(service, cmdToRun.Command, runTest)
+				if err := executeCommand(service, cmdToRun.Command, runTest, false); err != nil {
+					utils.StopLoader()
+					utils.PrintError(fmt.Sprintf("Command failed: %v", err))
+					os.Exit(1)
+				}
 				utils.StopLoader()
+				utils.PrintSuccess(fmt.Sprintf("Command '%s' completed", commandName))
 			} else {
 				utils.StartLoader(fmt.Sprintf("Running dependency: %s", cmdToRun.Name))
-				if err := executeCommandWait(service, cmdToRun.Command, runTest); err != nil {
+				if err := executeCommand(service, cmdToRun.Command, runTest, true); err != nil {
+					utils.StopLoader()
 					utils.PrintError(fmt.Sprintf("Dependency '%s' failed: %v", cmdToRun.Name, err))
 					os.Exit(1)
 				}
 				utils.StopLoader()
-				utils.PrintInfo(fmt.Sprintf("Running dependency: %s", cmdToRun.Name))
-				utils.PrintInfo(fmt.Sprintln("Done"))
+				utils.PrintSuccess(fmt.Sprintf("Dependency '%s' completed", cmdToRun.Name))
 			}
 		}
 	},
@@ -113,40 +121,7 @@ func init() {
 	})
 }
 
-func executeCustomCommand(service, customCommand string, isTest bool) {
-	composeCmd := docker.GetComposeCommand()
-	binary, err := exec.LookPath(composeCmd[0])
-	if err != nil {
-		utils.PrintError(fmt.Sprintf("Docker compose not found: %v", err))
-		return
-	}
-
-	baseArgs := docker.GetBaseComposeArgs()
-	args := append(composeCmd, baseArgs...)
-
-	args = append(args, "exec")
-
-	// Check if we have a TTY
-	if !isTTY() {
-		args = append(args, "-T")
-	}
-
-	// Set ORO_ENV=test if explicitly requested via --test flag
-	if isTest && service == "application" {
-		args = append(args, "-e", "ORO_ENV=test")
-	}
-
-	// We use "sh -c" to allow multiple commands and pipes if specified in the config.
-	args = append(args, service, "sh", "-c", customCommand)
-	env := os.Environ()
-
-	err = syscall.Exec(binary, args, env)
-	if err != nil {
-		utils.PrintError(fmt.Sprintf("Failed to execute command: %v", err))
-	}
-}
-
-func executeCommandWait(service, customCommand string, isTest bool) error {
+func executeCommand(service, customCommand string, isTest bool, silent bool) error {
 	composeCmd := docker.GetComposeCommand()
 	binary, err := exec.LookPath(composeCmd[0])
 	if err != nil {
@@ -155,6 +130,7 @@ func executeCommandWait(service, customCommand string, isTest bool) error {
 
 	baseArgs := docker.GetBaseComposeArgs()
 	args := append(composeCmd, baseArgs...)
+
 	args = append(args, "exec")
 
 	// Check if we have a TTY
@@ -171,11 +147,35 @@ func executeCommandWait(service, customCommand string, isTest bool) error {
 	args = append(args, service, "sh", "-c", customCommand)
 
 	cmd := exec.Command(binary, args[1:]...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+
+	if silent {
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			if len(output) > 0 {
+				return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(output)))
+			}
+			return err
+		}
+		return nil
+	}
+
 	cmd.Stdin = os.Stdin
 
-	return cmd.Run()
+	var stopped atomic.Bool
+	var stopOnce sync.Once
+	stopLoader := func() {
+		stopOnce.Do(func() {
+			stopped.Store(true)
+			utils.StopLoader()
+		})
+	}
+
+	cmd.Stdout = &loaderStopperWriter{writer: os.Stdout, stop: stopLoader, stopped: &stopped}
+	cmd.Stderr = &loaderStopperWriter{writer: os.Stderr, stop: stopLoader, stopped: &stopped}
+
+	err = cmd.Run()
+	stopLoader() // Ensure loader is stopped if command produces no output
+	return err
 }
 
 func resolveDependencies(name string, commands []config.CommandConfig, executionList *[]*config.CommandConfig, visited map[string]bool, path map[string]bool) error {
@@ -210,4 +210,28 @@ func resolveDependencies(name string, commands []config.CommandConfig, execution
 	visited[name] = true
 	*executionList = append(*executionList, foundCommand)
 	return nil
+}
+
+type loaderStopperWriter struct {
+	writer  io.Writer
+	stop    func()
+	stopped *atomic.Bool
+}
+
+func (w *loaderStopperWriter) Write(p []byte) (n int, err error) {
+	if len(p) > 0 {
+		if p[len(p)-1] == '\n' {
+			// If it ends with a newline, clear the loader line if it's still active
+			// so that command output doesn't mix with the spinner.
+			// The spinner will redraw itself on the next line at the next tick.
+			if !w.stopped.Load() {
+				fmt.Print("\r\033[K")
+			}
+		} else {
+			// If it DOES NOT end with a newline, it could be a prompt or a progress bar.
+			// Stop the loader to prevent it from overwriting incomplete output.
+			w.stop()
+		}
+	}
+	return w.writer.Write(p)
 }

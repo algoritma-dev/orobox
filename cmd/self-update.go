@@ -35,9 +35,9 @@ var selfUpdateCmd = &cobra.Command{
 	Short: "Update orobox to the latest version",
 	RunE: func(_ *cobra.Command, _ []string) error {
 		utils.PrintInfo(fmt.Sprintf("Current version: %s", Version))
-		utils.PrintInfo("Checking for updates...")
-
+		utils.StartLoader("Checking for updates...")
 		latest, err := getLatestRelease()
+		utils.StopLoader()
 		if err != nil {
 			return fmt.Errorf("failed to check for updates: %w", err)
 		}
@@ -50,10 +50,12 @@ var selfUpdateCmd = &cobra.Command{
 				return fmt.Errorf("no suitable binary found for %s/%s in release %s", runtime.GOOS, runtime.GOARCH, latest.TagName)
 			}
 
-			utils.PrintInfo(fmt.Sprintf("Downloading %s...", assetName))
+			utils.StartLoader(fmt.Sprintf("Downloading %s...", assetName))
 			if err := applyUpdate(assetURL); err != nil {
+				utils.StopLoader()
 				return fmt.Errorf("failed to apply update: %w", err)
 			}
+			utils.StopLoader()
 			utils.PrintSuccess(fmt.Sprintf("Successfully updated to %s", latest.TagName))
 		} else {
 			utils.PrintSuccess("You are already using the latest version of orobox.")

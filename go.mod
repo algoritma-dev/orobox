@@ -1,6 +1,6 @@
 module github.com/algoritma-dev/orobox
 
-go 1.25.0
+go 1.26.1
 
 require (
 	github.com/spf13/cobra v1.6.1
