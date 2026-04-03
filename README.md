@@ -16,7 +16,7 @@ Before installing Orobox, make sure you have installed on your system:
 Run the following command in your terminal. It will automatically detect your operating system and architecture:
 
 ```bash
-curl -sSfL "https://github.com/algoritma-dev/orobox/releases/download/0.0.11-dev/orobox_$(uname -s)_$(uname -m | sed 's/aarch64/arm64/')" -o ~/.local/bin/orobox && chmod +x ~/.local/bin/orobox && hash -r
+curl -sSfL "https://github.com/algoritma-dev/orobox/releases/download/0.0.12-dev/orobox_$(uname -s)_$(uname -m | sed 's/aarch64/arm64/')" -o ~/.local/bin/orobox && chmod +x ~/.local/bin/orobox && hash -r
 ```
 
 *Note: Make sure `~/.local/bin` is in your `PATH`.*
@@ -26,14 +26,14 @@ curl -sSfL "https://github.com/algoritma-dev/orobox/releases/download/0.0.11-dev
 Run the following command in PowerShell:
 
 ```powershell
-mkdir -Force "$HOME\.local\bin"; iwr "https://github.com/algoritma-dev/orobox/releases/download/0.0.11-dev/orobox_Windows_$($env:PROCESSOR_ARCHITECTURE.ToLower().Replace('amd64','x86_64')).exe" -OutFile "$HOME\.local\bin\orobox.exe"
+mkdir -Force "$HOME\.local\bin"; iwr "https://github.com/algoritma-dev/orobox/releases/download/0.0.12-dev/orobox_Windows_$($env:PROCESSOR_ARCHITECTURE.ToLower().Replace('amd64','x86_64')).exe" -OutFile "$HOME\.local\bin\orobox.exe"
 ```
 
 *Note: Make sure to add `%USERPROFILE%\.local\bin` to your User `Path` environment variable.*
 
 ## Configuration (`.orobox.yaml`)
 
-Orobox uses a configuration file called `.orobox.yaml` in the root of your bundle or project. If the file does not exist, the `init` command will guide you through its interactive creation.
+Orobox uses a configuration file called `.orobox.yaml` in the root of your bundle. If the file does not exist, the `init` command will guide you through its interactive creation.
 
 Example `.orobox.yaml` file:
 ```yaml
@@ -99,7 +99,7 @@ These options can be used with any command:
 The main command is `oro` (or `orobox`, depending on how you installed it).
 
 ### 1. Initialization (`init`)
-Prepares the development environment in your bundle or project repository.
+Prepares the development environment in your bundle repository.
 ```bash
 orobox init
 ```
@@ -109,7 +109,10 @@ This command:
 - Configures the necessary Docker files.
 
 Options:
+<<<<<<< HEAD
 - `--type`, `-t`: Installation type (`bundle`, `demo`).
+=======
+>>>>>>> main
 - `--bundle-path`, `-b`: Bundle path (default ".").
 - `--oro-version`, `-v`: OroCommerce version to use (default "6.1").
 - `--bundle-namespace`, `-n`: Bundle namespace (e.g., "MyVendor/Bundle/MyBundle").
@@ -122,7 +125,7 @@ orobox up
 The command dynamically generates the `docker-compose.yml` file, starts the services, and proceeds with the environment installation or update.
 
 ### 3. Stop Environment (`down`)
-Shuts down the Docker services associated with the project.
+Shuts down the Docker services associated with the bundle.
 ```bash
 orobox down
 ```
@@ -159,11 +162,10 @@ orobox test
 ```
 
 ### 8. QA Tools Initialization (`qa-init`)
-Configures and installs the necessary QA tools (PHPStan, coding standards, ESLint, Stylelint) in your bundle or project.
+Configures and installs the necessary QA tools (PHPStan, coding standards, ESLint, Stylelint) in your bundle.
 ```bash
 orobox qa-init
 ```
-*Note: This command is not available in `type: demo` mode.*
 
 ### 9. Run QA Tools (`qa`)
 Executes the QA analysis tools. By default, it runs all tools if no specific flag is provided.
@@ -182,7 +184,6 @@ Example:
 ```bash
 orobox qa --phpstan --eslint
 ```
-*Note: This command is not available in `type: demo` mode.*
 
 ### 10. Total Cleanup (`clean`)
 Removes all associated containers and volumes to start from scratch.
@@ -209,7 +210,6 @@ If you run `orobox run --help`, you will see a dynamic list of all commands conf
 
 Orobox includes Xdebug preinstalled, but disabled by default to maintain performance.
 
-**Note:** Xdebug is always disabled in `type: demo` mode.
 
 ### 1. Enabling/Disabling Xdebug
 
@@ -250,10 +250,8 @@ To debug with PHPStorm:
     - **Port**: `80` (or `443` if using SSL).
     - **Debugger**: Xdebug.
 3.  **Path Mappings**: Enable "Use path mappings" and configure:
-    - **Local Path**: The root folder of your bundle or project on the host machine.
-    - **Remote Path**: 
-        - For `type: bundle`: `/var/www/oro/src/<BundleNamespace>` (e.g., `/var/www/oro/src/MyVendor/Bundle/MyBundle`).
-        - For `type: project`: `/var/www/oro`.
+    - **Local Path**: The root folder of your bundle on the host machine.
+    - **Remote Path**: `/var/www/oro/src/<BundleNamespace>` (e.g., `/var/www/oro/src/MyVendor/Bundle/MyBundle`).
 4.  **Xdebug Port**: Ensure the port in `Settings -> PHP -> Debug` is set to `9003`.
 
 ## Internal Structure

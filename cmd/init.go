@@ -50,7 +50,10 @@ var initCmd = &cobra.Command{
 		generateConfig()
 
 		// Reload config after generation
-		_ = viper.ReadInConfig()
+		viper.SetConfigFile(".orobox.yaml")
+		if err := viper.ReadInConfig(); err != nil {
+			utils.PrintWarning(fmt.Sprintf("Could not read configuration: %v", err))
+		}
 
 		certificates.InstallSslCertificates()
 
@@ -106,7 +109,7 @@ func performInstallation() bool {
 		utils.PrintWarning(fmt.Sprintf("volume-init failed: %v", err))
 	}
 
-	// 3. For bundle or demo, we need to clone into the volume
+	// 3. For bundle or demo, we need to clone into the volume if not already there
 	// Always try to clone if composer.json is missing in the container
 	checkCmd := []string{"run", "--rm", "-T", "application", "test", "-f", "composer.json"}
 	utils.StartLoader("Checking for OroCommerce installation...")
@@ -119,6 +122,19 @@ func performInstallation() bool {
 		if err := docker.RunComposeCommandSilently("Downloading and installing OroCommerce into volume...", cloneCmd...); err != nil {
 			utils.PrintError(fmt.Sprintf("Download/Install into volume failed: %v", err))
 			return false
+		}
+	} else {
+		// Sources present: check for vendors (especially if vendor-oro was just added)
+		checkVendor := []string{"run", "--rm", "-T", "application", "test", "-f", "vendor/autoload.php"}
+		utils.StartLoader("Checking for vendors...")
+		_, errVendor := docker.RunComposeCommandWithOutput(checkVendor...)
+		utils.StopLoader()
+		if errVendor != nil {
+			installCmd := []string{"run", "--rm", "-T", "application", "composer", "install"}
+			if err := docker.RunComposeCommandSilently("Installing dependencies...", installCmd...); err != nil {
+				utils.PrintError(fmt.Sprintf("Composer install failed: %v", err))
+				return false
+			}
 		}
 	}
 
@@ -138,7 +154,7 @@ func init() {
 	initCmd.Flags().StringVarP(&bundlePath, "bundle-path", "b", ".", "Bundle path")
 	initCmd.Flags().StringVarP(&oroVersion, "oro-version", "v", "6.1", "OroCommerce version")
 	initCmd.Flags().StringVarP(&bundleNamespace, "bundle-namespace", "n", "", "Bundle namespace")
-	initCmd.Flags().StringVarP(&installType, "type", "t", "bundle", "Installation type (bundle, demo)")
+	initCmd.Flags().StringVarP(&installType, "type", "t", config.InstallTypeBundle, "Installation type (bundle, demo)")
 }
 
 func generateConfig() {
@@ -160,26 +176,24 @@ func generateConfig() {
 	typeOfInstall := utils.AskSelection(reader, "Installation type", []string{config.InstallTypeBundle, config.InstallTypeDemo}, installType)
 
 	var className, namespace string
-	if typeOfInstall == config.InstallTypeBundle {
-		bundleClass := utils.AskQuestion(reader, "Full bundle class (eg: Algoritma\\Bundle\\TestBundle\\TestBundle)", "")
+	bundleClass := utils.AskQuestion(reader, "Full bundle class (eg: Algoritma\\Bundle\\TestBundle\\TestBundle)", "")
 
-		if bundleClass != "" {
-			var found bool
-			className, namespace, found = config.FindPhpClass(bundleClass)
-			if !found {
-				utils.PrintWarning(fmt.Sprintf("PHP class for %s not found in current directory or subdirectories.", bundleClass))
-				// Manual parsing if not found
-				lastSlash := strings.LastIndex(bundleClass, "\\")
-				if lastSlash != -1 {
-					className = bundleClass[lastSlash+1:]
-					namespace = bundleClass[:lastSlash]
-				} else {
-					className = bundleClass
-					namespace = ""
-				}
+	if bundleClass != "" {
+		var found bool
+		className, namespace, _, found = config.FindPhpClass(".", bundleClass)
+		if !found {
+			utils.PrintWarning(fmt.Sprintf("PHP class for %s not found in current directory or subdirectories.", bundleClass))
+			// Manual parsing if not found
+			lastSlash := strings.LastIndex(bundleClass, "\\")
+			if lastSlash != -1 {
+				className = bundleClass[lastSlash+1:]
+				namespace = bundleClass[:lastSlash]
 			} else {
-				utils.PrintInfo(fmt.Sprintf("Found class %s in namespace %s", className, namespace))
+				className = bundleClass
+				namespace = ""
 			}
+		} else {
+			utils.PrintInfo(fmt.Sprintf("Found class %s in namespace %s", className, namespace))
 		}
 	}
 
@@ -188,31 +202,23 @@ func generateConfig() {
 	root := utils.AskQuestion(reader, "Main domain root", "public")
 	ssl := utils.AskYesNo(reader, "Enable SSL?", true)
 
-	isDemo := typeOfInstall == config.InstallTypeDemo
-
 	redisEnabled := utils.AskYesNo(reader, "Enable Redis?", false)
 	redisInsightEnabled := false
-	if redisEnabled && !isDemo {
+	if redisEnabled {
 		redisInsightEnabled = utils.AskYesNo(reader, "Enable RedisInsight?", true)
 	}
 
-	mailpit := false
-	if !isDemo {
-		mailpit = utils.AskYesNo(reader, "Enable Mailpit?", true)
-	}
+	mailpit := utils.AskYesNo(reader, "Enable Mailpit?", true)
 
 	rabbitmqEnabled := utils.AskYesNo(reader, "Enable RabbitMQ?", false)
 	elasticsearchEnabled := utils.AskYesNo(reader, "Enable Elasticsearch?", false)
 
 	kibanaEnabled := false
-	if elasticsearchEnabled && !isDemo {
+	if elasticsearchEnabled {
 		kibanaEnabled = utils.AskYesNo(reader, "Enable Kibana?", true)
 	}
 
-	adminerEnabled := false
-	if !isDemo {
-		adminerEnabled = utils.AskYesNo(reader, "Enable Adminer?", true)
-	}
+	adminerEnabled := utils.AskYesNo(reader, "Enable Adminer?", true)
 
 	conf := config.OroConfig{
 		Type:       typeOfInstall,

@@ -18,10 +18,6 @@ var qaInitCmd = &cobra.Command{
 	Run: func(_ *cobra.Command, _ []string) {
 		docker.SetIncludeTestFiles(true)
 		docker.EnsureDockerCompose()
-		if viper.GetString("type") == config.InstallTypeDemo {
-			utils.PrintError("The 'qa-init' command is not available for demo instances.")
-			return
-		}
 
 		var conf config.OroConfig
 		if err := viper.Unmarshal(&conf); err != nil {
@@ -39,11 +35,7 @@ func init() {
 }
 
 func runQaInitCommand() {
-	isBundle := viper.GetString("type") == config.InstallTypeBundle
-	workingDir := config.OroRootDir
-	if isBundle {
-		workingDir = config.OroRootDir + "/src/" + config.GetBundlePath()
-	}
+	workingDir := config.GetBundleRootContainerPath()
 
 	// 1. Configure Composer plugins
 	utils.PrintInfo("Configuring Composer plugins (phpstan/extension-installer, algoritma/php-coding-standards)...")
