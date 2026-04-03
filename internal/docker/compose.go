@@ -271,8 +271,8 @@ func EnsureDockerCompose() bool {
 	data.BundlePath = absBundlePath
 
 	// Try to get package name from composer.json
-	composerJsonPath := filepath.Join(data.BundlePath, "composer.json")
-	if content, err := os.ReadFile(composerJsonPath); err == nil {
+	composerJSONPath := filepath.Join(data.BundlePath, "composer.json")
+	if content, err := os.ReadFile(composerJSONPath); err == nil {
 		var composerData struct {
 			Name string `json:"name"`
 		}
