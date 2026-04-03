@@ -57,6 +57,14 @@ var initCmd = &cobra.Command{
 
 		certificates.InstallSslCertificates()
 
+		// Check hosts file
+		var missingHosts []string
+		for _, domain := range config.GetDomains() {
+			if !utils.CheckHostInEtcHosts(domain.Host) {
+				missingHosts = append(missingHosts, domain.Host)
+			}
+		}
+
 		docker.EnsureDockerCompose()
 
 		if !performInstallation() {
@@ -64,6 +72,14 @@ var initCmd = &cobra.Command{
 		}
 
 		utils.PrintSuccess("Environment initialized successfully!")
+
+		if len(missingHosts) > 0 {
+			utils.PrintTitle("Missing domains in hosts file")
+			utils.PrintWarning("The following domains are missing from your hosts file. Please add them manually to /etc/hosts:")
+			for _, host := range missingHosts {
+				fmt.Printf("127.0.0.1 %s\n", host)
+			}
+		}
 	},
 }
 

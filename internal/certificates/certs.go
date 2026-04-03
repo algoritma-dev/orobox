@@ -6,8 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 
 	"github.com/algoritma-dev/orobox/internal/config"
+	"github.com/algoritma-dev/orobox/internal/utils"
 )
 
 // InstallSslCertificates installs the SSL certificates for the configured domains.
@@ -23,6 +25,18 @@ func InstallSslCertificates() {
 	}
 
 	if !hasSsl {
+		return
+	}
+
+	// 0. Check if mkcert is installed
+	if _, err := exec.LookPath("mkcert"); err != nil {
+		utils.PrintWarning("mkcert is not installed. SSL certificates will not be generated.")
+		utils.PrintInfo("Please install mkcert (https://github.com/FiloSottile/mkcert) and run 'mkcert -install'")
+		if runtime.GOOS == "darwin" {
+			utils.PrintInfo("On macOS, you can use: brew install mkcert")
+		} else if runtime.GOOS == "linux" {
+			utils.PrintInfo("On Linux, you can follow: https://github.com/FiloSottile/mkcert#linux")
+		}
 		return
 	}
 

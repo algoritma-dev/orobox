@@ -8,6 +8,7 @@ Orobox is a command-line tool (CLI) developed in Go to quickly set up an isolate
 ## Prerequisites
 Before installing Orobox, make sure you have installed on your system:
 - **Docker** and **Docker Compose**
+- [**mkcert**](https://github.com/FiloSottile/mkcert) (Optional, but required if you want to use **SSL** locally)
 
 ## Installation
 
@@ -91,6 +92,11 @@ commands:
 ### Global Flags
 These options can be used with any command:
 - `--config`: Specifies an alternative configuration file (default: `.orobox.yaml`).
+
+## Domains and SSL
+- **Hosts File**: For each domain defined in `.orobox.yaml`, you must add an entry to your system's `hosts` file (e.g., `/etc/hosts` on Linux/macOS or `C:\Windows\System32\drivers\etc\hosts` on Windows) pointing to `127.0.0.1`.
+  Example: `127.0.0.1 oro.demo`
+- **SSL with mkcert**: If you enable SSL, Orobox uses `mkcert` to generate local certificates. Ensure `mkcert` is installed and you have run `mkcert -install` once on your machine.
 
 ## Command Usage
 
