@@ -86,24 +86,24 @@ var testInitCmd = &cobra.Command{
 		dropArgs := []string{"exec", "-T", "db", "psql", "-U", dbUser, "-d", "postgres", "-c", dropSQL}
 		if err := docker.RunComposeCommandSilently("Dropping test database...", dropArgs...); err != nil {
 			utils.PrintWarning(fmt.Sprintf("failed to drop test database using psql: %v. Trying via doctrine...", err))
-			dropCmd := []string{"exec", "-T", "application", "php", "bin/console", "doctrine:database:drop", "--force", "--env=test", "--if-exists"}
+			dropCmd := []string{"run", "--rm", "-T", "application", "php", "bin/console", "doctrine:database:drop", "--force", "--env=test", "--if-exists"}
 			if err := docker.RunComposeCommandSilently("Dropping test database...", dropCmd...); err != nil {
 				utils.PrintWarning(fmt.Sprintf("failed to drop test database: %v", err))
 			}
 		}
 
-		createCmd := []string{"exec", "-T", "application", "php", "bin/console", "doctrine:database:create", "--env=test"}
+		createCmd := []string{"run", "--rm", "-T", "application", "php", "bin/console", "doctrine:database:create", "--env=test"}
 		if err := docker.RunComposeCommandSilently("Creating test database...", createCmd...); err != nil {
 			utils.PrintError(fmt.Sprintf("failed to create test database: %v", err))
 			return
 		}
 
-		clearCacheCmd := []string{"exec", "-T", "application", "bash", "-c", "rm -rf var/cache/test"}
+		clearCacheCmd := []string{"run", "--rm", "-T", "application", "bash", "-c", "rm -rf var/cache/test"}
 		if err := docker.RunComposeCommandSilently("Clearing cache for test environment...", clearCacheCmd...); err != nil {
 			utils.PrintWarning(fmt.Sprintf("failed to clear cache: %v", err))
 		}
 
-		installCmd := []string{"exec", "-T", "application", "php", "bin/console", "oro:install", "--no-interaction", "--env=test", "--skip-translations"}
+		installCmd := []string{"run", "--rm", "-T", "application", "php", "bin/console", "oro:install", "--no-interaction", "--env=test", "--skip-translations"}
 		if err := docker.RunComposeCommandSilently("Running Oro installation for test environment (this may take several minutes)...", installCmd...); err != nil {
 			utils.PrintError(fmt.Sprintf("test environment installation failed: %v", err))
 			return
