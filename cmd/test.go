@@ -35,8 +35,8 @@ func init() {
 }
 
 func runTestCommand() {
-	// Ensure test database is running
-	if err := docker.EnsureServicesRunning([]string{"db"}); err != nil {
+	// Ensure test database and application are running
+	if err := docker.EnsureServicesRunning([]string{"db", "application"}); err != nil {
 		utils.PrintWarning(fmt.Sprintf("failed to ensure services are running: %v", err))
 	}
 
