@@ -1,6 +1,13 @@
+GOPATH := $(shell go env GOPATH)
+PATH := $(PATH):$(GOPATH)/bin
+
 .PHONY: lint test build clean set-version
 
 lint:
+	@if ! command -v golangci-lint >/dev/null 2>&1; then \
+		echo "golangci-lint not found, installing..."; \
+		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GOPATH)/bin v1.64.5; \
+	fi
 	golangci-lint run ./...
 
 test:
