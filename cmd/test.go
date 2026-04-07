@@ -58,7 +58,7 @@ func runTestCommand() {
 
 	var args []string
 
-	args = append(args, "run", "--rm")
+	args = append(args, "exec")
 
 	// Check if we have a TTY
 	if !isTTY() {
@@ -73,7 +73,7 @@ func runTestCommand() {
 	if viper.GetString("type") == "bundle" {
 		args = append(args, "./bin/simple-phpunit", "--configuration="+config.GetBundleRootContainerPath())
 	} else {
-		args = append(args, "php", "bin/phpunit")
+		args = append(args, "php", "bin/simple-phpunit")
 	}
 
 	if filter != "" {
