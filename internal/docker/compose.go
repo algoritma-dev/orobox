@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/spf13/viper"
+	"github.com/subosito/gotenv"
 	"io"
 	"io/fs"
 	"os"
@@ -18,8 +20,6 @@ import (
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/utils"
-
-	"github.com/spf13/viper"
 )
 
 var memoizedComposeCmd []string
@@ -363,7 +363,22 @@ func GetBaseComposeArgs() []string {
 	projectName := config.GetProjectName()
 	internalDir := config.GetInternalDir()
 	composeFile := filepath.Join(internalDir, "docker-compose.yml")
-	args := []string{"-p", projectName, "--project-directory", internalDir, "-f", composeFile}
+	args := []string{"-p", projectName, "--project-directory", internalDir}
+
+	// Order of --env-file matters: later ones override earlier ones
+	envFile := filepath.Join(internalDir, ".env")
+	if _, err := os.Stat(envFile); err == nil {
+		args = append(args, "--env-file", envFile)
+	}
+
+	if includeTestFiles {
+		testEnvFile := filepath.Join(internalDir, ".env.test")
+		if _, err := os.Stat(testEnvFile); err == nil {
+			args = append(args, "--env-file", testEnvFile)
+		}
+	}
+
+	args = append(args, "-f", composeFile)
 
 	// Add setup and test files if they exist
 	setupFile := filepath.Join(internalDir, "docker-compose.setup.yml")
@@ -850,6 +865,15 @@ func SetIncludeTestFiles(include bool) {
 	includeTestFiles = include
 }
 
+// LoadEnvFiles loads environment variables from .env and .env.test files.
+// .env.test will override .env only for common variables if includeTestFiles is true.
+func LoadEnvFiles() {
+	_ = gotenv.Load(".env")
+	if includeTestFiles {
+		_ = gotenv.OverLoad(".env.test")
+	}
+}
+
 // GetServiceEnv returns the value of an environment variable inside a running service container.
 func GetServiceEnv(serviceName, variable string) (string, error) {
 	args := []string{"exec", "-T", serviceName, "sh", "-c", "echo $" + variable}
@@ -1032,6 +1056,29 @@ func writeDockerfile(internalDir string, data any) bool {
 }
 
 func writeEnvFile(path string, internalDir string, data any) bool {
+	filename := filepath.Base(path)
+
+	// If file exists in current directory, use it instead of template
+	if _, err := os.Stat(filename); err == nil {
+		content, err := os.ReadFile(filename)
+		if err != nil {
+			fmt.Printf("Warning: could not read local file %s: %v\n", filename, err)
+			return false
+		}
+
+		dest := filepath.Join(internalDir, filename)
+		oldContent, err := os.ReadFile(dest)
+		if err == nil && bytes.Equal(oldContent, content) {
+			return false
+		}
+
+		err = os.WriteFile(dest, content, 0644)
+		if err != nil {
+			panic(err)
+		}
+		return true
+	}
+
 	envContent, err := fs.ReadFile(Templates, path)
 	if err != nil {
 		fmt.Printf("Warning: could not read template %s: %v\n", path, err)

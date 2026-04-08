@@ -4,6 +4,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"github.com/subosito/gotenv"
 	"golang.org/x/term"
 )
 
@@ -22,6 +24,7 @@ var testCmd = &cobra.Command{
 	Short: "Run tests (PHPUnit)",
 	Run: func(_ *cobra.Command, _ []string) {
 		docker.SetIncludeTestFiles(true)
+		docker.LoadEnvFiles()
 		docker.EnsureDockerCompose()
 		utils.PrintInfo("Running tests...")
 		runTestCommand()
@@ -65,8 +68,16 @@ func runTestCommand() {
 		args = append(args, "-T")
 	}
 
-	// Always set ORO_ENV to test for test command
-	args = append(args, "-e", "ORO_ENV=test")
+	// Inject variables from .env.test for this exec session so they override .env inside the container
+	internalDir := config.GetInternalDir()
+	testEnvPath := filepath.Join(internalDir, ".env.test")
+	if f, err := os.Open(testEnvPath); err == nil {
+		defer func() { _ = f.Close() }()
+		envMap := gotenv.Parse(f)
+		for k, v := range envMap {
+			args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
+		}
+	}
 
 	args = append(args, "application")
 

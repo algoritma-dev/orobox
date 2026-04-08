@@ -43,7 +43,6 @@ services:
     <<: *oro-app
     environment:
       ORO_XDEBUG_ENABLED: "false"
-      ORO_ENV: ${ORO_ENV:-dev}
     command: nginx
     restart: unless-stopped
     healthcheck:

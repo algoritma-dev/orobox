@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
 	yamlv3 "gopkg.in/yaml.v3"
 )
 
@@ -22,6 +23,7 @@ var testInitCmd = &cobra.Command{
 	Short: "Initialize or reset the test environment",
 	Run: func(_ *cobra.Command, _ []string) {
 		docker.SetIncludeTestFiles(true)
+		docker.LoadEnvFiles()
 		if testInitUseTmpfs {
 			viper.Set("test.use_tmpfs", true)
 			viper.Set("test.tmpfs_size", testInitTmpfsSize)
