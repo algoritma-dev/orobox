@@ -68,7 +68,7 @@ func GetVersionsForOro(oroVersion string) OroVersions {
 			PHP:           "8.5",
 			Postgres:      "17.6-alpine",
 			Redis:         "7.4-alpine",
-			Node:          "22",
+			Node:          "24",
 			PNPM:          "10",
 			RabbitMQ:      "4.2-management-alpine",
 			Elasticsearch: "9.2.0",
