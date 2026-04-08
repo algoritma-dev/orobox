@@ -85,11 +85,8 @@ var testInitCmd = &cobra.Command{
 		dropSQL := fmt.Sprintf("DROP DATABASE IF EXISTS %s WITH (FORCE);", dbName)
 		dropArgs := []string{"exec", "-T", "db", "psql", "-U", dbUser, "-d", "postgres", "-c", dropSQL}
 		if err := docker.RunComposeCommandSilently("Dropping test database...", dropArgs...); err != nil {
-			utils.PrintWarning(fmt.Sprintf("failed to drop test database using psql: %v. Trying via doctrine...", err))
-			dropCmd := []string{"run", "--rm", "-T", "application", "php", "bin/console", "doctrine:database:drop", "--force", "--env=test", "--if-exists"}
-			if err := docker.RunComposeCommandSilently("Dropping test database...", dropCmd...); err != nil {
-				utils.PrintWarning(fmt.Sprintf("failed to drop test database: %v", err))
-			}
+			utils.PrintWarning(fmt.Sprintf("failed to drop test database: %v", err))
+			return
 		}
 
 		createCmd := []string{"run", "--rm", "-T", "application", "php", "bin/console", "doctrine:database:create", "--env=test"}
