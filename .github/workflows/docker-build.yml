@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        oro-version: ["5.1", "6.0", "6.1"]
+        oro-version: ["5.1", "6.0", "6.1", "7.0"]
         type: ["bundle", "project", "demo"]
 
     steps:
