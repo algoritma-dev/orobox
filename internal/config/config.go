@@ -52,12 +52,13 @@ type OroVersions struct {
 	Redis         string
 	Node          string
 	NPM           string
+	PNPM          string
 	RabbitMQ      string
 	Elasticsearch string
 }
 
 // SupportedOroVersions is the list of supported OroCommerce versions.
-var SupportedOroVersions = []string{"6.1", "6.0", "5.1"}
+var SupportedOroVersions = []string{"7.0", "6.1", "6.0", "5.1"}
 
 // GetVersionsForOro returns the component versions for a given OroCommerce version.
 func GetVersionsForOro(oroVersion string) OroVersions {
@@ -68,7 +69,7 @@ func GetVersionsForOro(oroVersion string) OroVersions {
 			Postgres:      "17.6-alpine",
 			Redis:         "7.4-alpine",
 			Node:          "22",
-			NPM:           "10",
+			PNPM:          "10",
 			RabbitMQ:      "4.2-management-alpine",
 			Elasticsearch: "9.2.0",
 		}

@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
@@ -26,7 +27,7 @@ var qaInitCmd = &cobra.Command{
 		}
 
 		utils.PrintInfo("Initializing QA tools...")
-		runQaInitCommand()
+		runQaInitCommand(conf)
 	},
 }
 
@@ -34,7 +35,7 @@ func init() {
 	rootCmd.AddCommand(qaInitCmd)
 }
 
-func runQaInitCommand() {
+func runQaInitCommand(conf config.OroConfig) {
 	workingDir := config.GetBundleRootContainerPath()
 
 	// 1. Configure Composer plugins
@@ -66,18 +67,28 @@ func runQaInitCommand() {
 	}
 	utils.PrintSuccess("Composer QA packages installed.")
 
-	// 3. Install NPM packages
+	// 3. Install NPM/PNPM packages
+	versions := config.GetVersionsForOro(conf.OroVersion)
+	jsManager := "npm"
+	jsInstallCmd := "install"
+	jsSaveDevFlag := "--save-dev"
+	if versions.PNPM != "" {
+		jsManager = "pnpm"
+		jsInstallCmd = "add"
+		jsSaveDevFlag = "-D"
+	}
+
 	npmArgs := []string{"exec", "-w", workingDir}
 	if !isTTY() {
 		npmArgs = append(npmArgs, "-T")
 	}
-	npmArgs = append(npmArgs, "application", "npm", "install", "--save-dev", "eslint@^8.57.0", "eslint-plugin-no-jquery", "stylelint@^15.11.0", "@oroinc/oro-stylelint-config", "eslint-plugin-import")
+	npmArgs = append(npmArgs, "application", jsManager, jsInstallCmd, jsSaveDevFlag, "eslint@^8.57.0", "eslint-plugin-no-jquery", "stylelint@^15.11.0", "@oroinc/oro-stylelint-config", "eslint-plugin-import")
 
-	if err := docker.RunComposeCommandSilently("Installing NPM QA packages...", npmArgs...); err != nil {
-		utils.PrintError(fmt.Sprintf("Failed to install NPM packages: %v", err))
+	if err := docker.RunComposeCommandSilently(fmt.Sprintf("Installing %s QA packages...", strings.ToUpper(jsManager)), npmArgs...); err != nil {
+		utils.PrintError(fmt.Sprintf("Failed to install %s packages: %v", jsManager, err))
 		return
 	}
-	utils.PrintSuccess("NPM QA packages installed.")
+	utils.PrintSuccess(fmt.Sprintf("%s QA packages installed.", strings.ToUpper(jsManager)))
 
 	utils.PrintSuccess("QA tools initialized successfully!")
 }

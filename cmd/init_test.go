@@ -19,17 +19,19 @@ func TestGenerateConfig(t *testing.T) {
 	defer os.Chdir(origWd)
 
 	// Simulate interactive input:
-	// 1. Installation type (selection 1 = bundle)
-	// 2. Bundle class: Algoritma\Bundle\TestBundle\TestBundle
-	// 3. OroCommerce version (selection 1 = 7.0)
-	// 4. Host: test.local
-	// 5. Root: public
-	// 6. SSL: n
-	// 7. Redis: y
+	// 1. Bundle class: Algoritma\Bundle\TestBundle\TestBundle
+	// 2. OroCommerce version (selection 1 = 7.0)
+	// 3. Host: test.local
+	// 4. Root: public
+	// 5. SSL: n
+	// 6. Redis: y
+	// 7. RedisInsight: y
 	// 8. Mailpit: y
 	// 9. RabbitMQ: y
 	// 10. Elasticsearch: y
-	input := "1\nAlgoritma\\Bundle\\TestBundle\\TestBundle\n1\ntest.local\npublic\nn\ny\ny\ny\ny\n"
+	// 11. Kibana: y
+	// 12. Adminer: y
+	input := "Algoritma\\Bundle\\TestBundle\\TestBundle\n1\ntest.local\npublic\nn\ny\ny\ny\ny\ny\ny\ny\n"
 
 	oldStdin := stdin
 	stdin = strings.NewReader(input)
@@ -49,8 +51,8 @@ func TestGenerateConfig(t *testing.T) {
 	}
 
 	content := string(data)
-	if !strings.Contains(content, "oro_version: \"6.1\"") {
-		t.Errorf("Expected oro_version 6.1 in config, got:\n%s", content)
+	if !strings.Contains(content, "oro_version: \"7.0\"") {
+		t.Errorf("Expected oro_version 7.0 in config, got:\n%s", content)
 	}
 	if !strings.Contains(content, "host: test.local") {
 		t.Errorf("Expected host test.local in config, got:\n%s", content)

@@ -166,6 +166,7 @@ func EnsureDockerCompose() bool {
 		PHPVersion              string
 		NodeVersion             string
 		NpmVersion              string
+		PnpmVersion             string
 		BundlePath              string
 		Postgres                bool
 		PostgresVersion         string
@@ -246,6 +247,7 @@ func EnsureDockerCompose() bool {
 	data.PHPVersion = versions.PHP
 	data.NodeVersion = versions.Node
 	data.NpmVersion = versions.NPM
+	data.PnpmVersion = versions.PNPM
 	data.PostgresVersion = versions.Postgres
 	data.Postgres = true
 

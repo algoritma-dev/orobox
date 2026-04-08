@@ -2,6 +2,7 @@
 ARG PHP_VERSION={{.PHPVersion}}
 ARG NODE_VERSION={{.NodeVersion}}
 ARG NPM_VERSION={{.NpmVersion}}
+ARG PNPM_VERSION={{.PnpmVersion}}
 ARG MEMORY_LIMIT={{.MemoryLimit}}
 
 # Get Node from official image
@@ -58,6 +59,7 @@ FROM php:${PHP_VERSION}-fpm-alpine
 ARG PHP_VERSION
 ARG NODE_VERSION
 ARG NPM_VERSION
+ARG PNPM_VERSION
 ARG MEMORY_LIMIT
 
 # Runtime system dependencies
@@ -100,10 +102,16 @@ COPY --from=node_image /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=node_image /usr/local/bin/node /usr/local/bin/node
 RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
-    && npm install -g npm@${NPM_VERSION} \
-    && mkdir -p /.npm /.composer && chmod -R 777 /.npm /.composer
+    && if [ -n "${PNPM_VERSION}" ]; then \
+        npm install -g pnpm@${PNPM_VERSION}; \
+    else \
+        npm install -g npm@${NPM_VERSION}; \
+    fi \
+    && mkdir -p /.npm /.pnpm /.composer && chmod -R 777 /.npm /.pnpm /.composer
 
 ENV NPM_CONFIG_CACHE=/.npm
+ENV PNPM_HOME=/.pnpm
+ENV PATH=$PNPM_HOME:$PATH
 ENV COMPOSER_HOME=/.composer
 ENV npm_config_update_notifier=false
 
