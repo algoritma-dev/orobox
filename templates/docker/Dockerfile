@@ -91,6 +91,7 @@ RUN apk add --no-cache \
     libstdc++ \
     libgcc \
     ca-certificates \
+    icu-data-full \
     fcgi
 
 # Install Composer
