@@ -10,3 +10,4 @@ orobox
 /cmd/.orobox/init-db.sql
 /cmd/.orobox/nginx.conf
 /build/
+/vendor/
