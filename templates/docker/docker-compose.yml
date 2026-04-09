@@ -2,18 +2,19 @@
 x-templates:
   oro-app: &oro-app
     image: "algoritmadev/orobox:{{.OroVersion}}-bundle-latest"
-    env_file: .env
     mem_limit: ${ORO_APP_MEM_LIMIT:-2g}
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
   volumes-oro: &volumes-oro
-    - "oro_app:/var/www/oro:delegated"
+    - "oro_app:{{.OroRootDir}}:delegated"
     - "{{.BundlePath}}:{{.BundleRootContainerPath}}:cached"
-    - "{{.BundlePath}}/vendor-oro:/var/www/oro/vendor:delegated"
-    - "cache:/var/www/oro/var/cache:delegated"
-    - "public_storage:/var/www/oro/public/media:delegated"
-    - "private_storage:/var/www/oro/var/data:delegated"
+    - "{{.BundlePath}}/vendor-oro:{{.OroRootDir}}/vendor:delegated"
+    - "cache:{{.OroRootDir}}/var/cache:delegated"
+    - "public_storage:{{.OroRootDir}}/public/media:delegated"
+    - "private_storage:{{.OroRootDir}}/var/data:delegated"
+    - "{{.InternalDir}}/.env:{{.OroRootDir}}/.env-app:cached"
+    - "{{.InternalDir}}/.env.test:{{.OroRootDir}}/.env-app.test:cached"
 
 services:
   application:
@@ -66,12 +67,12 @@ services:
       - /opt/oro-nginx
     volumes:
       - "./nginx.conf:/etc/nginx/http.d/default.conf:ro"
-      - "oro_app:/var/www/oro:delegated"
+      - "oro_app:{{.OroRootDir}}:delegated"
       - "{{.BundlePath}}:{{.BundleRootContainerPath}}:cached"
-      - "{{.BundlePath}}/vendor-oro:/var/www/oro/vendor:delegated"
-      - "cache:/var/www/oro/var/cache:ro"
-      - "public_storage:/var/www/oro/public/media:ro"
-      - "private_storage:/var/www/oro/var/data:ro"
+      - "{{.BundlePath}}/vendor-oro:{{.OroRootDir}}/vendor:delegated"
+      - "cache:{{.OroRootDir}}/var/cache:ro"
+      - "public_storage:{{.OroRootDir}}/public/media:ro"
+      - "private_storage:{{.OroRootDir}}/var/data:ro"
       {{if .HasSsl -}}
       - "{{.CertsPath}}:/etc/nginx/certs:ro"
       {{- end}}
@@ -96,12 +97,12 @@ services:
     environment:
       ORO_XDEBUG_ENABLED: "false"
     volumes:
-      - "oro_app:/var/www/oro:delegated"
+      - "oro_app:{{.OroRootDir}}:delegated"
       - "{{.BundlePath}}:{{.BundleRootContainerPath}}:cached"
       - "{{.BundlePath}}/vendor-oro:/vendor-host:delegated"
-      - "cache:/var/www/oro/var/cache:delegated"
-      - "public_storage:/var/www/oro/public/media:delegated"
-      - "private_storage:/var/www/oro/var/data:delegated"
+      - "cache:{{.OroRootDir}}/var/cache:delegated"
+      - "public_storage:{{.OroRootDir}}/public/media:delegated"
+      - "private_storage:{{.OroRootDir}}/var/data:delegated"
 
   web-init:
     <<: *oro-app
@@ -166,7 +167,6 @@ services:
     user: ${ORO_USER_RUNTIME:-www-data}
     init: true
     environment:
-      ORO_ENV: ${ORO_ENV:-dev}
       ORO_LOG_PATH: php://stderr
     depends_on:
       "php-fpm-app":
@@ -180,7 +180,6 @@ services:
     user: ${ORO_USER_RUNTIME:-www-data}
     init: true
     environment:
-      ORO_ENV: ${ORO_ENV:-dev}
       ORO_LOG_PATH: php://stderr
       ORO_XDEBUG_ENABLED: ${ORO_CONSUMER_XDEBUG_ENABLED:-false}
     depends_on:
@@ -198,7 +197,6 @@ services:
         soft: 1024
         hard: 1048576
     environment:
-      ORO_ENV: ${ORO_ENV:-dev}
       ORO_LOG_PATH: php://stderr
       ORO_XDEBUG_ENABLED: ${ORO_CRON_XDEBUG_ENABLED:-false}
     volumes: *volumes-oro

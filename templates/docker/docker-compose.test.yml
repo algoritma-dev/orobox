@@ -1,8 +1,5 @@
 services:
   application:
-    env_file:
-      - .env
-      - .env.test
     depends_on:
       db:
         condition: service_healthy

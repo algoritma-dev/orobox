@@ -23,7 +23,6 @@ var testInitCmd = &cobra.Command{
 	Short: "Initialize or reset the test environment",
 	Run: func(_ *cobra.Command, _ []string) {
 		docker.SetIncludeTestFiles(true)
-		docker.LoadEnvFiles()
 		if testInitUseTmpfs {
 			viper.Set("test.use_tmpfs", true)
 			viper.Set("test.tmpfs_size", testInitTmpfsSize)

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/spf13/viper"
-	"github.com/subosito/gotenv"
 	"io"
 	"io/fs"
 	"os"
@@ -364,19 +363,6 @@ func GetBaseComposeArgs() []string {
 	internalDir := config.GetInternalDir()
 	composeFile := filepath.Join(internalDir, "docker-compose.yml")
 	args := []string{"-p", projectName, "--project-directory", internalDir}
-
-	// Order of --env-file matters: later ones override earlier ones
-	envFile := filepath.Join(internalDir, ".env")
-	if _, err := os.Stat(envFile); err == nil {
-		args = append(args, "--env-file", envFile)
-	}
-
-	if includeTestFiles {
-		testEnvFile := filepath.Join(internalDir, ".env.test")
-		if _, err := os.Stat(testEnvFile); err == nil {
-			args = append(args, "--env-file", testEnvFile)
-		}
-	}
 
 	args = append(args, "-f", composeFile)
 
@@ -865,25 +851,6 @@ func SetIncludeTestFiles(include bool) {
 	includeTestFiles = include
 }
 
-// LoadEnvFiles loads environment variables from .env and .env.test files.
-// .env.test will override .env only for common variables if includeTestFiles is true.
-func LoadEnvFiles() {
-	_ = gotenv.Load(".env")
-	if includeTestFiles {
-		_ = gotenv.OverLoad(".env.test")
-	}
-}
-
-// GetServiceEnv returns the value of an environment variable inside a running service container.
-func GetServiceEnv(serviceName, variable string) (string, error) {
-	args := []string{"exec", "-T", serviceName, "sh", "-c", "echo $" + variable}
-	output, err := RunComposeCommandWithOutput(args...)
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(output)), nil
-}
-
 // ResetEnsuredServices resets the cache of ensured services and database states.
 // This is primarily used for testing.
 func ResetEnsuredServices() {
@@ -894,12 +861,6 @@ func ResetEnsuredServices() {
 	dbInitializedCacheMu.Lock()
 	defer dbInitializedCacheMu.Unlock()
 	dbInitializedCache = make(map[bool]bool)
-}
-
-// EnsureServiceRunning checks if the service is running and healthy.
-// If it's not, it starts the service with 'up -d'.
-func EnsureServiceRunning(serviceName string) error {
-	return EnsureServicesRunning([]string{serviceName})
 }
 
 // EnsureServicesRunning checks if the services are running and healthy.

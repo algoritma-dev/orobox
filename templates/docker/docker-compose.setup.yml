@@ -6,12 +6,12 @@ x-templates:
       - "host.docker.internal:host-gateway"
 
   volumes-setup: &volumes-setup
-    - "oro_app:/var/www/oro:delegated"
+    - "oro_app:{{.OroRootDir}}:delegated"
     - "{{.BundlePath}}:{{.BundleRootContainerPath}}:cached"
-    - "{{.BundlePath}}/vendor-oro:/var/www/oro/vendor:delegated"
-    - "cache:/var/www/oro/var/cache:delegated"
-    - "public_storage:/var/www/oro/public/media:delegated"
-    - "private_storage:/var/www/oro/var/data:delegated"
+    - "{{.BundlePath}}/vendor-oro:{{.OroRootDir}}/vendor:delegated"
+    - "cache:{{.OroRootDir}}/var/cache:delegated"
+    - "public_storage:{{.OroRootDir}}/public/media:delegated"
+    - "private_storage:{{.OroRootDir}}/var/data:delegated"
 
 services:
   volume-setup:
@@ -31,7 +31,7 @@ services:
         if [ -n "{{.BundlePackageName}}" ]; then
             echo "Configuring bundle {{.BundlePackageName}} as path repository..."
             # Configure composer repository for the bundle
-            # Use relative path from /var/www/oro to the bundle root
+            # Use relative path from {{.OroRootDir}} to the bundle root
             COMPOSER_ALLOW_SUPERUSER=1 composer config repositories.bundle '{"type": "path", "url": "bundles/{{.BundleNamespace}}", "options": {"symlink": true}}'
             # Require the bundle package
             # We use --no-scripts to avoid running OroCommerce scripts too early
@@ -48,12 +48,12 @@ services:
     environment:
       ORO_XDEBUG_ENABLED: "false"
     volumes:
-    - "oro_app:/var/www/oro:delegated"
+    - "oro_app:{{.OroRootDir}}:delegated"
     - "{{.BundlePath}}:{{.BundleRootContainerPath}}:cached"
     - "{{.BundlePath}}/vendor-oro:/vendor-host:delegated"
-    - "cache:/var/www/oro/var/cache:delegated"
-    - "public_storage:/var/www/oro/public/media:delegated"
-    - "private_storage:/var/www/oro/var/data:delegated"
+    - "cache:{{.OroRootDir}}/var/cache:delegated"
+    - "public_storage:{{.OroRootDir}}/public/media:delegated"
+    - "private_storage:{{.OroRootDir}}/var/data:delegated"
 
   install:
     <<: *oro-app
