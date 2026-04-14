@@ -30,10 +30,21 @@ type ServicesConfig struct {
 	Adminer       bool `yaml:"adminer" mapstructure:"adminer"`
 }
 
+// QaConfig represents the configuration for enabled QA tools.
+type QaConfig struct {
+	Phpstan     bool `yaml:"phpstan" mapstructure:"phpstan"`
+	Rector      bool `yaml:"rector" mapstructure:"rector"`
+	PhpCSFixer  bool `yaml:"php_cs_fixer" mapstructure:"php_cs_fixer"`
+	TwigCSFixer bool `yaml:"twig_cs_fixer" mapstructure:"twig_cs_fixer"`
+	Eslint      bool `yaml:"eslint" mapstructure:"eslint"`
+	Stylelint   bool `yaml:"stylelint" mapstructure:"stylelint"`
+}
+
 // TestConfig represents the configuration for the test environment.
 type TestConfig struct {
-	UseTmpfs  bool   `yaml:"use_tmpfs" mapstructure:"use_tmpfs"`
-	TmpfsSize string `yaml:"tmpfs_size" mapstructure:"tmpfs_size"`
+	UseTmpfs  bool     `yaml:"use_tmpfs" mapstructure:"use_tmpfs"`
+	TmpfsSize string   `yaml:"tmpfs_size" mapstructure:"tmpfs_size"`
+	Qa        QaConfig `yaml:"qa" mapstructure:"qa"`
 }
 
 // CommandConfig represents a custom command that can be run in the container.
@@ -253,6 +264,31 @@ func GetDomains() []DomainConfig {
 	var domains []DomainConfig
 	_ = viper.UnmarshalKey("domains", &domains)
 	return domains
+}
+
+// qaToolConfigKeys maps tool names (as used in cmd/qa.go) to their YAML config keys under test.qa.
+var qaToolConfigKeys = map[string]string{
+	"phpstan":       "phpstan",
+	"rector":        "rector",
+	"php-cs-fixer":  "php_cs_fixer",
+	"twig-cs-fixer": "twig_cs_fixer",
+	"eslint":        "eslint",
+	"stylelint":     "stylelint",
+	"stylelint-css": "stylelint",
+}
+
+// IsQaToolEnabled returns whether a QA tool is enabled according to config.
+// If the tool is not explicitly configured, it defaults to true (enabled).
+func IsQaToolEnabled(toolName string) bool {
+	configKey, ok := qaToolConfigKeys[toolName]
+	if !ok {
+		return true
+	}
+	key := "test.qa." + configKey
+	if !viper.IsSet(key) {
+		return true
+	}
+	return viper.GetBool(key)
 }
 
 // FindPhpClass tries to find a PHP class in the specified root directory.

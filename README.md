@@ -57,6 +57,9 @@ services:
 test:
   use_tmpfs: true
   tmpfs_size: 1g
+  qa:
+    eslint: true
+    stylelint: false
 commands:
   - name: "otr"
     command: "php bin/console oro:test:run"
@@ -81,6 +84,13 @@ commands:
 - `test`:
     - `use_tmpfs`: (bool) If enabled, uses RAM (tmpfs) for database files in the test container, significantly improving performance but data is lost on container restart.
     - `tmpfs_size`: (string) Size of the tmpfs mount (e.g., "1g", "512m").
+    - `qa`: (map) Enable or disable individual QA tools. Any tool not listed defaults to enabled. Useful when a bundle has no JavaScript (disable `eslint`, `stylelint`) or no Twig templates (disable `twig_cs_fixer`).
+        - `phpstan`: (bool) Enable/disable PHPStan.
+        - `rector`: (bool) Enable/disable Rector.
+        - `php_cs_fixer`: (bool) Enable/disable PHP-CS-Fixer.
+        - `twig_cs_fixer`: (bool) Enable/disable Twig-CS-Fixer.
+        - `eslint`: (bool) Enable/disable ESLint.
+        - `stylelint`: (bool) Enable/disable Stylelint (SCSS/LESS/SASS/CSS).
 - `commands`: (list) List of custom commands that can be run in the container:
     - `name`: (string) Name of the command (e.g., `otr`).
     - `command`: (string) The actual command to execute (e.g., `php bin/console oro:test:run`).
@@ -168,7 +178,7 @@ orobox qa-init
 ```
 
 ### 9. Run QA Tools (`qa`)
-Executes the QA analysis tools. By default, it runs all tools if no specific flag is provided.
+Executes the QA analysis tools. When no flag is provided, runs the tools enabled in `.orobox.yaml` under `test.qa` (all tools are enabled by default if not configured).
 ```bash
 orobox qa
 ```
@@ -180,7 +190,7 @@ Options:
 - `--eslint`: Run ESLint analysis.
 - `--stylelint`: Run Stylelint analysis.
 
-Example:
+CLI flags always override the configuration. Example:
 ```bash
 orobox qa --phpstan --eslint
 ```

@@ -81,7 +81,11 @@ func runQaCommand() {
 
 	var enabledTools []tool
 	for _, t := range allTools {
-		if !anyEnabled || t.enabled {
+		if anyEnabled {
+			if t.enabled {
+				enabledTools = append(enabledTools, t)
+			}
+		} else if config.IsQaToolEnabled(t.name) {
 			enabledTools = append(enabledTools, t)
 		}
 	}
