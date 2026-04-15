@@ -22,6 +22,12 @@ var (
 	qaStylelint   bool
 )
 
+type qaTool struct {
+	name    string
+	args    []string
+	enabled bool
+}
+
 var qaCmd = &cobra.Command{
 	Use:   "qa",
 	Short: "Run QA tools (PHPStan, Rector, PHP-CS-Fixer, Twig-CS-Fixer, ESLint, Stylelint)",
@@ -44,34 +50,67 @@ func init() {
 	qaCmd.Flags().BoolVar(&qaStylelint, "stylelint", false, "Run Stylelint")
 }
 
+// qaToolBinaryPaths maps tool names to their expected binary paths relative to the bundle working dir.
+var qaToolBinaryPaths = map[string]string{
+	"phpstan":       "vendor/bin/phpstan",
+	"rector":        "vendor/bin/rector",
+	"php-cs-fixer":  "vendor/bin/php-cs-fixer",
+	"twig-cs-fixer": "vendor/bin/twig-cs-fixer",
+	"eslint":        "node_modules/.bin/eslint",
+	"stylelint":     "node_modules/.bin/stylelint",
+	"stylelint-css": "node_modules/.bin/stylelint",
+}
+
+// checkMissingToolBinaries returns the names of tools whose binaries are not present in the container.
+func checkMissingToolBinaries(workingDir string, tools []qaTool) []string {
+	seen := map[string]bool{}
+	var checks []string
+
+	for _, t := range tools {
+		binPath, ok := qaToolBinaryPaths[t.name]
+		if !ok || seen[binPath] {
+			continue
+		}
+		seen[binPath] = true
+		checks = append(checks, fmt.Sprintf("test -f %s || printf 'MISSING:%s\\n'", binPath, t.name))
+	}
+
+	if len(checks) == 0 {
+		return nil
+	}
+
+	args := []string{"exec", "-w", workingDir, "-T", "application", "sh", "-c", strings.Join(checks, "; ")}
+	output, _ := docker.RunComposeCommandWithOutput(args...)
+
+	var missing []string
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "MISSING:") {
+			missing = append(missing, strings.TrimPrefix(line, "MISSING:"))
+		}
+	}
+	return missing
+}
+
 func runQaCommand() {
 	workingDir := config.GetBundleRootContainerPath()
 
 	jsTarget := "Resources/public"
 	twigTarget := "."
 
-	type tool struct {
-		name    string
-		args    []string
-		enabled bool
-	}
-
-	allTools := []tool{
+	allTools := []qaTool{
 		{"phpstan", []string{"vendor/bin/phpstan", "analyze"}, qaPhpstan},
 		{"rector", []string{"vendor/bin/rector", "process"}, qaRector},
 		{"php-cs-fixer", []string{"vendor/bin/php-cs-fixer", "fix"}, qaPhpCSFixer},
 		{"twig-cs-fixer", []string{"vendor/bin/twig-cs-fixer", "lint", twigTarget}, qaTwigCSFixer},
+		{"eslint", []string{"npx", "--yes", "eslint", "--config", config.OroRootDir + "/.eslintrc.yml", "--ignore-path", config.OroRootDir + "/.eslintignore", "--fix", "--quiet", jsTarget}, qaEslint},
+		{"stylelint", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.{scss,less,sass,html}", "--config", config.OroRootDir + "/.stylelintrc.yml", "--ignore-path", config.OroRootDir + "/.stylelintignore", "--fix", "--quiet", "--allow-empty-input"}, qaStylelint},
+		{"stylelint-css", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.css", "--config", config.OroRootDir + "/.stylelintrc-css.yml", "--ignore-path", config.OroRootDir + "/.stylelintignore-css", "--fix", "--quiet", "--allow-empty-input"}, qaStylelint},
 	}
 
-	allTools = append(allTools,
-		tool{"eslint", []string{"npx", "--yes", "eslint", "--config", config.OroRootDir + "/.eslintrc.yml", "--ignore-path", config.OroRootDir + "/.eslintignore", "--fix", "--quiet", jsTarget}, qaEslint},
-		tool{"stylelint", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.{scss,less,sass,html}", "--config", config.OroRootDir + "/.stylelintrc.yml", "--ignore-path", config.OroRootDir + "/.stylelintignore", "--fix", "--quiet", "--allow-empty-input"}, qaStylelint},
-		tool{"stylelint-css", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.css", "--config", config.OroRootDir + "/.stylelintrc-css.yml", "--ignore-path", config.OroRootDir + "/.stylelintignore-css", "--fix", "--quiet", "--allow-empty-input"}, qaStylelint},
-	)
-
 	anyEnabled := false
-	for _, tool := range allTools {
-		if tool.enabled {
+	for _, t := range allTools {
+		if t.enabled {
 			anyEnabled = true
 			break
 		}
@@ -79,7 +118,7 @@ func runQaCommand() {
 
 	utils.PrintInfo("Running QA tools in " + workingDir + "...")
 
-	var enabledTools []tool
+	var enabledTools []qaTool
 	for _, t := range allTools {
 		if anyEnabled {
 			if t.enabled {
@@ -93,6 +132,12 @@ func runQaCommand() {
 	if len(enabledTools) == 0 {
 		utils.PrintWarning("No QA tools enabled.")
 		return
+	}
+
+	if missing := checkMissingToolBinaries(workingDir, enabledTools); len(missing) > 0 {
+		utils.PrintWarning(fmt.Sprintf("The following QA tools are enabled but not installed: %s", strings.Join(missing, ", ")))
+		utils.PrintWarning("Run 'orobox qa-init' to install the missing tools.")
+		os.Exit(1)
 	}
 
 	var compositeCmd strings.Builder
