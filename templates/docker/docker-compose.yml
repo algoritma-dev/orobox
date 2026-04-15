@@ -166,6 +166,7 @@ services:
     user: ${ORO_USER_RUNTIME:-www-data}
     init: true
     environment:
+      ORO_ENV: ${ORO_ENV:-dev}
       ORO_LOG_PATH: php://stderr
     depends_on:
       "php-fpm-app":
@@ -178,7 +179,10 @@ services:
     restart: unless-stopped
     user: ${ORO_USER_RUNTIME:-www-data}
     init: true
+    env_file:
+      - .env
     environment:
+      ORO_ENV: ${ORO_ENV:-dev}
       ORO_LOG_PATH: php://stderr
       ORO_XDEBUG_ENABLED: ${ORO_CONSUMER_XDEBUG_ENABLED:-false}
     depends_on:
@@ -195,7 +199,10 @@ services:
       nofile:
         soft: 1024
         hard: 1048576
+    env_file:
+      - .env
     environment:
+      ORO_ENV: ${ORO_ENV:-dev}
       ORO_LOG_PATH: php://stderr
       ORO_XDEBUG_ENABLED: ${ORO_CRON_XDEBUG_ENABLED:-false}
     volumes: *volumes-oro
