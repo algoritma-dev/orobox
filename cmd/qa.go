@@ -50,15 +50,15 @@ func init() {
 	qaCmd.Flags().BoolVar(&qaStylelint, "stylelint", false, "Run Stylelint")
 }
 
-// qaToolBinaryPaths maps tool names to their expected binary paths relative to the bundle working dir.
+// qaToolBinaryPaths maps tool names to their expected binary paths in the shared OroCommerce directory.
 var qaToolBinaryPaths = map[string]string{
-	"phpstan":       "vendor/bin/phpstan",
-	"rector":        "vendor/bin/rector",
-	"php-cs-fixer":  "vendor/bin/php-cs-fixer",
-	"twig-cs-fixer": "vendor/bin/twig-cs-fixer",
-	"eslint":        "node_modules/.bin/eslint",
-	"stylelint":     "node_modules/.bin/stylelint",
-	"stylelint-css": "node_modules/.bin/stylelint",
+	"phpstan":       config.OroRootDir + "/vendor/bin/phpstan",
+	"rector":        config.OroRootDir + "/vendor/bin/rector",
+	"php-cs-fixer":  config.OroRootDir + "/vendor/bin/php-cs-fixer",
+	"twig-cs-fixer": config.OroRootDir + "/vendor/bin/twig-cs-fixer",
+	"eslint":        config.OroRootDir + "/node_modules/.bin/eslint",
+	"stylelint":     config.OroRootDir + "/node_modules/.bin/stylelint",
+	"stylelint-css": config.OroRootDir + "/node_modules/.bin/stylelint",
 }
 
 // checkMissingToolBinaries returns the names of tools whose binaries are not present in the container.
@@ -99,10 +99,10 @@ func runQaCommand() {
 	twigTarget := "."
 
 	allTools := []qaTool{
-		{"phpstan", []string{"vendor/bin/phpstan", "analyze"}, qaPhpstan},
-		{"rector", []string{"vendor/bin/rector", "process"}, qaRector},
-		{"php-cs-fixer", []string{"vendor/bin/php-cs-fixer", "fix"}, qaPhpCSFixer},
-		{"twig-cs-fixer", []string{"vendor/bin/twig-cs-fixer", "lint", twigTarget}, qaTwigCSFixer},
+		{"phpstan", []string{config.OroRootDir + "/vendor/bin/phpstan", "analyze"}, qaPhpstan},
+		{"rector", []string{config.OroRootDir + "/vendor/bin/rector", "process"}, qaRector},
+		{"php-cs-fixer", []string{config.OroRootDir + "/vendor/bin/php-cs-fixer", "fix"}, qaPhpCSFixer},
+		{"twig-cs-fixer", []string{config.OroRootDir + "/vendor/bin/twig-cs-fixer", "lint", twigTarget}, qaTwigCSFixer},
 		{"eslint", []string{"npx", "--yes", "eslint", "--config", config.OroRootDir + "/.eslintrc.yml", "--ignore-path", config.OroRootDir + "/.eslintignore", "--fix", "--quiet", jsTarget}, qaEslint},
 		{"stylelint", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.{scss,less,sass,html}", "--config", config.OroRootDir + "/.stylelintrc.yml", "--ignore-path", config.OroRootDir + "/.stylelintignore", "--fix", "--quiet", "--allow-empty-input"}, qaStylelint},
 		{"stylelint-css", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.css", "--config", config.OroRootDir + "/.stylelintrc-css.yml", "--ignore-path", config.OroRootDir + "/.stylelintignore-css", "--fix", "--quiet", "--allow-empty-input"}, qaStylelint},
