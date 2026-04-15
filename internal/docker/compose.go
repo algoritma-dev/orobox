@@ -286,8 +286,6 @@ func EnsureDockerCompose() bool {
 		utils.PrintWarning(fmt.Sprintf("composer.json not found in %s. Bundle package name will be unknown.", data.BundlePath))
 	}
 
-	_ = os.MkdirAll(filepath.Join(data.BundlePath, "vendor"), 0755)
-
 	data.Redis = viper.GetBool("services.redis")
 	if data.Redis {
 		data.RedisVersion = versions.Redis
@@ -435,6 +433,57 @@ var RunComposeCommandSilently = func(message string, args ...string) error {
 			utils.PrintInfo("Try running: docker logout")
 		}
 
+		return err
+	}
+	return nil
+}
+
+// RunSetupComposeCommandSilently is like RunComposeCommandSilently but enables
+// the "setup" profile so that services marked with profiles: [setup] are accessible.
+var RunSetupComposeCommandSilently = func(message string, args ...string) error {
+	debug := viper.GetBool("debug")
+	if !debug {
+		utils.StartLoader(message)
+		defer utils.StopLoader()
+	} else if message != "" {
+		utils.PrintInfo(message)
+	}
+
+	composeCmd := GetComposeCommand()
+
+	var argsToRun []string
+	argsToRun = append(argsToRun, composeCmd[1:]...)
+
+	if !debug && len(composeCmd) > 1 && composeCmd[1] == "compose" {
+		argsToRun = append(argsToRun, "--progress", "quiet")
+	}
+
+	argsToRun = append(argsToRun, "--profile", "setup")
+	argsToRun = append(argsToRun, GetBaseComposeArgs()...)
+	argsToRun = append(argsToRun, args...)
+
+	cmd := exec.Command(composeCmd[0], argsToRun...)
+
+	if debug {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		return cmd.Run()
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err != nil {
+		utils.StopLoader()
+		stderrStr := stderr.String()
+		if stderr.Len() > 0 {
+			fmt.Print(stderrStr)
+		}
+		if stdout.Len() > 0 {
+			fmt.Print(stdout.String())
+		}
 		return err
 	}
 	return nil

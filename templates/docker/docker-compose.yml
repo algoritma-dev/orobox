@@ -80,17 +80,18 @@ services:
   volume-init:
     <<: *oro-app
     user: root
+    profiles: [setup]
     command:
       - bash
       - -c
       - |
         echo "Initializing volumes and permissions for ${ORO_USER_RUNTIME:-www-data}..."
-        mkdir -p bin config public src templates translations var assets var/cache var/logs var/data public/media vendor
+        mkdir -p bin config public src templates translations var assets var/cache var/logs var/data public/media
         if [ -d /vendor-host ] && [ -z "$$(ls -A /vendor-host)" ]; then
             echo "Populating vendor folder on host from container..."
-            cp -rp vendor/. /vendor-host/
+            cp -rp {{.OroRootDir}}/vendor/. /vendor-host/
         fi
-        chown -R ${ORO_USER_RUNTIME:-www-data} . bin config public src templates translations var assets var/cache var/logs var/data public/media vendor 2>/dev/null || true
+        chown -R ${ORO_USER_RUNTIME:-www-data} . bin config public src templates translations var assets var/cache var/logs var/data public/media 2>/dev/null || true
         [ -d /vendor-host ] && chown -R ${ORO_USER_RUNTIME:-www-data} /vendor-host 2>/dev/null || true
         chmod -R 777 var/cache var/logs var/data 2>/dev/null || true
         true
@@ -144,8 +145,6 @@ services:
       "mail":
         condition: service_started
       {{- end}}
-      "volume-init":
-        condition: service_completed_successfully
       {{if .Redis -}}
       "redis":
         condition: service_healthy

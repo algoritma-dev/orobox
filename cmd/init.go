@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -90,6 +91,13 @@ func performInstallation() bool {
 		return false
 	}
 
+	// Remove any existing containers to ensure fresh bind mounts after init.
+	// If vendor-oro was deleted and recreated, running containers would still hold
+	// a bind mount to the old (deleted) inode, causing an empty vendor inside containers.
+	if err := docker.RunComposeCommandSilently("Stopping existing containers...", "down", "--remove-orphans"); err != nil {
+		utils.PrintWarning(fmt.Sprintf("Could not stop existing containers: %v", err))
+	}
+
 	// 0. Resolve OroCommerce version to the latest tag
 	oroRepo := "https://github.com/oroinc/orocommerce-application.git"
 	resolvedVersion, err := utils.GetLatestTag(oroRepo, conf.OroVersion)
@@ -101,8 +109,9 @@ func performInstallation() bool {
 	// 1. Download sources (git clone)
 	// (Project support removed from main branch)
 
-	// 2. Ensure environment is ready
-	services := []string{"up", "-d", "db"}
+	// 2. Ensure environment is ready.
+	// gotenberg is always required by the install service.
+	services := []string{"up", "-d", "db", "gotenberg"}
 	if conf.Services.Redis {
 		services = append(services, "redis")
 	}
@@ -154,9 +163,31 @@ func performInstallation() bool {
 		}
 	}
 
-	// 4. Run Oro installation
-	// Use the 'install' service from docker-compose.setup.yml
-	if err := docker.RunComposeCommandSilently("Running OroCommerce installation (this may take several minutes)...", "run", "--rm", "-T", "install"); err != nil {
+	// 4. Install bundle into vendor-oro via composer require (runs in 'application'
+	// where vendor-oro is already mounted as the vendor directory).
+	if bundlePackageName := getBundlePackageName(); bundlePackageName != "" {
+		bundleNamespace := config.GetBundlePath()
+		requireCmd := []string{"run", "--rm", "-T", "application", "bash", "-c",
+			fmt.Sprintf(
+				`COMPOSER_ALLOW_SUPERUSER=1 composer config repositories.bundle '{"type":"path","url":"bundles/%s","options":{"symlink":true}}' && COMPOSER_ALLOW_SUPERUSER=1 composer require "%s:@dev" --no-interaction --no-scripts`,
+				bundleNamespace, bundlePackageName,
+			),
+		}
+		if err := docker.RunComposeCommandSilently("Installing bundle into vendor...", requireCmd...); err != nil {
+			utils.PrintWarning(fmt.Sprintf("Bundle installation failed: %v", err))
+		}
+	}
+
+	// 5. Run Oro installation.
+	// We run volume-setup first for permissions, then install with --no-deps
+	// because all dependencies (db, gotenberg, etc.) are already running above.
+	// Using --no-deps avoids Docker Compose's dependency resolution, which can
+	// trigger a "network not found" error when it tries to (re)start containers
+	// whose network was replaced by the earlier `down --remove-orphans`.
+	if err := docker.RunSetupComposeCommandSilently("Setting up volumes for installation...", "run", "--rm", "-T", "volume-setup"); err != nil {
+		utils.PrintWarning(fmt.Sprintf("volume-setup failed: %v", err))
+	}
+	if err := docker.RunSetupComposeCommandSilently("Running OroCommerce installation (this may take several minutes)...", "run", "--rm", "-T", "--no-deps", "install"); err != nil {
 		utils.PrintError(fmt.Sprintf("OroCommerce installation failed: %v", err))
 		return false
 	}
@@ -171,6 +202,22 @@ func init() {
 	initCmd.Flags().StringVarP(&oroVersion, "oro-version", "v", "6.1", "OroCommerce version")
 	initCmd.Flags().StringVarP(&bundleNamespace, "bundle-namespace", "n", "", "Bundle namespace")
 	// Type flag removed from main branch as only 'bundle' is supported here
+}
+
+// getBundlePackageName reads the composer package name from the bundle's composer.json.
+func getBundlePackageName() string {
+	composerJSONPath := filepath.Join(config.GetHostBundlePath(), "composer.json")
+	content, err := os.ReadFile(composerJSONPath)
+	if err != nil {
+		return ""
+	}
+	var data struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(content, &data); err != nil {
+		return ""
+	}
+	return data.Name
 }
 
 func generateConfig() {
