@@ -36,8 +36,7 @@ func init() {
 }
 
 func runQaInitCommand(conf config.OroConfig) {
-	phpWorkingDir := config.OroRootDir
-	jsWorkingDir := config.OroRootDir
+	workingDir := config.GetBundleRootContainerPath()
 
 	needsPhpCodingStandards := config.IsQaToolEnabled("phpstan") || config.IsQaToolEnabled("rector") || config.IsQaToolEnabled("php-cs-fixer")
 	needsTwigCS := config.IsQaToolEnabled("twig-cs-fixer")
@@ -51,10 +50,10 @@ func runQaInitCommand(conf config.OroConfig) {
 		return
 	}
 
-	// 1. Configure Composer plugins and install PHP packages in the OroCommerce project vendor
+	// 1. Configure Composer plugins and install PHP packages
 	if needsComposerTools {
 		for _, plugin := range []string{"phpstan/extension-installer", "algoritma/php-coding-standards"} {
-			configArgs := []string{"exec", "-w", phpWorkingDir}
+			configArgs := []string{"exec", "-w", workingDir}
 			if !isTTY() {
 				configArgs = append(configArgs, "-T")
 			}
@@ -74,7 +73,7 @@ func runQaInitCommand(conf config.OroConfig) {
 			composerPackages = append(composerPackages, "vincentlanglet/twig-cs-fixer")
 		}
 
-		composerArgs := []string{"exec", "-w", phpWorkingDir}
+		composerArgs := []string{"exec", "-w", workingDir}
 		if !isTTY() {
 			composerArgs = append(composerArgs, "-T")
 		}
@@ -89,7 +88,7 @@ func runQaInitCommand(conf config.OroConfig) {
 		utils.PrintSuccess("Composer QA packages installed.")
 	}
 
-	// 2. Install NPM/PNPM packages in the bundle directory
+	// 2. Install NPM/PNPM packages
 	if needsJsTools {
 		versions := config.GetVersionsForOro(conf.OroVersion)
 		jsManager := "npm"
@@ -109,7 +108,7 @@ func runQaInitCommand(conf config.OroConfig) {
 			jsPackages = append(jsPackages, "stylelint@^15.11.0", "@oroinc/oro-stylelint-config")
 		}
 
-		npmArgs := []string{"exec", "-w", jsWorkingDir}
+		npmArgs := []string{"exec", "-w", workingDir}
 		if !isTTY() {
 			npmArgs = append(npmArgs, "-T")
 		}
