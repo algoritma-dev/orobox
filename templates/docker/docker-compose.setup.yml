@@ -23,6 +23,8 @@ services:
       - -c
       - |
         echo "Initializing volumes and permissions for ${ORO_USER_RUNTIME:-www-data}..."
+        echo "Clearing stale cache before installation..."
+        rm -rf var/cache/* 2>/dev/null || true
         mkdir -p bin config public src templates translations var assets var/cache var/logs var/data public/media
         if [ -d /vendor-host ] && [ -z "$(ls -A /vendor-host)" ]; then
             echo "Populating vendor folder on host from container..."
