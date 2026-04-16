@@ -169,7 +169,7 @@ func TestTestCommand(t *testing.T) {
 
 	// 2nd call: actual test execution
 	lastCall := calls[1]
-	if lastCall[0] != "exec" || !contains(lastCall, "application") {
+	if lastCall[0] != "run" || !contains(lastCall, "application") {
 		t.Errorf("Expected exec application, got %v", lastCall)
 	}
 }
