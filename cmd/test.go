@@ -36,7 +36,7 @@ func init() {
 
 func runTestCommand() {
 	// Ensure test database and application are running
-	if err := docker.EnsureServicesRunning([]string{"db", "application"}); err != nil {
+	if err := docker.EnsureServicesRunning([]string{"db-test", "application"}); err != nil {
 		utils.PrintWarning(fmt.Sprintf("failed to ensure services are running: %v", err))
 	}
 
@@ -58,7 +58,7 @@ func runTestCommand() {
 
 	var args []string
 
-	args = append(args, "exec")
+	args = append(args, "run", "--rm", "--no-deps")
 
 	// Check if we have a TTY
 	if !isTTY() {
@@ -68,7 +68,7 @@ func runTestCommand() {
 	args = append(args, "application")
 
 	if viper.GetString("type") == "bundle" {
-		args = append(args, "./bin/simple-phpunit", "--configuration="+config.GetBundleRootContainerPath(), "--bootstrap="+config.OroRootDir+"/config/bootstrap_test.php")
+		args = append(args, "./bin/simple-phpunit", "--configuration="+config.GetBundleRootContainerPath())
 	} else {
 		args = append(args, "php", "bin/simple-phpunit")
 	}

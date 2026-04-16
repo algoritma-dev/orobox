@@ -95,15 +95,15 @@ func checkMissingToolBinaries(workingDir string, tools []qaTool) []string {
 func runQaCommand() {
 	workingDir := config.GetBundleRootContainerPath()
 
-	jsTarget := "Resources/public"
-	twigTarget := "."
+	jsTarget := "src/Resources/public"
+	twigTarget := "src/Resources/views"
 
 	allTools := []qaTool{
 		{"phpstan", []string{"vendor/bin/phpstan", "analyze"}, qaPhpstan},
 		{"rector", []string{"vendor/bin/rector", "process"}, qaRector},
 		{"php-cs-fixer", []string{"vendor/bin/php-cs-fixer", "fix"}, qaPhpCSFixer},
-		{"twig-cs-fixer", []string{"vendor/bin/twig-cs-fixer", "lint", twigTarget}, qaTwigCSFixer},
-		{"eslint", []string{"npx", "--yes", "eslint", "--config", config.OroRootDir + "/.eslintrc.yml", "--ignore-path", config.OroRootDir + "/.eslintignore", "--fix", "--quiet", jsTarget}, qaEslint},
+		{"twig-cs-fixer", []string{"vendor/bin/twig-cs-fixer", "lint", twigTarget, "--fix"}, qaTwigCSFixer},
+		{"eslint", []string{"npx", "--yes", "eslint", "--resolve-plugins-relative-to", workingDir, "--config", config.OroRootDir + "/.eslintrc.yml", "--ignore-path", config.OroRootDir + "/.eslintignore", "--fix", "--quiet", jsTarget}, qaEslint},
 		{"stylelint", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.{scss,less,sass,html}", "--config", config.OroRootDir + "/.stylelintrc.yml", "--ignore-path", config.OroRootDir + "/.stylelintignore", "--fix", "--quiet", "--allow-empty-input"}, qaStylelint},
 		{"stylelint-css", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.css", "--config", config.OroRootDir + "/.stylelintrc-css.yml", "--ignore-path", config.OroRootDir + "/.stylelintignore-css", "--fix", "--quiet", "--allow-empty-input"}, qaStylelint},
 	}

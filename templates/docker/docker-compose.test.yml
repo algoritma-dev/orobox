@@ -1,16 +1,37 @@
+volumes:
+  pg_data_test:
+
 services:
   application:
+    env_file:
+      - .env.test
     depends_on:
-      db:
+      db-test:
         condition: service_healthy
 
-  db:
+  db-test:
+    image: "postgres:{{.PostgresVersion}}"
+    command: [ "postgres", "-c", "max_locks_per_transaction=1024" ]
+    labels:
+      com.symfony.server.service-prefix: ORO_DB
+    ports:
+      - "5433:5432"
     environment:
       POSTGRES_DB: ${ORO_DB_NAME_TEST:-oro_db_test}
+      POSTGRES_USER: ${ORO_DB_USER:-oro_db_user}
+      POSTGRES_PASSWORD: ${ORO_DB_PASSWORD:-oro_db_pass}
+      POSTGRES_ROOT_PASSWORD: ${ORO_DB_ROOT_PASSWORD:-oro_db_pass}
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB" ]
+      start_period: 60s
+    restart: unless-stopped
     {{if .UseTmpfs -}}
     tmpfs:
       - /var/lib/postgresql/data:size={{.TmpfsSize}}
-    {{- end}}
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      start_period: 60s
+    volumes:
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    {{else}}
+    volumes:
+      - pg_data_test:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    {{end}}

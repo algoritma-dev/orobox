@@ -60,7 +60,7 @@ var upCmd = &cobra.Command{
 		if viper.GetBool("services.adminer") {
 			utils.PrintTitle("Adminer is available at:")
 			fmt.Println("  - http://localhost:8081")
-			dbUser, dbPass, dbName := docker.GetDatabaseCredentials()
+			dbUser, dbPass, dbName, _ := docker.GetDatabaseCredentials()
 			fmt.Printf("  - Credentials: %s / %s (Database: %s)\n", dbUser, dbPass, dbName)
 
 			utils.PrintTitle("External Database Connection (e.g. PhpStorm):")

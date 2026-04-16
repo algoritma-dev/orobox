@@ -86,25 +86,27 @@ func GetApplicationURLs() []string {
 }
 
 // GetDatabaseCredentials returns the credentials to access the database.
-func GetDatabaseCredentials() (user string, pass string, dbname string) {
+func GetDatabaseCredentials() (user string, pass string, dbname string, composeServiceName string) {
 	return GetDatabaseCredentialsFor(false)
 }
 
 // GetDatabaseTestCredentials returns the credentials to access the test database.
-func GetDatabaseTestCredentials() (user string, pass string, dbname string) {
+func GetDatabaseTestCredentials() (user string, pass string, dbname string, composeServiceName string) {
 	return GetDatabaseCredentialsFor(true)
 }
 
 // GetDatabaseCredentialsFor returns the credentials to access the specified database environment.
-func GetDatabaseCredentialsFor(test bool) (user string, pass string, dbname string) {
+func GetDatabaseCredentialsFor(test bool) (user string, pass string, dbname string, composeServiceName string) {
 	internalDir := config.GetInternalDir()
 	envFile := filepath.Join(internalDir, ".env")
 
 	// Default values if anything fails
 	user = "oro_db_user"
 	pass = "oro_db_pass"
+	composeServiceName = "db"
 	if test {
 		dbname = "oro_db_test"
+		composeServiceName = "db-test"
 	} else {
 		dbname = "oro_db"
 	}
@@ -147,7 +149,7 @@ func GetDatabaseCredentialsFor(test bool) (user string, pass string, dbname stri
 		}
 	}
 
-	return user, pass, dbname
+	return user, pass, dbname, composeServiceName
 }
 
 // EnsureDockerCompose renders and writes all docker-related files under the
@@ -495,9 +497,18 @@ var RunComposeCommand = func(message string, args ...string) error {
 	if message != "" {
 		utils.PrintInfo(message)
 	}
+	debug := viper.GetBool("debug")
 	composeCmd := GetComposeCommand()
 
-	argsToRun := append(composeCmd[1:], GetBaseComposeArgs()...)
+	var argsToRun []string
+	argsToRun = append(argsToRun, composeCmd[1:]...)
+
+	// Add --progress quiet if it's 'docker compose' (V2) and not in debug mode
+	if !debug && len(composeCmd) > 1 && composeCmd[1] == "compose" {
+		argsToRun = append(argsToRun, "--progress", "quiet")
+	}
+
+	argsToRun = append(argsToRun, GetBaseComposeArgs()...)
 	argsToRun = append(argsToRun, args...)
 
 	cmd := exec.Command(composeCmd[0], argsToRun...)
@@ -997,8 +1008,7 @@ func IsDatabaseInitialized(test bool) (bool, error) {
 	}
 	dbInitializedCacheMu.Unlock()
 
-	dbUser, _, dbName := GetDatabaseCredentialsFor(test)
-	container := "db"
+	dbUser, _, dbName, container := GetDatabaseCredentialsFor(test)
 
 	checkArgs := []string{
 		"exec", "-T", container,

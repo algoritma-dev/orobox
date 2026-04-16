@@ -14,7 +14,7 @@ import (
 )
 
 var dbExec = func(stdin io.Reader, stdout io.Writer, args ...string) error {
-	_, dbPass, _ := docker.GetDatabaseCredentials()
+	_, dbPass, _, _ := docker.GetDatabaseCredentials()
 	composeCmd := docker.GetComposeCommand()
 	baseArgs := docker.GetBaseComposeArgs()
 
@@ -85,7 +85,7 @@ func backupDatabase(file string) {
 	utils.StartLoader("Creating database backup...")
 	defer utils.StopLoader()
 
-	dbUser, _, dbName := docker.GetDatabaseCredentials()
+	dbUser, _, dbName, _ := docker.GetDatabaseCredentials()
 
 	f, err := os.Create(file)
 	if err != nil {
@@ -115,7 +115,7 @@ func restoreDatabase(file string) {
 		return
 	}
 
-	dbUser, _, dbName := docker.GetDatabaseCredentials()
+	dbUser, _, dbName, _ := docker.GetDatabaseCredentials()
 
 	// Ensure services are running
 	if err := docker.EnsureServicesRunning([]string{"db", "application"}); err != nil {

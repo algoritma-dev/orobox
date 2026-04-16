@@ -232,9 +232,7 @@ services:
       start_period: 60s
     restart: unless-stopped
     volumes:
-      {{if not .UseTmpfs -}}
       - pg_data:/var/lib/postgresql/data
-      {{end -}}
       - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
   {{end}}
   {{if .Redis}}

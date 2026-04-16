@@ -112,9 +112,9 @@ func runQaInitCommand(conf config.OroConfig) {
 		if !isTTY() {
 			npmArgs = append(npmArgs, "-T")
 		}
+
 		npmArgs = append(npmArgs, "application", jsManager, jsInstallCmd, jsSaveDevFlag)
 		npmArgs = append(npmArgs, jsPackages...)
-
 		if err := docker.RunComposeCommandSilently(fmt.Sprintf("Installing %s QA packages...", strings.ToUpper(jsManager)), npmArgs...); err != nil {
 			utils.PrintError(fmt.Sprintf("Failed to install %s packages: %v", jsManager, err))
 			return

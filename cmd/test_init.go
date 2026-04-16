@@ -45,7 +45,7 @@ var testInitCmd = &cobra.Command{
 			return
 		}
 
-		serviceNames := []string{"db"}
+		serviceNames := []string{"db-test"}
 		if conf.Services.Redis {
 			serviceNames = append(serviceNames, "redis")
 		}
@@ -62,7 +62,7 @@ var testInitCmd = &cobra.Command{
 		}
 
 		// Check if already initialized
-		dbUser, dbPass, dbName := docker.GetDatabaseTestCredentials()
+		dbUser, dbPass, dbName, _ := docker.GetDatabaseTestCredentials()
 		utils.StartLoader("Checking for existing installation...")
 		isInstalled, err := docker.IsDatabaseInitialized(true)
 		utils.StopLoader()
@@ -84,13 +84,13 @@ var testInitCmd = &cobra.Command{
 
 		// Try psql first with FORCE (requires Postgres 13+)
 		dropSQL := fmt.Sprintf("DROP DATABASE IF EXISTS %s WITH (FORCE);", dbName)
-		dropArgs := []string{"exec", "-T", "db", "psql", "-U", dbUser, "-d", "postgres", "-c", dropSQL}
+		dropArgs := []string{"exec", "-T", "db-test", "psql", "-U", dbUser, "-d", "postgres", "-c", dropSQL}
 		if err := docker.RunComposeCommandSilently("Dropping test database...", dropArgs...); err != nil {
 			utils.PrintWarning(fmt.Sprintf("failed to drop test database: %v", err))
 			return
 		}
 
-		createCmd := []string{"run", "--rm", "-T", "application", "php", "bin/console", "doctrine:database:create", "--env=test"}
+		createCmd := []string{"run", "--rm", "-T", "application", "php", "bin/console", "doctrine:database:create", "--env=test", "--if-not-exists"}
 		if err := docker.RunComposeCommandSilently("Creating test database...", createCmd...); err != nil {
 			utils.PrintError(fmt.Sprintf("failed to create test database: %v", err))
 			return
