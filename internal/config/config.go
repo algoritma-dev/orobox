@@ -151,10 +151,11 @@ const (
 const OroRootDir = "/var/www/oro"
 
 // QaToolsDir is the bamarni/composer-bin-plugin namespace directory for QA tools.
+// bamarni uses "vendor-bin/<namespace>" as its default target directory.
 // Tools are installed here as an isolated composer project, so they get the latest
 // versions without conflicting with OroCommerce's locked dependencies.
 // PHPStan can still access the OroCommerce autoloader at OroRootDir/vendor/autoload.php.
-const QaToolsDir = OroRootDir + "/vendor/bin-dir/qa"
+const QaToolsDir = OroRootDir + "/vendor-bin/qa"
 
 // CustomBundlePath is the base path for custom bundles.
 const CustomBundlePath = "/src/CustomBundle"

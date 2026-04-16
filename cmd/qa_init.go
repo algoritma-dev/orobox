@@ -52,13 +52,14 @@ func runQaInitCommand(conf config.OroConfig) {
 	}
 
 	// 1. Install PHP packages using bamarni/composer-bin-plugin.
-	//    This creates an isolated composer project at vendor/bin-dir/qa/ that shares
+	//    This creates an isolated composer project at vendor-bin/qa/ that shares
 	//    the OroCommerce autoloader, so PHPStan can resolve all OroCommerce classes.
 	if needsComposerTools {
-		// 1a. Pre-create the bin namespace composer.json with allow-plugins configured,
-		//     so bamarni does not prompt interactively for plugin authorization.
+		// 1a. Ensure the bin namespace directory and a minimal composer.json exist,
+		//     then use 'composer -d' to set allow-plugins — this works even if the file
+		//     was previously created by bamarni without the required plugin authorizations.
 		initCmd := fmt.Sprintf(
-			`mkdir -p %s && [ -f %s/composer.json ] || printf '{"name":"orobox/qa-tools","config":{"allow-plugins":{"phpstan/extension-installer":true,"algoritma/php-coding-standards":true}}}' > %s/composer.json`,
+			`mkdir -p %s && [ -f %s/composer.json ] || printf '{"name":"orobox/qa-tools"}' > %s/composer.json`,
 			qaToolsDir, qaToolsDir, qaToolsDir,
 		)
 		initArgs := []string{"exec", "-T", "application", "sh", "-c", initCmd}
@@ -66,6 +67,15 @@ func runQaInitCommand(conf config.OroConfig) {
 			utils.PrintError(fmt.Sprintf("Failed to prepare QA tools namespace: %v", err))
 			return
 		}
+
+		for _, plugin := range []string{"phpstan/extension-installer", "algoritma/php-coding-standards"} {
+			configArgs := []string{"exec", "-T", "application", "composer", "-d", qaToolsDir, "config", "--no-plugins", "allow-plugins." + plugin, "true"}
+			if err := docker.RunComposeCommandSilently("Allowing plugin "+plugin+" in QA namespace...", configArgs...); err != nil {
+				utils.PrintError(fmt.Sprintf("Failed to allow plugin %s: %v", plugin, err))
+				return
+			}
+		}
+		utils.PrintSuccess("QA namespace configured.")
 
 		// 1b. Allow and install bamarni/composer-bin-plugin in OroRoot.
 		for _, step := range []struct {
