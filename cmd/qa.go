@@ -50,15 +50,15 @@ func init() {
 	qaCmd.Flags().BoolVar(&qaStylelint, "stylelint", false, "Run Stylelint")
 }
 
-// qaToolBinaryPaths maps tool names to their expected binary paths relative to the bundle working dir.
+// qaToolBinaryPaths maps tool names to their expected binary paths inside the isolated QA tools directory.
 var qaToolBinaryPaths = map[string]string{
-	"phpstan":       "vendor/bin/phpstan",
-	"rector":        "vendor/bin/rector",
-	"php-cs-fixer":  "vendor/bin/php-cs-fixer",
-	"twig-cs-fixer": "vendor/bin/twig-cs-fixer",
-	"eslint":        "node_modules/.bin/eslint",
-	"stylelint":     "node_modules/.bin/stylelint",
-	"stylelint-css": "node_modules/.bin/stylelint",
+	"phpstan":       config.QaToolsDir + "/vendor/bin/phpstan",
+	"rector":        config.QaToolsDir + "/vendor/bin/rector",
+	"php-cs-fixer":  config.QaToolsDir + "/vendor/bin/php-cs-fixer",
+	"twig-cs-fixer": config.QaToolsDir + "/vendor/bin/twig-cs-fixer",
+	"eslint":        config.QaToolsDir + "/node_modules/.bin/eslint",
+	"stylelint":     config.QaToolsDir + "/node_modules/.bin/stylelint",
+	"stylelint-css": config.QaToolsDir + "/node_modules/.bin/stylelint",
 }
 
 // checkMissingToolBinaries returns the names of tools whose binaries are not present in the container.
@@ -94,18 +94,32 @@ func checkMissingToolBinaries(workingDir string, tools []qaTool) []string {
 
 func runQaCommand() {
 	workingDir := config.GetBundleRootContainerPath()
+	qaToolsDir := config.QaToolsDir
 
 	jsTarget := "src/Resources/public"
 	twigTarget := "src/Resources/views"
 
+	// Shell expressions for bundle-first config resolution:
+	// use the bundle's own config if it exists, else fall back to the default generated in QaToolsDir.
+	phpstanConfig := fmt.Sprintf("$([ -f %s/phpstan.neon ] && echo %s/phpstan.neon || echo %s/phpstan.neon)", workingDir, workingDir, qaToolsDir)
+	rectorConfig := fmt.Sprintf("$([ -f %s/rector.php ] && echo %s/rector.php || echo %s/rector.php)", workingDir, workingDir, qaToolsDir)
+	phpCSFixerConfig := fmt.Sprintf("$([ -f %s/.php-cs-fixer.php ] && echo %s/.php-cs-fixer.php || echo %s/.php-cs-fixer.php)", workingDir, workingDir, qaToolsDir)
+	twigCSFixerConfig := fmt.Sprintf("$([ -f %s/.twig-cs-fixer.php ] && echo %s/.twig-cs-fixer.php || echo %s/.twig-cs-fixer.php)", workingDir, workingDir, qaToolsDir)
+	eslintConfig := fmt.Sprintf("$([ -f %s/.eslintrc.yml ] && echo %s/.eslintrc.yml || echo %s/.eslintrc.yml)", workingDir, workingDir, qaToolsDir)
+	eslintIgnore := fmt.Sprintf("$([ -f %s/.eslintignore ] && echo %s/.eslintignore || echo %s/.eslintignore)", workingDir, workingDir, qaToolsDir)
+	stylelintConfig := fmt.Sprintf("$([ -f %s/.stylelintrc.yml ] && echo %s/.stylelintrc.yml || echo %s/.stylelintrc.yml)", workingDir, workingDir, qaToolsDir)
+	stylelintIgnore := fmt.Sprintf("$([ -f %s/.stylelintignore ] && echo %s/.stylelintignore || echo %s/.stylelintignore)", workingDir, workingDir, qaToolsDir)
+	stylelintCSSConfig := fmt.Sprintf("$([ -f %s/.stylelintrc-css.yml ] && echo %s/.stylelintrc-css.yml || echo %s/.stylelintrc-css.yml)", workingDir, workingDir, qaToolsDir)
+	stylelintCSSIgnore := fmt.Sprintf("$([ -f %s/.stylelintignore-css ] && echo %s/.stylelintignore-css || echo %s/.stylelintignore-css)", workingDir, workingDir, qaToolsDir)
+
 	allTools := []qaTool{
-		{"phpstan", []string{"vendor/bin/phpstan", "analyze"}, qaPhpstan},
-		{"rector", []string{"vendor/bin/rector", "process"}, qaRector},
-		{"php-cs-fixer", []string{"vendor/bin/php-cs-fixer", "fix"}, qaPhpCSFixer},
-		{"twig-cs-fixer", []string{"vendor/bin/twig-cs-fixer", "lint", twigTarget, "--fix"}, qaTwigCSFixer},
-		{"eslint", []string{"npx", "--yes", "eslint", "--resolve-plugins-relative-to", workingDir, "--config", config.OroRootDir + "/.eslintrc.yml", "--ignore-path", config.OroRootDir + "/.eslintignore", "--fix", "--quiet", jsTarget}, qaEslint},
-		{"stylelint", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.{scss,less,sass,html}", "--config", config.OroRootDir + "/.stylelintrc.yml", "--ignore-path", config.OroRootDir + "/.stylelintignore", "--fix", "--quiet", "--allow-empty-input"}, qaStylelint},
-		{"stylelint-css", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.css", "--config", config.OroRootDir + "/.stylelintrc-css.yml", "--ignore-path", config.OroRootDir + "/.stylelintignore-css", "--fix", "--quiet", "--allow-empty-input"}, qaStylelint},
+		{"phpstan", []string{qaToolsDir + "/vendor/bin/phpstan", "analyze", "--configuration=" + phpstanConfig}, qaPhpstan},
+		{"rector", []string{qaToolsDir + "/vendor/bin/rector", "process", "--config=" + rectorConfig}, qaRector},
+		{"php-cs-fixer", []string{qaToolsDir + "/vendor/bin/php-cs-fixer", "fix", "--config=" + phpCSFixerConfig}, qaPhpCSFixer},
+		{"twig-cs-fixer", []string{qaToolsDir + "/vendor/bin/twig-cs-fixer", "lint", twigTarget, "--fix", "--config=" + twigCSFixerConfig}, qaTwigCSFixer},
+		{"eslint", []string{"npx", "--yes", "eslint", "--resolve-plugins-relative-to", qaToolsDir + "/node_modules", "--config", eslintConfig, "--ignore-path", eslintIgnore, "--fix", "--quiet", jsTarget}, qaEslint},
+		{"stylelint", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.{scss,less,sass,html}", "--config", stylelintConfig, "--ignore-path", stylelintIgnore, "--fix", "--quiet", "--allow-empty-input"}, qaStylelint},
+		{"stylelint-css", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.css", "--config", stylelintCSSConfig, "--ignore-path", stylelintCSSIgnore, "--fix", "--quiet", "--allow-empty-input"}, qaStylelint},
 	}
 
 	anyEnabled := false

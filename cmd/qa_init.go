@@ -36,7 +36,8 @@ func init() {
 }
 
 func runQaInitCommand(conf config.OroConfig) {
-	workingDir := config.GetBundleRootContainerPath()
+	oroRoot := config.OroRootDir
+	qaToolsDir := config.QaToolsDir // /var/www/oro/vendor/bin-dir/qa
 
 	needsPhpCodingStandards := config.IsQaToolEnabled("phpstan") || config.IsQaToolEnabled("rector") || config.IsQaToolEnabled("php-cs-fixer")
 	needsTwigCS := config.IsQaToolEnabled("twig-cs-fixer")
@@ -50,45 +51,69 @@ func runQaInitCommand(conf config.OroConfig) {
 		return
 	}
 
-	// 1. Configure Composer plugins and install PHP packages
+	// 1. Install PHP packages using bamarni/composer-bin-plugin.
+	//    This creates an isolated composer project at vendor/bin-dir/qa/ that shares
+	//    the OroCommerce autoloader, so PHPStan can resolve all OroCommerce classes.
 	if needsComposerTools {
-		for _, plugin := range []string{"phpstan/extension-installer", "algoritma/php-coding-standards"} {
-			configArgs := []string{"exec", "-w", workingDir}
-			if !isTTY() {
-				configArgs = append(configArgs, "-T")
-			}
-			configArgs = append(configArgs, "application", "composer", "config", "--no-plugins", "allow-plugins."+plugin, "true")
-			if err := docker.RunComposeCommandSilently("Configuring Composer plugin "+plugin, configArgs...); err != nil {
-				utils.PrintError(fmt.Sprintf("Failed to configure plugin %s: %v", plugin, err))
+		// 1a. Pre-create the bin namespace composer.json with allow-plugins configured,
+		//     so bamarni does not prompt interactively for plugin authorization.
+		initCmd := fmt.Sprintf(
+			`mkdir -p %s && [ -f %s/composer.json ] || printf '{"name":"orobox/qa-tools","config":{"allow-plugins":{"phpstan/extension-installer":true,"algoritma/php-coding-standards":true}}}' > %s/composer.json`,
+			qaToolsDir, qaToolsDir, qaToolsDir,
+		)
+		initArgs := []string{"exec", "-T", "application", "sh", "-c", initCmd}
+		if err := docker.RunComposeCommandSilently("Preparing QA tools namespace...", initArgs...); err != nil {
+			utils.PrintError(fmt.Sprintf("Failed to prepare QA tools namespace: %v", err))
+			return
+		}
+
+		// 1b. Allow and install bamarni/composer-bin-plugin in OroRoot.
+		for _, step := range []struct {
+			msg  string
+			args []string
+		}{
+			{
+				"Configuring bamarni/composer-bin-plugin...",
+				[]string{"exec", "-w", oroRoot, "-T", "application", "composer", "config", "--no-plugins", "allow-plugins.bamarni/composer-bin-plugin", "true"},
+			},
+			{
+				"Installing bamarni/composer-bin-plugin...",
+				[]string{"exec", "-w", oroRoot, "-T", "application", "composer", "require", "--dev", "--no-scripts", "bamarni/composer-bin-plugin"},
+			},
+		} {
+			if err := docker.RunComposeCommandSilently(step.msg, step.args...); err != nil {
+				utils.PrintError(fmt.Sprintf("%s failed: %v", step.msg, err))
 				return
 			}
 		}
-		utils.PrintSuccess("Composer plugins configured.")
+		utils.PrintSuccess("bamarni/composer-bin-plugin installed.")
 
+		// 1c. Install QA packages in the isolated 'qa' bin namespace.
+		//     Using ':*' forces the latest version, bypassing OroCommerce's locked constraints.
 		var composerPackages []string
 		if needsPhpCodingStandards {
-			composerPackages = append(composerPackages, "algoritma/php-coding-standards")
+			composerPackages = append(composerPackages, "algoritma/php-coding-standards:*")
 		}
 		if needsTwigCS {
-			composerPackages = append(composerPackages, "vincentlanglet/twig-cs-fixer")
+			composerPackages = append(composerPackages, "vincentlanglet/twig-cs-fixer:*")
 		}
 
-		composerArgs := []string{"exec", "-w", workingDir}
+		composerArgs := []string{"exec", "-w", oroRoot}
 		if !isTTY() {
 			composerArgs = append(composerArgs, "-T")
 		}
-		// Use bash -c to pipe 'yes' into composer to automatically accept file creation from the plugin
-		cmdLine := "yes y | composer require --dev " + strings.Join(composerPackages, " ")
+		// Pipe 'yes y' to auto-accept config file generation prompts from the plugin.
+		cmdLine := "yes y | composer bin qa require --dev " + strings.Join(composerPackages, " ")
 		composerArgs = append(composerArgs, "application", "bash", "-c", cmdLine)
 
-		if err := docker.RunComposeCommandSilently("Installing Composer QA packages...", composerArgs...); err != nil {
+		if err := docker.RunComposeCommand("Installing Composer QA packages...", composerArgs...); err != nil {
 			utils.PrintError(fmt.Sprintf("Failed to install Composer packages: %v", err))
 			return
 		}
 		utils.PrintSuccess("Composer QA packages installed.")
 	}
 
-	// 2. Install NPM/PNPM packages
+	// 2. Install JS packages in the QA tools namespace directory.
 	if needsJsTools {
 		versions := config.GetVersionsForOro(conf.OroVersion)
 		jsManager := "npm"
@@ -108,11 +133,10 @@ func runQaInitCommand(conf config.OroConfig) {
 			jsPackages = append(jsPackages, "stylelint@^15.11.0", "@oroinc/oro-stylelint-config")
 		}
 
-		npmArgs := []string{"exec", "-w", workingDir}
+		npmArgs := []string{"exec", "-w", qaToolsDir}
 		if !isTTY() {
 			npmArgs = append(npmArgs, "-T")
 		}
-
 		npmArgs = append(npmArgs, "application", jsManager, jsInstallCmd, jsSaveDevFlag)
 		npmArgs = append(npmArgs, jsPackages...)
 		if err := docker.RunComposeCommandSilently(fmt.Sprintf("Installing %s QA packages...", strings.ToUpper(jsManager)), npmArgs...); err != nil {
