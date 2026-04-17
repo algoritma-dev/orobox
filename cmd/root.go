@@ -18,7 +18,7 @@ var cfgFile string
 var Version = "1.0.0-rc1"
 
 var rootCmd = &cobra.Command{
-	Use:     "oro",
+	Use:     "orobox",
 	Short:   "CLI tool for OroCommerce environment setup",
 	Long:    `Orobox is a CLI tool to quickly configure an isolated development environment for OroCommerce bundles.`,
 	Version: Version,

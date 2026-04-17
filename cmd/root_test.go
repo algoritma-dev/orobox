@@ -9,7 +9,7 @@ func TestRootCommand(t *testing.T) {
 	rootCmd.SetOut(new(bytes.Buffer))
 	rootCmd.SetErr(new(bytes.Buffer))
 
-	if rootCmd.Use != "oro" {
+	if rootCmd.Use != "orobox" {
 		t.Errorf("Expected use 'oro', got %s", rootCmd.Use)
 	}
 
@@ -30,7 +30,7 @@ func TestVersionFlag(t *testing.T) {
 	}
 
 	got := buf.String()
-	want := "oro version " + Version + "\n"
+	want := "orobox version " + Version + "\n"
 	if got != want {
 		t.Errorf("Expected %q, got %q", want, got)
 	}
