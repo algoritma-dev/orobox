@@ -37,7 +37,7 @@ func init() {
 
 func runQaInitCommand(conf config.OroConfig) {
 	oroRoot := config.OroRootDir
-	qaToolsDir := config.QaToolsDir // /var/www/oro/vendor/bin-dir/qa
+	qaToolsDir := config.QaToolsDir
 
 	needsPhpCodingStandards := config.IsQaToolEnabled("phpstan") || config.IsQaToolEnabled("rector") || config.IsQaToolEnabled("php-cs-fixer")
 	needsTwigCS := config.IsQaToolEnabled("twig-cs-fixer")
@@ -52,7 +52,7 @@ func runQaInitCommand(conf config.OroConfig) {
 	}
 
 	// 1. Install PHP packages using bamarni/composer-bin-plugin.
-	//    This creates an isolated composer project at vendor-bin/qa/ that shares
+	//    This creates an isolated composer project at vendor-bin/ that shares
 	//    the OroCommerce autoloader, so PHPStan can resolve all OroCommerce classes.
 	if needsComposerTools {
 		// 1a. Ensure the bin namespace directory and a minimal composer.json exist,
@@ -143,11 +143,7 @@ func runQaInitCommand(conf config.OroConfig) {
 			jsPackages = append(jsPackages, "stylelint@^15.11.0", "@oroinc/oro-stylelint-config")
 		}
 
-		npmArgs := []string{"exec", "-w", qaToolsDir}
-		if !isTTY() {
-			npmArgs = append(npmArgs, "-T")
-		}
-		npmArgs = append(npmArgs, "application", jsManager, jsInstallCmd, jsSaveDevFlag)
+		npmArgs := []string{"exec", "-w", qaToolsDir, "-T", "application", jsManager, jsInstallCmd, jsSaveDevFlag}
 		npmArgs = append(npmArgs, jsPackages...)
 		if err := docker.RunComposeCommandSilently(fmt.Sprintf("Installing %s QA packages...", strings.ToUpper(jsManager)), npmArgs...); err != nil {
 			utils.PrintError(fmt.Sprintf("Failed to install %s packages: %v", jsManager, err))

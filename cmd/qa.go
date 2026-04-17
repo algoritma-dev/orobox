@@ -25,6 +25,7 @@ var (
 type qaTool struct {
 	name    string
 	args    []string
+	workDir string // optional override; uses workingDir if empty
 	enabled bool
 }
 
@@ -52,13 +53,13 @@ func init() {
 
 // qaToolBinaryPaths maps tool names to their expected binary paths inside the isolated QA tools directory.
 var qaToolBinaryPaths = map[string]string{
-	"phpstan":       config.QaToolsDir + "/vendor/bin/phpstan",
-	"rector":        config.QaToolsDir + "/vendor/bin/rector",
-	"php-cs-fixer":  config.QaToolsDir + "/vendor/bin/php-cs-fixer",
-	"twig-cs-fixer": config.QaToolsDir + "/vendor/bin/twig-cs-fixer",
-	"eslint":        config.QaToolsDir + "/node_modules/.bin/eslint",
-	"stylelint":     config.QaToolsDir + "/node_modules/.bin/stylelint",
-	"stylelint-css": config.QaToolsDir + "/node_modules/.bin/stylelint",
+	"phpstan":       config.OroRootDir + "/bin/phpstan",
+	"rector":        config.OroRootDir + "/bin/rector",
+	"php-cs-fixer":  config.OroRootDir + "/bin/php-cs-fixer",
+	"twig-cs-fixer": config.OroRootDir + "/bin/twig-cs-fixer",
+	"eslint":        config.OroRootDir + "/node_modules/.bin/eslint",
+	"stylelint":     config.OroRootDir + "/node_modules/.bin/stylelint",
+	"stylelint-css": config.OroRootDir + "/node_modules/.bin/stylelint",
 }
 
 // checkMissingToolBinaries returns the names of tools whose binaries are not present in the container.
@@ -103,23 +104,23 @@ func runQaCommand() {
 	// use the bundle's own config if it exists, else fall back to the default generated in QaToolsDir.
 	phpstanConfig := fmt.Sprintf("$([ -f %s/phpstan.neon ] && echo %s/phpstan.neon || echo %s/phpstan.neon)", workingDir, workingDir, qaToolsDir)
 	rectorConfig := fmt.Sprintf("$([ -f %s/rector.php ] && echo %s/rector.php || echo %s/rector.php)", workingDir, workingDir, qaToolsDir)
-	phpCSFixerConfig := fmt.Sprintf("$([ -f %s/.php-cs-fixer.php ] && echo %s/.php-cs-fixer.php || echo %s/.php-cs-fixer.php)", workingDir, workingDir, qaToolsDir)
+	phpCSFixerConfig := fmt.Sprintf("$([ -f %s/.php-cs-fixer.dist.php ] && echo %s/.php-cs-fixer.dist.php || echo %s/.php-cs-fixer.dist.php)", workingDir, workingDir, qaToolsDir)
 	twigCSFixerConfig := fmt.Sprintf("$([ -f %s/.twig-cs-fixer.php ] && echo %s/.twig-cs-fixer.php || echo %s/.twig-cs-fixer.php)", workingDir, workingDir, qaToolsDir)
-	eslintConfig := fmt.Sprintf("$([ -f %s/.eslintrc.yml ] && echo %s/.eslintrc.yml || echo %s/.eslintrc.yml)", workingDir, workingDir, qaToolsDir)
-	eslintIgnore := fmt.Sprintf("$([ -f %s/.eslintignore ] && echo %s/.eslintignore || echo %s/.eslintignore)", workingDir, workingDir, qaToolsDir)
-	stylelintConfig := fmt.Sprintf("$([ -f %s/.stylelintrc.yml ] && echo %s/.stylelintrc.yml || echo %s/.stylelintrc.yml)", workingDir, workingDir, qaToolsDir)
-	stylelintIgnore := fmt.Sprintf("$([ -f %s/.stylelintignore ] && echo %s/.stylelintignore || echo %s/.stylelintignore)", workingDir, workingDir, qaToolsDir)
-	stylelintCSSConfig := fmt.Sprintf("$([ -f %s/.stylelintrc-css.yml ] && echo %s/.stylelintrc-css.yml || echo %s/.stylelintrc-css.yml)", workingDir, workingDir, qaToolsDir)
-	stylelintCSSIgnore := fmt.Sprintf("$([ -f %s/.stylelintignore-css ] && echo %s/.stylelintignore-css || echo %s/.stylelintignore-css)", workingDir, workingDir, qaToolsDir)
+	eslintConfig := fmt.Sprintf("$([ -f %s/.eslintrc.yml ] && echo %s/.eslintrc.yml || echo %s/.eslintrc.yml)", workingDir, workingDir, config.OroRootDir)
+	eslintIgnore := fmt.Sprintf("$([ -f %s/.eslintignore ] && echo %s/.eslintignore || echo %s/.eslintignore)", workingDir, workingDir, config.OroRootDir)
+	stylelintConfig := fmt.Sprintf("$([ -f %s/.stylelintrc.yml ] && echo %s/.stylelintrc.yml || echo %s/.stylelintrc.yml)", workingDir, workingDir, config.OroRootDir)
+	stylelintIgnore := fmt.Sprintf("$([ -f %s/.stylelintignore ] && echo %s/.stylelintignore || echo %s/.stylelintignore)", workingDir, workingDir, config.OroRootDir)
+	stylelintCSSConfig := fmt.Sprintf("$([ -f %s/.stylelintrc-css.yml ] && echo %s/.stylelintrc-css.yml || echo %s/.stylelintrc-css.yml)", workingDir, workingDir, config.OroRootDir)
+	stylelintCSSIgnore := fmt.Sprintf("$([ -f %s/.stylelintignore-css ] && echo %s/.stylelintignore-css || echo %s/.stylelintignore-css)", workingDir, workingDir, config.OroRootDir)
 
 	allTools := []qaTool{
-		{"phpstan", []string{qaToolsDir + "/vendor/bin/phpstan", "analyze", "--configuration=" + phpstanConfig}, qaPhpstan},
-		{"rector", []string{qaToolsDir + "/vendor/bin/rector", "process", "--config=" + rectorConfig}, qaRector},
-		{"php-cs-fixer", []string{qaToolsDir + "/vendor/bin/php-cs-fixer", "fix", "--config=" + phpCSFixerConfig}, qaPhpCSFixer},
-		{"twig-cs-fixer", []string{qaToolsDir + "/vendor/bin/twig-cs-fixer", "lint", twigTarget, "--fix", "--config=" + twigCSFixerConfig}, qaTwigCSFixer},
-		{"eslint", []string{"npx", "--yes", "eslint", "--resolve-plugins-relative-to", qaToolsDir + "/node_modules", "--config", eslintConfig, "--ignore-path", eslintIgnore, "--fix", "--quiet", jsTarget}, qaEslint},
-		{"stylelint", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.{scss,less,sass,html}", "--config", stylelintConfig, "--ignore-path", stylelintIgnore, "--fix", "--quiet", "--allow-empty-input"}, qaStylelint},
-		{"stylelint-css", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.css", "--config", stylelintCSSConfig, "--ignore-path", stylelintCSSIgnore, "--fix", "--quiet", "--allow-empty-input"}, qaStylelint},
+		{"phpstan", []string{config.OroRootDir + "/bin/phpstan", "analyze", "--configuration=" + phpstanConfig, "--autoload-file=" + config.OroRootDir + "/vendor/autoload.php"}, "", qaPhpstan},
+		{"rector", []string{config.OroRootDir + "/bin/rector", "process", "--config=" + rectorConfig}, config.OroRootDir, qaRector},
+		{"php-cs-fixer", []string{config.OroRootDir + "/bin/php-cs-fixer", "fix", "--config=" + phpCSFixerConfig}, "", qaPhpCSFixer},
+		{"twig-cs-fixer", []string{config.OroRootDir + "/bin/twig-cs-fixer", "lint", twigTarget, "--fix", "--config=" + twigCSFixerConfig}, "", qaTwigCSFixer},
+		{"eslint", []string{"npx", "--yes", "eslint", "--resolve-plugins-relative-to", qaToolsDir + "/node_modules", "--config", eslintConfig, "--ignore-path", eslintIgnore, "--fix", "--quiet", jsTarget}, "", qaEslint},
+		{"stylelint", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.{scss,less,sass,html}", "--config", stylelintConfig, "--ignore-path", stylelintIgnore, "--fix", "--quiet", "--allow-empty-input"}, "", qaStylelint},
+		{"stylelint-css", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.css", "--config", stylelintCSSConfig, "--ignore-path", stylelintCSSIgnore, "--fix", "--quiet", "--allow-empty-input"}, "", qaStylelint},
 	}
 
 	anyEnabled := false
@@ -161,7 +162,11 @@ func runQaCommand() {
 		}
 		// Wrap each command with an echo for better visibility
 		compositeCmd.WriteString(fmt.Sprintf("echo '--- Running %s ---' && ", t.name))
-		compositeCmd.WriteString(strings.Join(t.args, " "))
+		cmd := strings.Join(t.args, " ")
+		if t.workDir != "" {
+			cmd = fmt.Sprintf("(cd %s && %s)", t.workDir, cmd)
+		}
+		compositeCmd.WriteString(cmd)
 	}
 
 	args := []string{"exec"}
