@@ -65,6 +65,12 @@ commands:
     command: "php bin/console oro:test:run"
     description: "Runs the Shippy Pro tests suite"
     service: "application"
+composer:
+  repositories:
+    - type: vcs
+      url: https://github.com/my-org/private-repo.git
+    - type: composer
+      url: https://repo.packagist.com/my-org/
 ```
 
 ### Configuration Fields
@@ -96,6 +102,8 @@ commands:
     - `command`: (string) The actual command to execute (e.g., `php bin/console oro:test:run`).
     - `description`: (string) Description of the command (displayed in help).
     - `service`: (string, optional) Default service to run the command in (e.g., `application`).
+- `composer`: (map) Composer-specific settings for the bundle.
+    - `repositories`: (list) Additional Composer repositories to register in the OroCommerce project during installation. Accepts the same format as Composer's [`repositories`](https://getcomposer.org/doc/05-repositories.md) field (VCS, Composer, path, package, etc.). These are merged with any existing repositories in the project's `composer.json`. Required when the bundle depends on packages hosted in private repositories.
 
 *Note: Versions of PHP, PostgreSQL, Node.js, and other components are automatically determined by the `oro_version` setting and cannot be changed manually.*
 

@@ -167,12 +167,26 @@ func performInstallation() bool {
 	// where vendor-oro is already mounted as the vendor directory).
 	if bundlePackageName := getBundlePackageName(); bundlePackageName != "" {
 		bundleNamespace := config.GetBundlePath()
-		requireCmd := []string{"run", "--rm", "-T", "application", "bash", "-c",
-			fmt.Sprintf(
-				`COMPOSER_ALLOW_SUPERUSER=1 composer config repositories.bundle '{"type":"path","url":"bundles/%s","options":{"symlink":true}}' && COMPOSER_ALLOW_SUPERUSER=1 composer require "%s:@dev" --no-interaction --no-scripts`,
-				bundleNamespace, bundlePackageName,
-			),
+		bashCmd := fmt.Sprintf(
+			`COMPOSER_ALLOW_SUPERUSER=1 composer config repositories.bundle '{"type":"path","url":"bundles/%s","options":{"symlink":true}}'`,
+			bundleNamespace,
+		)
+		for i, repo := range conf.Composer.Repositories {
+			repoJSON, err := json.Marshal(repo)
+			if err != nil {
+				utils.PrintWarning(fmt.Sprintf("Could not serialize composer repository %d: %v", i, err))
+				continue
+			}
+			bashCmd += fmt.Sprintf(
+				` && COMPOSER_ALLOW_SUPERUSER=1 composer config repositories.orobox_%d '%s'`,
+				i, string(repoJSON),
+			)
 		}
+		bashCmd += fmt.Sprintf(
+			` && COMPOSER_ALLOW_SUPERUSER=1 composer require "%s:@dev" --no-interaction --no-scripts`,
+			bundlePackageName,
+		)
+		requireCmd := []string{"run", "--rm", "-T", "application", "bash", "-c", bashCmd}
 		if err := docker.RunComposeCommandSilently("Installing bundle into vendor...", requireCmd...); err != nil {
 			utils.PrintWarning(fmt.Sprintf("Bundle installation failed: %v", err))
 		}

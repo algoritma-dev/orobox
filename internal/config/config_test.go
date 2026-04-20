@@ -151,6 +151,42 @@ commands:
 	}
 }
 
+func TestParseConfigWithComposerRepositories(t *testing.T) {
+	yamlData := `
+namespace: MyNamespace
+oro_version: "6.1"
+domains:
+  - host: example.com
+composer:
+  repositories:
+    - type: vcs
+      url: https://github.com/private/repo.git
+    - type: composer
+      url: https://repo.packagist.com/my-org/
+`
+	config, err := ParseConfig([]byte(yamlData))
+	if err != nil {
+		t.Fatalf("ParseConfig failed: %v", err)
+	}
+
+	if len(config.Composer.Repositories) != 2 {
+		t.Fatalf("Expected 2 repositories, got %d", len(config.Composer.Repositories))
+	}
+
+	repo0 := config.Composer.Repositories[0]
+	if repo0["type"] != "vcs" {
+		t.Errorf("Expected repo[0].type 'vcs', got %v", repo0["type"])
+	}
+	if repo0["url"] != "https://github.com/private/repo.git" {
+		t.Errorf("Expected repo[0].url 'https://github.com/private/repo.git', got %v", repo0["url"])
+	}
+
+	repo1 := config.Composer.Repositories[1]
+	if repo1["type"] != "composer" {
+		t.Errorf("Expected repo[1].type 'composer', got %v", repo1["type"])
+	}
+}
+
 func TestParseConfigWithDepends(t *testing.T) {
 	yamlData := `
 namespace: MyNamespace

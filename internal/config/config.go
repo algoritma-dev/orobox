@@ -56,6 +56,11 @@ type CommandConfig struct {
 	Depends     []string `yaml:"depends" mapstructure:"depends"`
 }
 
+// ComposerConfig holds Composer-specific configuration for the bundle.
+type ComposerConfig struct {
+	Repositories []map[string]interface{} `yaml:"repositories" mapstructure:"repositories"`
+}
+
 // OroVersions defines the versions of components for a specific OroCommerce version.
 type OroVersions struct {
 	PHP           string
@@ -139,6 +144,7 @@ type OroConfig struct {
 	Services   ServicesConfig  `yaml:"services" mapstructure:"services"`
 	Test       TestConfig      `yaml:"test" mapstructure:"test"`
 	Commands   []CommandConfig `yaml:"commands" mapstructure:"commands"`
+	Composer   ComposerConfig  `yaml:"composer" mapstructure:"composer"`
 }
 
 // Install types for OroCommerce.
