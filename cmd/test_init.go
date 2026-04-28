@@ -96,6 +96,13 @@ var testInitCmd = &cobra.Command{
 			return
 		}
 
+		uuidExtensionSQL := "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"
+		uuidExtensionArgs := []string{"exec", "-T", "db-test", "psql", "-U", dbUser, "-d", "postgres", "-c", uuidExtensionSQL}
+		if err := docker.RunComposeCommandSilently("Creating uuid extension...", uuidExtensionArgs...); err != nil {
+			utils.PrintWarning(fmt.Sprintf("failed to create uuid extension: %v", err))
+			return
+		}
+
 		clearCacheCmd := []string{"run", "--rm", "-T", "application", "bash", "-c", "rm -rf var/cache/test"}
 		if err := docker.RunComposeCommandSilently("Clearing cache for test environment...", clearCacheCmd...); err != nil {
 			utils.PrintWarning(fmt.Sprintf("failed to clear cache: %v", err))
