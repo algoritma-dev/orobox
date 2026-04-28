@@ -97,7 +97,7 @@ var testInitCmd = &cobra.Command{
 		}
 
 		uuidExtensionSQL := "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"
-		uuidExtensionArgs := []string{"exec", "-T", "db-test", "psql", "-U", dbUser, "-d", "postgres", "-c", uuidExtensionSQL}
+		uuidExtensionArgs := []string{"exec", "-T", "db-test", "psql", "-U", dbUser, "-d", dbName, "-c", uuidExtensionSQL}
 		if err := docker.RunComposeCommandSilently("Creating uuid extension...", uuidExtensionArgs...); err != nil {
 			utils.PrintWarning(fmt.Sprintf("failed to create uuid extension: %v", err))
 			return
