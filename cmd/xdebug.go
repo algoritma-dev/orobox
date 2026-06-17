@@ -39,7 +39,7 @@ var xdebugCmd = &cobra.Command{
 		if xdebugCron {
 			err = applyXdebugHotfix(enable, "cron", false, false)
 		} else if xdebugConsumer {
-			err = applyXdebugHotfix(enable, "consumer", false, true)
+			err = applyXdebugHotfix(enable, "consumer", false, false)
 		} else {
 			if err = applyXdebugHotfix(enable, "application", false, false); err == nil {
 				err = applyXdebugHotfix(enable, "php-fpm-app", true, false)
@@ -72,9 +72,7 @@ func applyXdebugHotfix(enable bool, service string, reloadPhpFpm bool, restartSe
 
 	// Move file if it exists
 	execArgs := []string{"exec", "-u", "root"}
-	if !isTTY() {
-		execArgs = append(execArgs, "-T")
-	}
+	execArgs = append(execArgs, "-T")
 	execArgs = append(execArgs, service, "bash", "-c", fmt.Sprintf("if [ -f %s ]; then mv %s %s; fi", source, source, target))
 	err := docker.RunComposeCommandSilently("Applying Xdebug patch...", execArgs...)
 	if err != nil {
