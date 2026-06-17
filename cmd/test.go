@@ -58,7 +58,7 @@ func runTestCommand() {
 
 	var args []string
 
-	args = append(args, "run", "--rm", "--no-deps")
+	args = append(args, "exec")
 
 	// Check if we have a TTY
 	if !isTTY() {

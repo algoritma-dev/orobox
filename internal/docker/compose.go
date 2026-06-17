@@ -99,6 +99,9 @@ func GetDatabaseTestCredentials() (user string, pass string, dbname string, comp
 func GetDatabaseCredentialsFor(test bool) (user string, pass string, dbname string, composeServiceName string) {
 	internalDir := config.GetInternalDir()
 	envFile := filepath.Join(internalDir, ".env")
+	if test {
+		envFile = filepath.Join(internalDir, ".env.test")
+	}
 
 	// Default values if anything fails
 	user = "oro_db_user"
@@ -121,14 +124,8 @@ func GetDatabaseCredentialsFor(test bool) (user string, pass string, dbname stri
 		if p := v.GetString("ORO_DB_PASSWORD"); p != "" {
 			pass = p
 		}
-		if test {
-			if db := v.GetString("ORO_DB_NAME_TEST"); db != "" {
-				dbname = db
-			}
-		} else {
-			if db := v.GetString("ORO_DB_NAME"); db != "" {
-				dbname = db
-			}
+		if db := v.GetString("ORO_DB_NAME"); db != "" {
+			dbname = db
 		}
 	}
 
@@ -139,14 +136,8 @@ func GetDatabaseCredentialsFor(test bool) (user string, pass string, dbname stri
 	if p := os.Getenv("ORO_DB_PASSWORD"); p != "" {
 		pass = p
 	}
-	if test {
-		if db := os.Getenv("ORO_DB_NAME_TEST"); db != "" {
-			dbname = db
-		}
-	} else {
-		if db := os.Getenv("ORO_DB_NAME"); db != "" {
-			dbname = db
-		}
+	if db := os.Getenv("ORO_DB_NAME"); db != "" {
+		dbname = db
 	}
 
 	return user, pass, dbname, composeServiceName

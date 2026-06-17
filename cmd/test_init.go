@@ -115,6 +115,10 @@ var testInitCmd = &cobra.Command{
 		}
 
 		docker.SetDatabaseInitializedCache(true, true)
+		if err := docker.EnsureServicesRunning([]string{"application"}); err != nil {
+			utils.PrintError(fmt.Sprintf("failed to start test application container: %v", err))
+			return
+		}
 		utils.PrintSuccess("Test environment initialized successfully!")
 
 		utils.PrintTitle("Test Database Connection (e.g. PhpStorm):")

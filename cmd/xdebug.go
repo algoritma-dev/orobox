@@ -44,13 +44,19 @@ var xdebugCmd = &cobra.Command{
 
 		// 1. Hot-patch running containers
 		if xdebugDev {
-			applyXdebugHotfix(enable, "php-fpm-app", true)
-			applyXdebugHotfix(enable, "application", false)
+			docker.SetIncludeTestFiles(false)
+			applyXdebugHotfix(enable, "application", false, false)
+			applyXdebugHotfix(enable, "php-fpm-app", true, false)
+			applyXdebugHotfix(enable, "cron", false, false)
+			applyXdebugHotfix(enable, "consumer", false, true)
 		}
 
 		if xdebugTest {
 			docker.SetIncludeTestFiles(true)
-			applyXdebugHotfix(enable, "application", false)
+			if err := docker.EnsureServicesRunning([]string{"application"}); err != nil {
+				utils.PrintWarning(fmt.Sprintf("failed to ensure test application is running: %v", err))
+			}
+			applyXdebugHotfix(enable, "application", false, false)
 		}
 
 		utils.PrintSuccess(fmt.Sprintf("Xdebug %s completed successfully!", action))
@@ -63,7 +69,7 @@ func init() {
 	xdebugCmd.Flags().BoolVar(&xdebugTest, "test", false, "Apply to test environment")
 }
 
-func applyXdebugHotfix(enable bool, service string, reloadFpm bool) {
+func applyXdebugHotfix(enable bool, service string, reloadPhpFpm bool, restartService bool) {
 	source := "/usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini"
 	target := "/usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini.disabled"
 
@@ -84,7 +90,7 @@ func applyXdebugHotfix(enable bool, service string, reloadFpm bool) {
 		return
 	}
 
-	if reloadFpm {
+	if reloadPhpFpm {
 		// Signal FPM to reload configuration
 		reloadArgs := []string{"exec", "-u", "root"}
 		if !isTTY() {
@@ -92,6 +98,10 @@ func applyXdebugHotfix(enable bool, service string, reloadFpm bool) {
 		}
 		reloadArgs = append(reloadArgs, service, "kill", "-USR2", "1")
 		_ = docker.RunComposeCommandSilently("Reloading PHP-FPM...", reloadArgs...)
+	}
+
+	if restartService {
+		_ = docker.RunComposeCommandSilently(fmt.Sprintf("Restarting %s...", service), "restart", service)
 	}
 }
 
@@ -103,13 +113,17 @@ func showXdebugStatus() {
 
 	// 2. Dev environment status
 	if showAll || xdebugDev {
+		docker.SetIncludeTestFiles(false)
+		checkXdebugStatus("application", "Development (application)")
 		checkXdebugStatus("php-fpm-app", "Development (php-fpm-app)")
+		checkXdebugStatus("cron", "Development (cron)")
+		checkXdebugStatus("consumer", "Development (consumer)")
 	}
 
 	// 3. Test environment status
 	if showAll || xdebugTest {
 		docker.SetIncludeTestFiles(true)
-		checkXdebugStatus("application", "Test (application with test override)")
+		checkXdebugStatus("application", "Test (application-test)")
 	}
 }
 

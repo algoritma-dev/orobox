@@ -169,7 +169,7 @@ func TestTestCommand(t *testing.T) {
 
 	// 2nd call: actual test execution
 	lastCall := calls[1]
-	if lastCall[0] != "run" || !contains(lastCall, "application") {
+	if lastCall[0] != "exec" || !contains(lastCall, "application") {
 		t.Errorf("Expected exec application, got %v", lastCall)
 	}
 }
@@ -399,7 +399,7 @@ func TestTestInitCommand(t *testing.T) {
 		t.Fatalf("rootCmd.Execute() failed: %v", err)
 	}
 
-	// Expected calls: up, drop (psql), create, cache clear, install
+	// Expected calls: up, drop (psql), create, cache clear, install, ensure application
 	if len(calls) < 5 {
 		t.Errorf("Expected at least 5 calls to RunComposeCommand, got %d: %v", len(calls), calls)
 		return

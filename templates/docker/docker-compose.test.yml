@@ -12,15 +12,12 @@ services:
   db-test:
     image: "postgres:{{.PostgresVersion}}"
     command: [ "postgres", "-c", "max_locks_per_transaction=1024" ]
+    env_file:
+      - .env.test
     labels:
       com.symfony.server.service-prefix: ORO_DB
     ports:
       - "5433:5432"
-    environment:
-      POSTGRES_DB: ${ORO_DB_NAME_TEST:-oro_db_test}
-      POSTGRES_USER: ${ORO_DB_USER:-oro_db_user}
-      POSTGRES_PASSWORD: ${ORO_DB_PASSWORD:-oro_db_pass}
-      POSTGRES_ROOT_PASSWORD: ${ORO_DB_ROOT_PASSWORD:-oro_db_pass}
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB" ]
       start_period: 60s
