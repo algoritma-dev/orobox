@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -359,6 +360,61 @@ func contains(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+func TestXdebugConsumerUsesNonTTYExecAndRestarts(t *testing.T) {
+	oldRunSilently := docker.RunComposeCommandSilently
+	defer func() { docker.RunComposeCommandSilently = oldRunSilently }()
+
+	var calls [][]string
+	docker.RunComposeCommandSilently = func(_ string, args ...string) error {
+		calls = append(calls, args)
+		return nil
+	}
+
+	rootCmd.SetArgs([]string{"xdebug", "on", "--consumer"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("rootCmd.Execute() failed: %v", err)
+	}
+
+	if len(calls) != 2 {
+		t.Fatalf("Expected 2 calls to RunComposeCommandSilently, got %d: %v", len(calls), calls)
+	}
+
+	patchCall := calls[0]
+	if !contains(patchCall, "exec") || !contains(patchCall, "-T") || !contains(patchCall, "consumer") {
+		t.Errorf("Expected non-TTY exec for consumer patch, got %v", patchCall)
+	}
+
+	restartCall := calls[1]
+	if len(restartCall) != 2 || restartCall[0] != "restart" || restartCall[1] != "consumer" {
+		t.Errorf("Expected consumer restart, got %v", restartCall)
+	}
+}
+
+func TestXdebugConsumerReturnsErrorWhenPatchFails(t *testing.T) {
+	oldRunSilently := docker.RunComposeCommandSilently
+	defer func() { docker.RunComposeCommandSilently = oldRunSilently }()
+
+	var calls [][]string
+	docker.RunComposeCommandSilently = func(_ string, args ...string) error {
+		calls = append(calls, args)
+		return errors.New("cannot attach stdin to a TTY-enabled container because stdin is not a terminal")
+	}
+
+	rootCmd.SetArgs([]string{"xdebug", "on", "--consumer"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("Expected xdebug consumer command to fail")
+	}
+
+	if !strings.Contains(err.Error(), "failed to patch consumer") {
+		t.Fatalf("Expected consumer patch error, got %v", err)
+	}
+
+	if len(calls) != 1 {
+		t.Fatalf("Expected only patch call before failure, got %d: %v", len(calls), calls)
+	}
 }
 
 func TestTestInitCommand(t *testing.T) {

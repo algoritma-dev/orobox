@@ -3,7 +3,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/algoritma-dev/orobox/internal/docker"
@@ -13,63 +12,56 @@ import (
 )
 
 var (
-	xdebugDev  bool
-	xdebugTest bool
+	xdebugConsumer bool
+	xdebugCron     bool
 )
 
 var xdebugCmd = &cobra.Command{
 	Use:   "xdebug [on|off|status]",
-	Short: "Enable, disable or show Xdebug status in development and test environments",
+	Short: "Enable, disable or show Xdebug status",
 	Args:  cobra.ExactArgs(1),
-	Run: func(_ *cobra.Command, args []string) {
+	RunE: func(_ *cobra.Command, args []string) error {
 		docker.EnsureDockerCompose()
 		action := args[0]
 		if action == "status" {
 			showXdebugStatus()
-			return
+			return nil
 		}
 
 		if action != "on" && action != "off" {
 			utils.PrintError("Action must be 'on', 'off' or 'status'")
-			os.Exit(1)
+			return fmt.Errorf("invalid xdebug action: %s", action)
 		}
 
 		enable := action == "on"
 
-		// Default to both if none specified
-		if !xdebugDev && !xdebugTest {
-			xdebugDev = true
-			xdebugTest = true
-		}
-
-		// 1. Hot-patch running containers
-		if xdebugDev {
-			docker.SetIncludeTestFiles(false)
-			applyXdebugHotfix(enable, "application", false, false)
-			applyXdebugHotfix(enable, "php-fpm-app", true, false)
-			applyXdebugHotfix(enable, "cron", false, false)
-			applyXdebugHotfix(enable, "consumer", false, true)
-		}
-
-		if xdebugTest {
-			docker.SetIncludeTestFiles(true)
-			if err := docker.EnsureServicesRunning([]string{"application"}); err != nil {
-				utils.PrintWarning(fmt.Sprintf("failed to ensure test application is running: %v", err))
+		var err error
+		if xdebugCron {
+			err = applyXdebugHotfix(enable, "cron", false, false)
+		} else if xdebugConsumer {
+			err = applyXdebugHotfix(enable, "consumer", false, true)
+		} else {
+			if err = applyXdebugHotfix(enable, "application", false, false); err == nil {
+				err = applyXdebugHotfix(enable, "php-fpm-app", true, false)
 			}
-			applyXdebugHotfix(enable, "application", false, false)
+		}
+		if err != nil {
+			utils.PrintError(fmt.Sprintf("Xdebug %s failed: %v", action, err))
+			return err
 		}
 
 		utils.PrintSuccess(fmt.Sprintf("Xdebug %s completed successfully!", action))
+		return nil
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(xdebugCmd)
-	xdebugCmd.Flags().BoolVar(&xdebugDev, "dev", false, "Apply to development environment")
-	xdebugCmd.Flags().BoolVar(&xdebugTest, "test", false, "Apply to test environment")
+	xdebugCmd.Flags().BoolVar(&xdebugConsumer, "consumer", false, "Apply to consumer service")
+	xdebugCmd.Flags().BoolVar(&xdebugCron, "cron", false, "Apply to cron service")
 }
 
-func applyXdebugHotfix(enable bool, service string, reloadPhpFpm bool, restartService bool) {
+func applyXdebugHotfix(enable bool, service string, reloadPhpFpm bool, restartService bool) error {
 	source := "/usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini"
 	target := "/usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini.disabled"
 
@@ -86,8 +78,7 @@ func applyXdebugHotfix(enable bool, service string, reloadPhpFpm bool, restartSe
 	execArgs = append(execArgs, service, "bash", "-c", fmt.Sprintf("if [ -f %s ]; then mv %s %s; fi", source, source, target))
 	err := docker.RunComposeCommandSilently("Applying Xdebug patch...", execArgs...)
 	if err != nil {
-		utils.PrintWarning(fmt.Sprintf("Failed to patch %s: %v", service, err))
-		return
+		return fmt.Errorf("failed to patch %s: %w", service, err)
 	}
 
 	if reloadPhpFpm {
@@ -97,34 +88,28 @@ func applyXdebugHotfix(enable bool, service string, reloadPhpFpm bool, restartSe
 			reloadArgs = append(reloadArgs, "-T")
 		}
 		reloadArgs = append(reloadArgs, service, "kill", "-USR2", "1")
-		_ = docker.RunComposeCommandSilently("Reloading PHP-FPM...", reloadArgs...)
+		if err := docker.RunComposeCommandSilently("Reloading PHP-FPM...", reloadArgs...); err != nil {
+			return fmt.Errorf("failed to reload %s: %w", service, err)
+		}
 	}
 
 	if restartService {
-		_ = docker.RunComposeCommandSilently(fmt.Sprintf("Restarting %s...", service), "restart", service)
+		if err := docker.RunComposeCommandSilently(fmt.Sprintf("Restarting %s...", service), "restart", service); err != nil {
+			return fmt.Errorf("failed to restart %s: %w", service, err)
+		}
 	}
+
+	return nil
 }
 
 func showXdebugStatus() {
 	utils.StartLoader("Checking Xdebug status...")
 	defer utils.StopLoader()
 
-	showAll := !xdebugDev && !xdebugTest
-
-	// 2. Dev environment status
-	if showAll || xdebugDev {
-		docker.SetIncludeTestFiles(false)
-		checkXdebugStatus("application", "Development (application)")
-		checkXdebugStatus("php-fpm-app", "Development (php-fpm-app)")
-		checkXdebugStatus("cron", "Development (cron)")
-		checkXdebugStatus("consumer", "Development (consumer)")
-	}
-
-	// 3. Test environment status
-	if showAll || xdebugTest {
-		docker.SetIncludeTestFiles(true)
-		checkXdebugStatus("application", "Test (application-test)")
-	}
+	checkXdebugStatus("application", "Application")
+	checkXdebugStatus("php-fpm-app", "PHP-FPM")
+	checkXdebugStatus("cron", "Cron")
+	checkXdebugStatus("consumer", "Consumer")
 }
 
 func checkXdebugStatus(service, label string) {

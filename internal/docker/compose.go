@@ -23,6 +23,36 @@ import (
 
 var memoizedComposeCmd []string
 
+func shellQuoteArg(arg string) string {
+	if arg == "" {
+		return "''"
+	}
+	if strings.IndexFunc(arg, func(r rune) bool {
+		isAlphaNumeric := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9'
+		return !(isAlphaNumeric || strings.ContainsRune("_+-=./:@%", r))
+	}) == -1 {
+		return arg
+	}
+	return "'" + strings.ReplaceAll(arg, "'", "'\\''") + "'"
+}
+
+// FormatCommand returns a shell-friendly representation of a command.
+func FormatCommand(name string, args []string) string {
+	parts := make([]string, 0, len(args)+1)
+	parts = append(parts, shellQuoteArg(name))
+	for _, arg := range args {
+		parts = append(parts, shellQuoteArg(arg))
+	}
+	return strings.Join(parts, " ")
+}
+
+// PrintDebugCommand prints the command to be executed when debug mode is enabled.
+func PrintDebugCommand(name string, args []string) {
+	if viper.GetBool("debug") {
+		utils.PrintInfo("Running command: " + FormatCommand(name, args))
+	}
+}
+
 // GetComposeCommand returns the docker compose command to use, preferring
 // the integrated 'docker compose' when available and falling back to
 // the legacy 'docker-compose'.
@@ -400,6 +430,7 @@ var RunComposeCommandSilently = func(message string, args ...string) error {
 	cmd := exec.Command(composeCmd[0], argsToRun...)
 
 	if debug {
+		PrintDebugCommand(composeCmd[0], argsToRun)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		return cmd.Run()
@@ -458,6 +489,7 @@ var RunSetupComposeCommandSilently = func(message string, args ...string) error 
 	cmd := exec.Command(composeCmd[0], argsToRun...)
 
 	if debug {
+		PrintDebugCommand(composeCmd[0], argsToRun)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		return cmd.Run()
@@ -503,6 +535,7 @@ var RunComposeCommand = func(message string, args ...string) error {
 	argsToRun = append(argsToRun, args...)
 
 	cmd := exec.Command(composeCmd[0], argsToRun...)
+	PrintDebugCommand(composeCmd[0], argsToRun)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	var stderrBuf bytes.Buffer
@@ -521,7 +554,9 @@ var RunComposeCommand = func(message string, args ...string) error {
 // It returns true if any image was updated.
 func PullAllLocalOrobotImages() (bool, error) {
 	// Filter for our images and get their IDs
-	cmd := exec.Command("docker", "images", "--filter", "reference=algoritmadev/orobox:*", "--format", "{{.Repository}}:{{.Tag}} {{.ID}}", "--no-trunc")
+	args := []string{"images", "--filter", "reference=algoritmadev/orobox:*", "--format", "{{.Repository}}:{{.Tag}} {{.ID}}", "--no-trunc"}
+	cmd := exec.Command("docker", args...)
+	PrintDebugCommand("docker", args)
 	output, err := cmd.Output()
 	if err != nil {
 		return false, err
@@ -596,6 +631,7 @@ func PullAllLocalOrobotImages() (bool, error) {
 			defer func() { <-semaphore }()
 			pullCmd := exec.Command("docker", "pull", imageName)
 			if debug {
+				PrintDebugCommand("docker", []string{"pull", imageName})
 				pullCmd.Stdout = os.Stdout
 				pullCmd.Stderr = os.Stderr
 			}
@@ -603,7 +639,8 @@ func PullAllLocalOrobotImages() (bool, error) {
 		}(img)
 	}
 	wg.Wait()
-	cmdAfter := exec.Command("docker", "images", "--filter", "reference=algoritmadev/orobox:*", "--format", "{{.Repository}}:{{.Tag}} {{.ID}}", "--no-trunc")
+	cmdAfter := exec.Command("docker", args...)
+	PrintDebugCommand("docker", args)
 	outputAfter, err := cmdAfter.Output()
 	if err != nil {
 		return false, err
@@ -637,6 +674,7 @@ func PullProjectImages() (bool, error) {
 	args := append(composeCmd[1:], GetBaseComposeArgs()...)
 	args = append(args, "config", "--images")
 	cmd := exec.Command(composeCmd[0], args...)
+	PrintDebugCommand(composeCmd[0], args)
 	output, err := cmd.Output()
 	if err != nil {
 		return false, err
@@ -704,7 +742,9 @@ func PullProjectImages() (bool, error) {
 	getImageIDs := func() map[string]string {
 		ids := make(map[string]string)
 		for img := range projectImages {
-			cmdIDs := exec.Command("docker", "inspect", "-f", "{{.ID}}", img)
+			argsIDs := []string{"inspect", "-f", "{{.ID}}", img}
+			cmdIDs := exec.Command("docker", argsIDs...)
+			PrintDebugCommand("docker", argsIDs)
 			outputIDs, err := cmdIDs.Output()
 			if err == nil {
 				ids[img] = strings.TrimSpace(string(outputIDs))
@@ -725,6 +765,7 @@ func PullProjectImages() (bool, error) {
 			defer func() { <-semaphore }()
 			pullCmd := exec.Command("docker", "pull", imageName)
 			if debug {
+				PrintDebugCommand("docker", []string{"pull", imageName})
 				pullCmd.Stdout = os.Stdout
 				pullCmd.Stderr = os.Stderr
 			}
@@ -779,7 +820,9 @@ func needsPull(imageName string) bool {
 
 func getLocalImageInfo(imageName string) (digest, arch, osName string, err error) {
 	// Use inspect to get digests, architecture and os
-	cmd := exec.Command("docker", "inspect", "-f", "{{range .RepoDigests}}{{.}} {{end}}|{{.Architecture}}|{{.Os}}", imageName)
+	args := []string{"inspect", "-f", "{{range .RepoDigests}}{{.}} {{end}}|{{.Architecture}}|{{.Os}}", imageName}
+	cmd := exec.Command("docker", args...)
+	PrintDebugCommand("docker", args)
 	output, err := cmd.Output()
 	if err != nil {
 		return "", "", "", err
@@ -815,7 +858,9 @@ type manifestVerboseEntry struct {
 
 func getRemoteImageDigest(imageName, arch, osName string) (string, error) {
 	// Use manifest inspect -v to get a consistent format for both single and multi-arch images
-	cmd := exec.Command("docker", "manifest", "inspect", "-v", imageName)
+	args := []string{"manifest", "inspect", "-v", imageName}
+	cmd := exec.Command("docker", args...)
+	PrintDebugCommand("docker", args)
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -861,6 +906,7 @@ var RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
 
 	cmd := exec.Command(composeCmd[0], argsToRun...)
 	if debug {
+		PrintDebugCommand(composeCmd[0], argsToRun)
 		var buf bytes.Buffer
 		cmd.Stdout = io.MultiWriter(os.Stdout, &buf)
 		cmd.Stderr = io.MultiWriter(os.Stderr, &buf)

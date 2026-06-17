@@ -2,13 +2,6 @@ volumes:
   pg_data_test:
 
 services:
-  application:
-    env_file:
-      - .env.test
-    depends_on:
-      db-test:
-        condition: service_healthy
-
   db-test:
     image: "postgres:{{.PostgresVersion}}"
     command: [ "postgres", "-c", "max_locks_per_transaction=1024" ]

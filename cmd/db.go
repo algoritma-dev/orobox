@@ -22,6 +22,7 @@ var dbExec = func(stdin io.Reader, stdout io.Writer, args ...string) error {
 	fullArgs = append(fullArgs, args...)
 
 	cmd := exec.Command(composeCmd[0], fullArgs...)
+	docker.PrintDebugCommand(composeCmd[0], fullArgs)
 	cmd.Stdin = stdin
 
 	var stdoutBuf, stderrBuf bytes.Buffer
