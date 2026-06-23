@@ -102,7 +102,7 @@ func runQaInitCommand(conf config.OroConfig) {
 		//     Using ':*' forces the latest version, bypassing OroCommerce's locked constraints.
 		var composerPackages []string
 		if needsPhpCodingStandards {
-			composerPackages = append(composerPackages, "algoritma/php-coding-standards:*")
+			composerPackages = append(composerPackages, "phpstan/phpstan-symfony", "phpstan/phpstan-phpunit", "phpstan/phpstan-doctrine", "algoritma/php-coding-standards:*")
 		}
 		if needsTwigCS {
 			composerPackages = append(composerPackages, "vincentlanglet/twig-cs-fixer:*")
