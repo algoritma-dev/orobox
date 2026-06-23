@@ -144,6 +144,11 @@ func runQaInitCommand(conf config.OroConfig) {
 		}
 
 		npmArgs := []string{"exec", "-w", qaToolsDir, "-T", "application", jsManager, jsInstallCmd, jsSaveDevFlag}
+		if jsManager == "pnpm" {
+			// pnpm refuses to add deps to a workspace root unless told it's intentional
+			// (ERR_PNPM_ADDING_TO_ROOT). The QA tools dir is such a root.
+			npmArgs = append(npmArgs, "--ignore-workspace-root-check")
+		}
 		npmArgs = append(npmArgs, jsPackages...)
 		if err := docker.RunComposeCommandSilently(fmt.Sprintf("Installing %s QA packages...", strings.ToUpper(jsManager)), npmArgs...); err != nil {
 			utils.PrintError(fmt.Sprintf("Failed to install %s packages: %v", jsManager, err))
