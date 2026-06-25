@@ -3,8 +3,13 @@ package docker
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
+	"text/template"
+
+	"github.com/algoritma-dev/orobox/internal/config"
+	yamlv3 "gopkg.in/yaml.v3"
 )
 
 func init() {
@@ -106,4 +111,139 @@ func TestWriteFiles(t *testing.T) {
 			t.Errorf("nginx.conf was not created")
 		}
 	})
+}
+
+// renderRealTemplate renders a real template file from the repo against data,
+// failing the test on parse/execute errors.
+func renderRealTemplate(t *testing.T, relPath string, data any) string {
+	t.Helper()
+	content, err := os.ReadFile(relPath)
+	if err != nil {
+		t.Fatalf("read template %s: %v", relPath, err)
+	}
+	tmpl, err := template.New(filepath.Base(relPath)).Parse(string(content))
+	if err != nil {
+		t.Fatalf("parse template %s: %v", relPath, err)
+	}
+	var buf strings.Builder
+	if err := tmpl.Execute(&buf, data); err != nil {
+		t.Fatalf("execute template %s: %v", relPath, err)
+	}
+	return buf.String()
+}
+
+func assertValidYAML(t *testing.T, name, content string) {
+	t.Helper()
+	var out map[string]interface{}
+	if err := yamlv3.Unmarshal([]byte(content), &out); err != nil {
+		t.Fatalf("%s is not valid YAML: %v\n---\n%s", name, err, content)
+	}
+}
+
+func bundleComposeData() map[string]any {
+	return map[string]any{
+		"OroVersion":              "6.1",
+		"ImageSuffix":             "bundle",
+		"BindWholeRepo":           false,
+		"BundlePath":              "/host/repo",
+		"OroRootDir":              "/var/www/oro",
+		"BundleRootContainerPath": "/var/www/oro/bundles/My/Bundle",
+		"BundleNamespace":         "My/Bundle",
+		"BundlePackageName":       "acme/my-bundle",
+		"SyncsVendorToHost":       true,
+		"RunsComposerRequire":     true,
+		"RunsComposerInstall":     false,
+		"InternalDir":             ".orobox",
+		"NginxHTTPPort":           "8080",
+		"NginxHTTPSPort":          "8443",
+		"HasSsl":                  false,
+		"Postgres":                true,
+		"PostgresVersion":         "16.1-alpine",
+		"Redis":                   false,
+		"RedisInsight":            false,
+		"Mailpit":                 false,
+		"RabbitMQ":                false,
+		"Elasticsearch":           false,
+		"Adminer":                 false,
+		"Kibana":                  false,
+		"Domains":                 []config.DomainConfig{{Host: "oro.demo"}},
+	}
+}
+
+func projectComposeData() map[string]any {
+	d := bundleComposeData()
+	d["ImageSuffix"] = "project"
+	d["BindWholeRepo"] = true
+	d["SyncsVendorToHost"] = false
+	d["RunsComposerRequire"] = false
+	d["RunsComposerInstall"] = true
+	d["BundlePackageName"] = ""
+	return d
+}
+
+func TestComposeSetupGolden(t *testing.T) {
+	const path = "../../templates/docker/docker-compose.setup.yml"
+
+	t.Run("bundle", func(t *testing.T) {
+		out := renderRealTemplate(t, path, bundleComposeData())
+		assertValidYAML(t, "setup/bundle", out)
+		mustContain(t, out, "6.1-bundle-latest")
+		mustContain(t, out, `"oro_app:/var/www/oro:delegated"`)
+		mustContain(t, out, `"/host/repo:/var/www/oro/bundles/My/Bundle:cached"`)
+		mustContain(t, out, `/host/repo/vendor-oro:/var/www/oro/vendor`)
+		mustContain(t, out, "composer require")
+		mustContain(t, out, "vendor-oro:/vendor-host:delegated")
+		mustNotContain(t, out, "composer install --no-interaction --no-scripts")
+	})
+
+	t.Run("project", func(t *testing.T) {
+		out := renderRealTemplate(t, path, projectComposeData())
+		assertValidYAML(t, "setup/project", out)
+		mustContain(t, out, "6.1-project-latest")
+		mustContain(t, out, `"/host/repo:/var/www/oro:cached"`)
+		mustContain(t, out, "composer install --no-interaction --no-scripts")
+		mustNotContain(t, out, "oro_app:/var/www/oro")
+		mustNotContain(t, out, "composer require")
+		mustNotContain(t, out, "vendor-oro:/vendor-host")
+		mustNotContain(t, out, "Populating vendor folder")
+	})
+}
+
+func TestComposeRuntimeGolden(t *testing.T) {
+	const path = "../../templates/docker/docker-compose.yml"
+
+	t.Run("bundle", func(t *testing.T) {
+		out := renderRealTemplate(t, path, bundleComposeData())
+		assertValidYAML(t, "runtime/bundle", out)
+		mustContain(t, out, "6.1-bundle-latest")
+		mustContain(t, out, `"oro_app:/var/www/oro:delegated"`)
+		mustContain(t, out, `"/host/repo:/var/www/oro/bundles/My/Bundle:cached"`)
+		mustContain(t, out, `/host/repo/vendor-oro:/var/www/oro/vendor`)
+		mustContain(t, out, "vendor-oro:/vendor-host:delegated")
+		mustContain(t, out, ".env-app.local")
+	})
+
+	t.Run("project", func(t *testing.T) {
+		out := renderRealTemplate(t, path, projectComposeData())
+		assertValidYAML(t, "runtime/project", out)
+		mustContain(t, out, "6.1-project-latest")
+		mustContain(t, out, `"/host/repo:/var/www/oro:cached"`)
+		mustContain(t, out, ".env-app.local")
+		mustNotContain(t, out, "oro_app:/var/www/oro")
+		mustNotContain(t, out, "vendor-oro:/vendor-host")
+	})
+}
+
+func mustContain(t *testing.T, haystack, needle string) {
+	t.Helper()
+	if !strings.Contains(haystack, needle) {
+		t.Errorf("expected output to contain %q\n---\n%s", needle, haystack)
+	}
+}
+
+func mustNotContain(t *testing.T, haystack, needle string) {
+	t.Helper()
+	if strings.Contains(haystack, needle) {
+		t.Errorf("expected output NOT to contain %q\n---\n%s", needle, haystack)
+	}
 }

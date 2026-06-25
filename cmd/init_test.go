@@ -19,19 +19,24 @@ func TestGenerateConfig(t *testing.T) {
 	defer os.Chdir(origWd)
 
 	// Simulate interactive input:
-	// 1. Bundle class: Algoritma\Bundle\TestBundle\TestBundle
-	// 2. OroCommerce version (selection 1 = 7.0)
-	// 3. Host: test.local
-	// 4. Root: public
-	// 5. SSL: n
-	// 6. Redis: y
-	// 7. RedisInsight: y
-	// 8. Mailpit: y
-	// 9. RabbitMQ: y
-	// 10. Elasticsearch: y
-	// 11. Kibana: y
-	// 12. Adminer: y
-	input := "Algoritma\\Bundle\\TestBundle\\TestBundle\n1\ntest.local\npublic\nn\ny\ny\ny\ny\ny\ny\ny\n"
+	// 1. Installation type (selection 1 = bundle)
+	// 2. Bundle class: Algoritma\Bundle\TestBundle\TestBundle
+	// 3. OroCommerce version (selection 1 = 7.0)
+	// 4. Host: test.local
+	// 5. Root: public
+	// 6. SSL: n
+	// 7. Redis: y
+	// 8. RedisInsight: y
+	// 9. Mailpit: y
+	// 10. RabbitMQ: y
+	// 11. Elasticsearch: y
+	// 12. Kibana: y
+	// 13. Adminer: y
+	input := "1\nAlgoritma\\Bundle\\TestBundle\\TestBundle\n1\ntest.local\npublic\nn\ny\ny\ny\ny\ny\ny\ny\n"
+
+	oldType := installType
+	installType = ""
+	defer func() { installType = oldType }()
 
 	oldStdin := stdin
 	stdin = strings.NewReader(input)
@@ -56,6 +61,58 @@ func TestGenerateConfig(t *testing.T) {
 	}
 	if !strings.Contains(content, "host: test.local") {
 		t.Errorf("Expected host test.local in config, got:\n%s", content)
+	}
+}
+
+func TestGenerateConfigProject(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "orobox-init-project-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	origWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(origWd)
+
+	// Project install skips the bundle class/namespace prompt entirely.
+	// 1. Installation type (selection 2 = project)
+	// 2. OroCommerce version (selection 1 = 7.0)
+	// 3. Host: proj.local
+	// 4. Root: public
+	// 5. SSL: n
+	// 6. Redis: n
+	// 7. Mailpit: y
+	// 8. RabbitMQ: n
+	// 9. Elasticsearch: n
+	// 10. Adminer: y
+	input := "2\n1\nproj.local\npublic\nn\nn\ny\nn\nn\ny\n"
+
+	oldType := installType
+	installType = ""
+	defer func() { installType = oldType }()
+
+	oldStdin := stdin
+	stdin = strings.NewReader(input)
+	defer func() { stdin = oldStdin }()
+
+	generateConfig()
+
+	data, err := os.ReadFile(".orobox.yaml")
+	if err != nil {
+		t.Fatalf(".orobox.yaml was not created: %v", err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, "type: project") {
+		t.Errorf("Expected type project in config, got:\n%s", content)
+	}
+	if !strings.Contains(content, "host: proj.local") {
+		t.Errorf("Expected host proj.local in config, got:\n%s", content)
+	}
+	// No bundle namespace/class should have been collected (fields stay empty).
+	if !strings.Contains(content, `namespace: ""`) || !strings.Contains(content, `class: ""`) {
+		t.Errorf("Project config should have empty bundle namespace/class, got:\n%s", content)
 	}
 }
 

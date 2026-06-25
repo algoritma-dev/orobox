@@ -67,10 +67,16 @@ func runTestCommand() {
 
 	args = append(args, "application")
 
-	if viper.GetString("type") == "bundle" {
-		args = append(args, "./bin/simple-phpunit", "--configuration="+config.GetBundleRootContainerPath())
-	} else {
+	installType, err := config.InstallTypeFor(viper.GetString("type"))
+	if err != nil {
+		installType, _ = config.InstallTypeFor(config.InstallTypeBundle)
+	}
+	if installType.BindWholeRepo() {
+		// Project: phpunit.xml lives at the app root; run from the default workdir.
 		args = append(args, "php", "bin/simple-phpunit")
+	} else {
+		// Bundle: point phpunit at the bundle's source root inside the prebuilt app.
+		args = append(args, "./bin/simple-phpunit", "--configuration="+config.GetSourceRootContainerPath())
 	}
 
 	if filter != "" {

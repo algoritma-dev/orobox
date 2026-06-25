@@ -1,15 +1,19 @@
 
 x-templates:
   oro-app: &oro-app
-    image: "algoritmadev/orobox:{{.OroVersion}}-bundle-latest"
+    image: "algoritmadev/orobox:{{.OroVersion}}-{{.ImageSuffix}}-latest"
     mem_limit: ${ORO_APP_MEM_LIMIT:-2g}
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
   volumes-oro: &volumes-oro
+    {{if .BindWholeRepo -}}
+    - "{{.BundlePath}}:{{.OroRootDir}}:cached"
+    {{- else -}}
     - "oro_app:{{.OroRootDir}}:delegated"
     - "{{.BundlePath}}:{{.BundleRootContainerPath}}:cached"
     - "{{.BundlePath}}/vendor-oro:{{.OroRootDir}}/vendor:delegated"
+    {{- end}}
     - "cache:{{.OroRootDir}}/var/cache:delegated"
     - "public_storage:{{.OroRootDir}}/public/media:delegated"
     - "private_storage:{{.OroRootDir}}/var/data:delegated"
@@ -67,9 +71,13 @@ services:
       - /opt/oro-nginx
     volumes:
       - "./nginx.conf:/etc/nginx/http.d/default.conf:ro"
+      {{if .BindWholeRepo -}}
+      - "{{.BundlePath}}:{{.OroRootDir}}:cached"
+      {{- else -}}
       - "oro_app:{{.OroRootDir}}:delegated"
       - "{{.BundlePath}}:{{.BundleRootContainerPath}}:cached"
       - "{{.BundlePath}}/vendor-oro:{{.OroRootDir}}/vendor:delegated"
+      {{- end}}
       - "cache:{{.OroRootDir}}/var/cache:ro"
       - "public_storage:{{.OroRootDir}}/public/media:ro"
       - "private_storage:{{.OroRootDir}}/var/data:ro"
@@ -87,10 +95,12 @@ services:
       - |
         echo "Initializing volumes and permissions for ${ORO_USER_RUNTIME:-www-data}..."
         mkdir -p bin config public src templates translations var assets var/cache var/logs var/data public/media
+        {{if .SyncsVendorToHost -}}
         if [ -d /vendor-host ] && [ -z "$$(ls -A /vendor-host)" ]; then
             echo "Populating vendor folder on host from container..."
             cp -rp {{.OroRootDir}}/vendor/. /vendor-host/
         fi
+        {{end -}}
         chown -R ${ORO_USER_RUNTIME:-www-data} . bin config public src templates translations var assets var/cache var/logs var/data public/media 2>/dev/null || true
         [ -d /vendor-host ] && chown -R ${ORO_USER_RUNTIME:-www-data} /vendor-host 2>/dev/null || true
         chmod -R 777 var/cache var/logs var/data 2>/dev/null || true
@@ -98,9 +108,15 @@ services:
     environment:
       ORO_XDEBUG_ENABLED: "false"
     volumes:
+      {{if .BindWholeRepo -}}
+      - "{{.BundlePath}}:{{.OroRootDir}}:cached"
+      {{- else -}}
       - "oro_app:{{.OroRootDir}}:delegated"
       - "{{.BundlePath}}:{{.BundleRootContainerPath}}:cached"
+      {{- end}}
+      {{if .SyncsVendorToHost -}}
       - "{{.BundlePath}}/vendor-oro:/vendor-host:delegated"
+      {{end -}}
       - "cache:{{.OroRootDir}}/var/cache:delegated"
       - "public_storage:{{.OroRootDir}}/public/media:delegated"
       - "private_storage:{{.OroRootDir}}/var/data:delegated"

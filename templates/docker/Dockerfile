@@ -97,6 +97,8 @@ RUN apk add --no-cache \
 # Install Composer
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 ENV COMPOSER_ALLOW_SUPERUSER=1
+# Disable Composer process timeout (0 = infinite) so long installs/scripts never abort
+ENV COMPOSER_PROCESS_TIMEOUT=0
 
 # Install Node.js from official image
 COPY --from=node_image /usr/local/lib/node_modules /usr/local/lib/node_modules

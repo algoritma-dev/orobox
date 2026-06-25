@@ -61,6 +61,29 @@ func TestOroConfig_Validate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "project without namespace is valid",
+			config: OroConfig{
+				Type:       InstallTypeProject,
+				OroVersion: "6.1",
+				Domains: []DomainConfig{
+					{Host: "example.com"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "unknown type is rejected",
+			config: OroConfig{
+				Type:       "demo",
+				Namespace:  "MyNamespace",
+				OroVersion: "6.1",
+				Domains: []DomainConfig{
+					{Host: "example.com"},
+				},
+			},
+			wantErr: true,
+		},
+		{
 			name: "missing oro_version",
 			config: OroConfig{
 				Namespace: "MyNamespace",
@@ -148,6 +171,25 @@ commands:
 	}
 	if config.Commands[0].Service != "test-app" {
 		t.Errorf("Expected service 'test-app', got %s", config.Commands[0].Service)
+	}
+}
+
+func TestParseConfigProject(t *testing.T) {
+	yamlData := `
+type: project
+oro_version: "6.1"
+domains:
+  - host: example.com
+`
+	config, err := ParseConfig([]byte(yamlData))
+	if err != nil {
+		t.Fatalf("ParseConfig failed: %v", err)
+	}
+	if config.Type != InstallTypeProject {
+		t.Errorf("Expected type project, got %s", config.Type)
+	}
+	if err := config.Validate(); err != nil {
+		t.Errorf("project config without namespace should validate, got: %v", err)
 	}
 }
 

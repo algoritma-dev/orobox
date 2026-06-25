@@ -218,6 +218,12 @@ func EnsureDockerCompose() bool {
 		TmpfsSize               string
 		BundleRootContainerPath string
 		BundlePackageName       string
+		ImageSuffix             string
+		SourceRootContainer     string
+		BindWholeRepo           bool
+		RunsComposerRequire     bool
+		RunsComposerInstall     bool
+		SyncsVendorToHost       bool
 	}{
 		Type:                    viper.GetString("type"),
 		InternalDir:             internalDir,
@@ -231,6 +237,19 @@ func EnsureDockerCompose() bool {
 		TmpfsSize:               viper.GetString("test.tmpfs_size"),
 		BundleRootContainerPath: config.GetBundleRootContainerPath(),
 	}
+
+	// Resolve the install-type strategy and derive every behavioral flag from it.
+	// On an unknown type we fall back to bundle semantics; OroConfig.Validate surfaces the error.
+	installType, err := config.InstallTypeFor(data.Type)
+	if err != nil {
+		installType, _ = config.InstallTypeFor(config.InstallTypeBundle)
+	}
+	data.ImageSuffix = installType.ImageSuffix()
+	data.SourceRootContainer = installType.SourceRootContainer()
+	data.BindWholeRepo = installType.BindWholeRepo()
+	data.RunsComposerRequire = installType.RunsComposerRequire()
+	data.RunsComposerInstall = installType.RunsComposerInstall()
+	data.SyncsVendorToHost = installType.SyncsVendorToHost()
 
 	if data.TmpfsSize == "" {
 		data.TmpfsSize = "1g"
@@ -305,7 +324,7 @@ func EnsureDockerCompose() bool {
 		} else {
 			utils.PrintWarning(fmt.Sprintf("Could not parse composer.json in %s: %v", data.BundlePath, err))
 		}
-	} else if data.Type == config.InstallTypeBundle {
+	} else if installType.WarnOnMissingComposerJSON() {
 		utils.PrintWarning(fmt.Sprintf("composer.json not found in %s. Bundle package name will be unknown.", data.BundlePath))
 	}
 

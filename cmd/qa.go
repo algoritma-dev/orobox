@@ -94,7 +94,7 @@ func checkMissingToolBinaries(workingDir string, tools []qaTool) []string {
 }
 
 func runQaCommand() {
-	workingDir := config.GetBundleRootContainerPath()
+	workingDir := config.GetSourceRootContainerPath()
 	qaToolsDir := config.QaToolsDir
 
 	jsTarget := "src/Resources/public"

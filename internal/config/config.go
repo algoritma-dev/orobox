@@ -149,8 +149,9 @@ type OroConfig struct {
 
 // Install types for OroCommerce.
 const (
-	InstallTypeBundle = "bundle"
-	// InstallTypeProject and InstallTypeDemo are moved to separate branches
+	InstallTypeBundle  = "bundle"
+	InstallTypeProject = "project"
+	// InstallTypeDemo is parked on a separate branch
 )
 
 // OroRootDir is the base directory for OroCommerce in the container.
@@ -172,7 +173,12 @@ func (c *OroConfig) Validate() error {
 		c.Type = InstallTypeBundle
 	}
 
-	if c.Namespace == "" {
+	installType, err := InstallTypeFor(c.Type)
+	if err != nil {
+		return err
+	}
+
+	if installType.RequiresBundleNamespace() && c.Namespace == "" {
 		return errors.New("config error: field 'namespace' is required (did you use 'bundle_namespace' by mistake?)")
 	}
 
@@ -226,8 +232,21 @@ func GetBundlePath() string {
 }
 
 // GetBundleRootContainerPath returns the path to the bundle root in the container.
+// This is bundle-specific; use GetSourceRootContainerPath when you mean "the user's
+// source root" regardless of install type.
 func GetBundleRootContainerPath() string {
 	return OroRootDir + "/bundles/" + GetBundlePath()
+}
+
+// GetSourceRootContainerPath returns the container path of the user's source root for
+// the active install type: the bundle subdir for bundle, OroRoot for project.
+func GetSourceRootContainerPath() string {
+	installType, err := InstallTypeFor(viper.GetString("type"))
+	if err != nil {
+		// Fall back to bundle semantics on an unknown/unset type; Validate surfaces the error.
+		return GetBundleRootContainerPath()
+	}
+	return installType.SourceRootContainer()
 }
 
 // GetHostBundlePath returns the absolute path to the bundle on the host.
