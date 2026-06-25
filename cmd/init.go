@@ -147,17 +147,22 @@ func performInstallation() bool {
 	_, err = docker.RunComposeCommandWithOutput(checkCmd...)
 	utils.StopLoader()
 	if err != nil {
-		// For a project install the checkout itself IS the Oro app (bind-mounted onto
-		// OroRoot); there is nothing to clone, so a missing composer.json is fatal.
+		// No composer.json in the source root: bootstrap a full OroCommerce application.
+		// For bundle this lands in the oro_app volume; for project the source root is the
+		// bind-mounted checkout, so the app is scaffolded directly into the user's repo.
+		// A temporary clone dir avoids "directory not empty" errors when something is
+		// already mounted at the destination.
+		scaffoldMsg := "Downloading and installing OroCommerce into volume..."
 		if strategy.BindWholeRepo() {
-			utils.PrintError("composer.json not found in the project repository. A 'project' install requires the checkout to be a full OroCommerce application.")
-			return false
+			scaffoldMsg = "Scaffolding OroCommerce application into the project checkout..."
 		}
-		// Use a temporary directory to clone, then move to avoid "directory not empty" errors if bundle is mounted
+		// Drop orobox-managed env files from the clone before copying: they are
+		// single-file bind mounts at OroRoot, and cp cannot replace a mount point
+		// ("can't create ... File exists"). The mounted versions are authoritative.
 		cloneCmd := []string{"run", "--rm", "-T", "application", "bash", "-c",
-			fmt.Sprintf("git clone -b %s --depth 1 %s /tmp/oro-app && cp -rf /tmp/oro-app/. . && rm -rf /tmp/oro-app && composer install", resolvedVersion, oroRepo)}
-		if err := docker.RunComposeCommandSilently("Downloading and installing OroCommerce into volume...", cloneCmd...); err != nil {
-			utils.PrintError(fmt.Sprintf("Download/Install into volume failed: %v", err))
+			fmt.Sprintf("git clone -b %s --depth 1 %s /tmp/oro-app && rm -f /tmp/oro-app/.env-app.local /tmp/oro-app/.env-app.test && cp -rf /tmp/oro-app/. . && rm -rf /tmp/oro-app && composer install", resolvedVersion, oroRepo)}
+		if err := docker.RunComposeCommandSilently(scaffoldMsg, cloneCmd...); err != nil {
+			utils.PrintError(fmt.Sprintf("OroCommerce download/install failed: %v", err))
 			return false
 		}
 	} else {
