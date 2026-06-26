@@ -108,6 +108,13 @@ func runQaInitCommand(conf config.OroConfig) {
 			composerPackages = append(composerPackages, "vincentlanglet/twig-cs-fixer:*")
 		}
 
+		// Remove project's own php-cs-fixer so it doesn't conflict with the QA namespace install.
+		removeArgs := []string{"exec", "-w", oroRoot, "-T", "application", "composer", "remove", "--dev", "--no-scripts", "friendsofphp/php-cs-fixer"}
+		if err := docker.RunComposeCommandSilently("Removing project php-cs-fixer...", removeArgs...); err != nil {
+			utils.PrintError(fmt.Sprintf("Failed to remove project php-cs-fixer: %v", err))
+			return
+		}
+
 		composerArgs := []string{"exec", "-w", oroRoot}
 		if !isTTY() {
 			composerArgs = append(composerArgs, "-T")
