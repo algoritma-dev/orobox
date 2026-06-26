@@ -66,11 +66,25 @@ commands:
     description: "Runs the Shippy Pro tests suite"
     service: "application"
 composer:
+  # Tokens for private repositories. Mirrors Composer's COMPOSER_AUTH schema and is
+  # injected only into the containers that run composer (never committed or baked
+  # into long-running services).
+  auth:
+    github-oauth:
+      github.com: ghp_yourtokenhere
+    http-basic:
+      repo.packagist.com:
+        username: token
+        password: yourtokenhere
   repositories:
     - type: vcs
       url: https://github.com/my-org/private-repo.git
     - type: composer
       url: https://repo.packagist.com/my-org/
+    # SSH-format URLs are supported too; orobox forwards your host SSH agent into
+    # the container automatically (start ssh-agent and `ssh-add` your key first).
+    - type: vcs
+      url: git@github.com:my-org/ssh-repo.git
 ```
 
 ### Installation types (`type`)
@@ -123,6 +137,8 @@ domains:
     - `service`: (string, optional) Default service to run the command in (e.g., `application`).
 - `composer`: (map) Composer-specific settings for the bundle.
     - `repositories`: (list) Additional Composer repositories to register in the OroCommerce project during installation. Accepts the same format as Composer's [`repositories`](https://getcomposer.org/doc/05-repositories.md) field (VCS, Composer, path, package, etc.). These are merged with any existing repositories in the project's `composer.json`. Required when the bundle depends on packages hosted in private repositories.
+    - `auth`: (map) Credentials for private repositories, using Composer's [`COMPOSER_AUTH`](https://getcomposer.org/doc/03-cli.md#composer-auth) schema (`github-oauth`, `gitlab-token`, `http-basic`, `bearer`, ...). Serialized to JSON and injected as the `COMPOSER_AUTH` environment variable only into the containers that run composer, so tokens are never committed or baked into long-running services.
+    - **SSH repositories**: when any `repositories[].url` uses an SSH transport (`git@host:org/repo.git` or `ssh://...`), orobox forwards your host SSH agent into the composer container (`SSH_AUTH_SOCK` is bind-mounted; on Docker Desktop the built-in agent socket is used, on Linux your live `$SSH_AUTH_SOCK`). Ensure an agent is running with your key loaded (`eval "$(ssh-agent)" && ssh-add`).
 
 *Note: Versions of PHP, PostgreSQL, Node.js, and other components are automatically determined by the `oro_version` setting and cannot be changed manually.*
 

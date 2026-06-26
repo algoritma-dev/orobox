@@ -59,6 +59,11 @@ type CommandConfig struct {
 // ComposerConfig holds Composer-specific configuration for the bundle.
 type ComposerConfig struct {
 	Repositories []map[string]interface{} `yaml:"repositories" mapstructure:"repositories"`
+	// Auth mirrors Composer's COMPOSER_AUTH schema (github-oauth, gitlab-token,
+	// http-basic, bearer, ...). It is serialized to JSON and injected as the
+	// COMPOSER_AUTH env var only into the containers that run composer, so tokens
+	// for private repositories never get committed or baked into long-running services.
+	Auth map[string]interface{} `yaml:"auth" mapstructure:"auth"`
 }
 
 // OroVersions defines the versions of components for a specific OroCommerce version.
