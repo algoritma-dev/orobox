@@ -11,7 +11,7 @@ import (
 )
 
 var cleanCmd = &cobra.Command{
-	Use:   "clean",
+	Use:   "clear",
 	Short: "Remove all containers and volumes to start fresh",
 	Run: func(_ *cobra.Command, _ []string) {
 		docker.EnsureDockerCompose()

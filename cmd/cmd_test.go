@@ -104,7 +104,7 @@ func TestCleanCommand(t *testing.T) {
 		return nil
 	}
 
-	rootCmd.SetArgs([]string{"clean"})
+	rootCmd.SetArgs([]string{"clear"})
 	err := rootCmd.Execute()
 	if err != nil {
 		t.Fatalf("rootCmd.Execute() failed: %v", err)
