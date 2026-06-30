@@ -26,6 +26,7 @@ var (
 	oroVersion      string
 	bundleNamespace string
 	installType     string
+	forceInstall    bool
 	stdin           io.Reader = os.Stdin
 )
 
@@ -140,6 +141,11 @@ func performInstallation() bool {
 		utils.PrintWarning(fmt.Sprintf("volume-init failed: %v", err))
 	}
 
+	// runOroInstall gates step 5 (oro:install). A fresh scaffold always installs;
+	// an existing project checkout (composer.json present) is preserved unless the
+	// user opts in, because oro:install resets the database.
+	runOroInstall := true
+
 	// 3. For bundle, we need to clone into the volume if not already there
 	// Always try to clone if composer.json is missing in the container
 	checkCmd := []string{"run", "--rm", "-T", "application", "test", "-f", "composer.json"}
@@ -168,6 +174,16 @@ func performInstallation() bool {
 			return false
 		}
 	} else {
+		// Sources present. For project installs the source root is the user's
+		// bind-mounted checkout; running oro:install would reset an existing
+		// database. Ask before doing so (default no), unless --force-install.
+		// In non-interactive runs the reader hits EOF, AskYesNo returns its
+		// default (false), so oro:install is skipped.
+		if strategy.BindWholeRepo() && !forceInstall {
+			reader := bufio.NewReader(stdin)
+			runOroInstall = utils.AskYesNo(reader, "OroCommerce already present (composer.json found). Run oro:install? This resets the database", false)
+		}
+
 		// Sources present: check for vendors (especially if vendor-oro was just added)
 		checkVendor := []string{"run", "--rm", "-T", "application", "test", "-f", "vendor/autoload.php"}
 		utils.StartLoader("Checking for vendors...")
@@ -222,6 +238,11 @@ func performInstallation() bool {
 	// Using --no-deps avoids Docker Compose's dependency resolution, which can
 	// trigger a "network not found" error when it tries to (re)start containers
 	// whose network was replaced by the earlier `down --remove-orphans`.
+	if !runOroInstall {
+		utils.PrintInfo("Skipping OroCommerce installation (existing project preserved).")
+		return true
+	}
+
 	volumeSetupCmd := []string{"run", "--rm", "-T"}
 	volumeSetupCmd = append(volumeSetupCmd, docker.CredentialRunArgs(conf.Composer.Auth, conf.Composer.Repositories)...)
 	volumeSetupCmd = append(volumeSetupCmd, "volume-setup")
@@ -243,6 +264,7 @@ func init() {
 	initCmd.Flags().StringVarP(&oroVersion, "oro-version", "v", "6.1", "OroCommerce version")
 	initCmd.Flags().StringVarP(&bundleNamespace, "bundle-namespace", "n", "", "Bundle namespace")
 	initCmd.Flags().StringVarP(&installType, "type", "t", "", "Installation type (bundle|project)")
+	initCmd.Flags().BoolVar(&forceInstall, "force-install", false, "Force oro:install even if the project already has composer.json")
 }
 
 // getBundlePackageName reads the composer package name from the bundle's composer.json.

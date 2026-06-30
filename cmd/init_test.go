@@ -151,3 +151,13 @@ domains:
 		t.Errorf("validateConfig should return true for valid config")
 	}
 }
+
+func TestForceInstallFlagRegistered(t *testing.T) {
+	flag := initCmd.Flags().Lookup("force-install")
+	if flag == nil {
+		t.Fatal("init command should register the --force-install flag")
+	}
+	if flag.DefValue != "false" {
+		t.Errorf("--force-install default should be false, got %q", flag.DefValue)
+	}
+}
