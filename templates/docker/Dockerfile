@@ -87,6 +87,7 @@ RUN apk add --no-cache \
     optipng \
     libjpeg-turbo-utils \
     git \
+    openssh-client \
     unzip \
     libstdc++ \
     libgcc \
