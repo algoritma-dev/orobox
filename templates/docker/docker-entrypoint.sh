@@ -9,7 +9,11 @@ cd ${ORO_ROOT_DIR}
 # owned by the host user) that UID often has no /etc/passwd entry. Tools that call
 # getpwuid — notably OpenSSH used by `git clone` over ssh:// — abort with
 # "No user exists for uid N". Give the current UID a home and a passwd entry.
-export HOME="${HOME:-/tmp}"
+# Docker may set HOME=/ for a bare numeric --user, which the host UID cannot
+# write; fall back to /tmp when HOME is unset or not writable.
+if [ -z "$HOME" ] || [ ! -w "$HOME" ]; then
+    export HOME=/tmp
+fi
 if ! getent passwd "$(id -u)" >/dev/null 2>&1; then
     echo "orobox:x:$(id -u):$(id -g):orobox:${HOME}:/bin/bash" >> /etc/passwd 2>/dev/null || true
 fi

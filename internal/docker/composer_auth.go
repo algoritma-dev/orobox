@@ -94,8 +94,10 @@ func CredentialRunArgs(auth map[string]interface{}, repos []map[string]interface
 				"-v", sock+":"+containerSSHAgentSocket,
 				"-e", "SSH_AUTH_SOCK="+containerSSHAgentSocket,
 				// accept-new avoids the interactive host-key prompt that would hang
-				// a non-TTY (`-T`) composer/git run on first connect.
-				"-e", "GIT_SSH_COMMAND=ssh -o StrictHostKeyChecking=accept-new",
+				// a non-TTY (`-T`) composer/git run on first connect. UserKnownHostsFile
+				// points at /tmp so the write never depends on a writable $HOME/.ssh
+				// (the container may run as a host UID with no home directory).
+				"-e", "GIT_SSH_COMMAND=ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known_hosts",
 			)
 		}
 	}
