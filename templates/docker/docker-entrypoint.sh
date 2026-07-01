@@ -14,8 +14,9 @@ cd ${ORO_ROOT_DIR}
 if [ -z "$HOME" ] || [ ! -w "$HOME" ]; then
     export HOME=/tmp
 fi
-if ! getent passwd "$(id -u)" >/dev/null 2>&1; then
-    echo "orobox:x:$(id -u):$(id -g):orobox:${HOME}:/bin/bash" >> /etc/passwd 2>/dev/null || true
+CURRENT_UID="$(id -u)"
+if ! awk -F: -v uid="$CURRENT_UID" '$3==uid{found=1} END{exit !found}' /etc/passwd; then
+    echo "orobox:x:${CURRENT_UID}:$(id -g):orobox:${HOME}:/bin/bash" >> /etc/passwd 2>/dev/null || true
 fi
 
 # Enable/Disable Xdebug

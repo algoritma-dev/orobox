@@ -93,10 +93,12 @@ func CredentialRunArgs(auth map[string]interface{}, repos []map[string]interface
 			args = append(args,
 				"-v", sock+":"+containerSSHAgentSocket,
 				"-e", "SSH_AUTH_SOCK="+containerSSHAgentSocket,
+				// The container may run as a host UID with no home directory, leaving
+				// HOME=/ (not writable). Point HOME at /tmp so ssh can create ~/.ssh.
+				"-e", "HOME=/tmp",
 				// accept-new avoids the interactive host-key prompt that would hang
 				// a non-TTY (`-T`) composer/git run on first connect. UserKnownHostsFile
-				// points at /tmp so the write never depends on a writable $HOME/.ssh
-				// (the container may run as a host UID with no home directory).
+				// points at /tmp so the write never depends on a writable $HOME/.ssh.
 				"-e", "GIT_SSH_COMMAND=ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known_hosts",
 			)
 		}

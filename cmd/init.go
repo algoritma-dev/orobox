@@ -113,6 +113,16 @@ func performInstallation() bool {
 		resolvedVersion = conf.OroVersion
 	}
 
+	// Ensure an SSH agent with a loaded key is available before any composer/git
+	// run that clones a private SSH repository, so credentials forward into the
+	// containers. No-op when no SSH repo is configured or an agent already exists.
+	sshCleanup, err := docker.EnsureSSHAgent(conf.Composer.Repositories, oroRepo)
+	if err != nil {
+		utils.PrintError(err.Error())
+		return false
+	}
+	defer sshCleanup()
+
 	// 1. Download sources (git clone)
 	// (Project support removed from main branch)
 
