@@ -192,6 +192,11 @@ RUN mkdir -p /opt/oro-nginx-tool /opt/oro-nginx/etc/sites-available \
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
+# Allow the entrypoint to register an /etc/passwd entry for the host UID the
+# container may be run as (see docker-entrypoint.sh) so getpwuid-based tools
+# (OpenSSH/git) work under an arbitrary numeric --user.
+RUN chmod 666 /etc/passwd
+
 # Install php-fpm-healthcheck
 RUN wget -O /usr/local/bin/php-fpm-healthcheck https://raw.githubusercontent.com/renatomefi/php-fpm-healthcheck/master/php-fpm-healthcheck \
     && chmod +x /usr/local/bin/php-fpm-healthcheck

@@ -5,6 +5,15 @@ set -e
 ORO_ROOT_DIR={{.OroRootDir}}
 cd ${ORO_ROOT_DIR}
 
+# When the container runs as the host UID/GID (Linux, to keep bind-mounted files
+# owned by the host user) that UID often has no /etc/passwd entry. Tools that call
+# getpwuid — notably OpenSSH used by `git clone` over ssh:// — abort with
+# "No user exists for uid N". Give the current UID a home and a passwd entry.
+export HOME="${HOME:-/tmp}"
+if ! getent passwd "$(id -u)" >/dev/null 2>&1; then
+    echo "orobox:x:$(id -u):$(id -g):orobox:${HOME}:/bin/bash" >> /etc/passwd 2>/dev/null || true
+fi
+
 # Enable/Disable Xdebug
 if [ "$ORO_XDEBUG_ENABLED" = "true" ] || [ "$ORO_XDEBUG_ENABLED" = "1" ]; then
     if [ -f /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini.disabled ]; then
