@@ -89,8 +89,8 @@ func TestDownCommand(t *testing.T) {
 		t.Fatal("Expected call to RunComposeCommandSilently, got 0")
 	}
 
-	if capturedArgs[0] != "down" {
-		t.Errorf("Expected down command, got %v", capturedArgs)
+	if capturedArgs[0] != "down" || !contains(capturedArgs, "--remove-orphans") {
+		t.Errorf("Expected down --remove-orphans, got %v", capturedArgs)
 	}
 }
 
