@@ -93,10 +93,17 @@ func EnsureSSHAgent(repos []map[string]interface{}, extraURLs ...string) (func()
 	}
 
 	add := exec.Command("ssh-add", keyPath)
+	// Wire the terminal through so ssh-add can prompt for a passphrase when the
+	// key is encrypted. Clear SSH_ASKPASS/DISPLAY so ssh-add reads the passphrase
+	// from the tty instead of spawning a GUI/askpass helper.
 	add.Env = append(os.Environ(), "SSH_AUTH_SOCK="+sock)
-	if addOut, addErr := add.CombinedOutput(); addErr != nil {
+	add.Env = append(add.Env, "SSH_ASKPASS_REQUIRE=never")
+	add.Stdin = os.Stdin
+	add.Stdout = os.Stdout
+	add.Stderr = os.Stderr
+	if addErr := add.Run(); addErr != nil {
 		cleanup()
-		return noop, fmt.Errorf("failed to load SSH key %s: %v: %s", keyPath, addErr, strings.TrimSpace(string(addOut)))
+		return noop, fmt.Errorf("failed to load SSH key %s (wrong passphrase or unreadable key): %w", keyPath, addErr)
 	}
 
 	utils.PrintInfo(fmt.Sprintf("Started ssh-agent and loaded key %s for private repository access.", keyPath))
