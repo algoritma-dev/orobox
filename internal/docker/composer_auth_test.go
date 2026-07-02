@@ -1,6 +1,8 @@
 package docker
 
 import (
+	"fmt"
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -66,6 +68,25 @@ func TestCredentialRunArgs_SSH(t *testing.T) {
 	}
 	if !strings.Contains(joined, "GIT_SSH_COMMAND=") {
 		t.Errorf("expected GIT_SSH_COMMAND, got %v", args)
+	}
+}
+
+// On Linux the agent socket is only connectable by its owning uid, so the
+// credential run must execute as the host user, not the image default
+// (www-data cannot connect to a socket owned by uid 1000).
+func TestCredentialRunArgs_SSHRunsAsHostUser(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("linux-only behavior")
+	}
+	t.Setenv("SSH_AUTH_SOCK", "/tmp/agent.sock")
+	repos := []map[string]interface{}{
+		{"type": "vcs", "url": "git@github.com:org/private.git"},
+	}
+	args := CredentialRunArgs(nil, repos)
+	joined := strings.Join(args, " ")
+	want := fmt.Sprintf("--user %d:%d", os.Getuid(), os.Getgid())
+	if !strings.Contains(joined, want) {
+		t.Errorf("expected %q in credential run args, got %v", want, args)
 	}
 }
 

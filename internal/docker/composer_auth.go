@@ -2,6 +2,7 @@ package docker
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"regexp"
 	"runtime"
@@ -101,6 +102,13 @@ func CredentialRunArgs(auth map[string]interface{}, repos []map[string]interface
 				// points at /tmp so the write never depends on a writable $HOME/.ssh.
 				"-e", "GIT_SSH_COMMAND=ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known_hosts",
 			)
+			// A unix socket is only connectable with write permission, which the
+			// agent socket grants to its owning host user, not to the image
+			// default (www-data). Run the credential command as the host user so
+			// ssh inside the container can actually reach the forwarded agent.
+			if runtime.GOOS == "linux" {
+				args = append(args, "--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()))
+			}
 		}
 	}
 
