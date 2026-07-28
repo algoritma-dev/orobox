@@ -143,6 +143,14 @@ func runQaInitCommand(conf config.OroConfig) {
 		if config.IsQaToolEnabled("phpstan") {
 			fixPhpstanConfigForOro()
 		}
+
+		// vincentlanglet/twig-cs-fixer ships no config generator (unlike the
+		// algoritma plugin for the PHP tools), and the linter aborts without a
+		// config file. Write a default one into QaToolsDir so qa.go's fallback
+		// resolves. A bundle-local .twig-cs-fixer.php still takes precedence.
+		if needsTwigCS {
+			writeTwigCsFixerConfig()
+		}
 	}
 
 	// 2. Install JS packages in the QA tools namespace directory.
@@ -222,6 +230,42 @@ $kernel->boot();
 
 return $kernel->getContainer()->get('doctrine')->getManager();
 `
+
+// twigCsFixerConfigPHP is the default config for vincentlanglet/twig-cs-fixer.
+// new Config() already applies the bundled TwigCsFixer standard ruleset, so this
+// is a minimal, override-friendly starting point.
+const twigCsFixerConfigPHP = `<?php
+
+$ruleset = new TwigCsFixer\Ruleset\Ruleset();
+$ruleset->addStandard(new TwigCsFixer\Standard\TwigCsFixer());
+
+$finder = new TwigCsFixer\File\Finder();
+$finder->in(['` + config.OroRootDir + `/templates', '` + config.OroRootDir + `/src']);
+$finder->exclude(['` + config.OroRootDir + `/vendor', '` + config.OroRootDir + `/vendor-bin']);
+
+$config = new TwigCsFixer\Config\Config();
+$config->setRuleset($ruleset);
+$config->allowNonFixableRules();
+$config->setFinder($finder);
+
+return $config;
+`
+
+// writeTwigCsFixerConfig drops a default .twig-cs-fixer.php into QaToolsDir when
+// none exists, so the twig-cs-fixer linter has a config to load. It never
+// overwrites an existing file, keeping re-runs and manual edits safe.
+func writeTwigCsFixerConfig() {
+	cfg := config.QaToolsDir + "/.twig-cs-fixer.php"
+	b64 := base64.StdEncoding.EncodeToString([]byte(twigCsFixerConfigPHP))
+	script := fmt.Sprintf("[ -f %[1]s ] || printf '%%s' '%[2]s' | base64 -d > %[1]s", cfg, b64)
+
+	args := []string{"exec", "-T", "application", "sh", "-c", script}
+	if err := docker.RunComposeCommandSilently("Writing default Twig-CS-Fixer config...", args...); err != nil {
+		utils.PrintWarning(fmt.Sprintf("Could not write Twig-CS-Fixer config: %v", err))
+		return
+	}
+	utils.PrintSuccess("Twig-CS-Fixer config written.")
+}
 
 // fixPhpstanConfigForOro rewrites the generated vendor-bin/qa/phpstan.neon so its
 // paths resolve from OroRoot instead of the isolated QaToolsDir, and installs

@@ -97,8 +97,12 @@ func runQaCommand() {
 	workingDir := config.GetSourceRootContainerPath()
 	qaToolsDir := config.QaToolsDir
 
-	jsTarget := "src/Resources/public"
-	twigTarget := "src/Resources/views"
+	// Recursive globs, single-quoted so POSIX sh (no globstar) forwards the raw
+	// `**` to the tool, which expands it. Matches bundle and project layouts:
+	// src/<Org>/Bundle/<X>Bundle/Resources/public/... in both install types.
+	jsTarget := "'src/**/Resources/public/**/*.js'"
+	scssTarget := "'src/**/Resources/public/**/*.{scss,less,sass,html}'"
+	cssTarget := "'src/**/Resources/public/**/*.css'"
 
 	// Shell expressions for bundle-first config resolution:
 	// use the bundle's own config if it exists, else fall back to the default generated in QaToolsDir.
@@ -117,10 +121,13 @@ func runQaCommand() {
 		{"phpstan", []string{config.OroRootDir + "/bin/phpstan", "analyze", config.GetQaAnalyzePath(), "--configuration=" + phpstanConfig, "--autoload-file=" + config.OroRootDir + "/vendor/autoload.php"}, "", qaPhpstan},
 		{"rector", []string{config.OroRootDir + "/bin/rector", "process", "--config=" + rectorConfig}, config.OroRootDir, qaRector},
 		{"php-cs-fixer", []string{config.OroRootDir + "/bin/php-cs-fixer", "fix", "--config=" + phpCSFixerConfig}, "", qaPhpCSFixer},
-		{"twig-cs-fixer", []string{config.OroRootDir + "/bin/twig-cs-fixer", "lint", twigTarget, "--fix", "--config=" + twigCSFixerConfig}, "", qaTwigCSFixer},
-		{"eslint", []string{"npx", "--yes", "eslint", "--resolve-plugins-relative-to", qaToolsDir + "/node_modules", "--config", eslintConfig, "--ignore-path", eslintIgnore, "--fix", "--quiet", jsTarget}, "", qaEslint},
-		{"stylelint", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.{scss,less,sass,html}", "--config", stylelintConfig, "--ignore-path", stylelintIgnore, "--fix", "--quiet", "--allow-empty-input"}, "", qaStylelint},
-		{"stylelint-css", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.css", "--config", stylelintCSSConfig, "--ignore-path", stylelintCSSIgnore, "--fix", "--quiet", "--allow-empty-input"}, "", qaStylelint},
+		// No positional path: the CLI path would override the config's Finder.
+		// Let the .twig-cs-fixer.php Finder (templates + src, recursive) discover
+		// bundle templates under src/<Org>/Bundle/<X>Bundle/Resources/views.
+		{"twig-cs-fixer", []string{config.OroRootDir + "/bin/twig-cs-fixer", "lint", "--fix", "--config=" + twigCSFixerConfig}, "", qaTwigCSFixer},
+		{"eslint", []string{"npx", "--yes", "eslint", "--resolve-plugins-relative-to", qaToolsDir + "/node_modules", "--config", eslintConfig, "--ignore-path", eslintIgnore, "--fix", "--quiet", "--no-error-on-unmatched-pattern", jsTarget}, "", qaEslint},
+		{"stylelint", []string{"npx", "--yes", "stylelint", scssTarget, "--config", stylelintConfig, "--ignore-path", stylelintIgnore, "--fix", "--quiet", "--allow-empty-input"}, "", qaStylelint},
+		{"stylelint-css", []string{"npx", "--yes", "stylelint", cssTarget, "--config", stylelintCSSConfig, "--ignore-path", stylelintCSSIgnore, "--fix", "--quiet", "--allow-empty-input"}, "", qaStylelint},
 	}
 
 	anyEnabled := false
