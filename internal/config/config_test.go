@@ -33,6 +33,47 @@ func TestGetVersionsForOro(t *testing.T) {
 	}
 }
 
+func TestGetQaSymfonyConstraints(t *testing.T) {
+	tests := []struct {
+		version      string
+		wantContains []string
+		wantAbsent   []string
+	}{
+		{
+			version:      "5.1",
+			wantContains: []string{"symfony/console:^5.4", "symfony/event-dispatcher:^5.4", "symfony/service-contracts:^2.5", "psr/container:^1.1", "psr/log:^2"},
+			wantAbsent:   []string{"symfony/service-contracts:^3.0"},
+		},
+		{
+			version:      "7.0",
+			wantContains: []string{"symfony/console:^6.4", "symfony/service-contracts:^3.0", "psr/container:^2.0"},
+			// psr/log is only pinned on the 5.4 line (console 5.4 conflicts with psr/log >=3).
+			wantAbsent: []string{"psr/log:^2", "symfony/service-contracts:^2.5"},
+		},
+		{
+			version:      "6.1",
+			wantContains: []string{"symfony/console:^6.4", "symfony/service-contracts:^3.0"},
+			wantAbsent:   []string{"psr/log:^2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			got := strings.Join(GetQaSymfonyConstraints(tt.version), " ")
+			for _, want := range tt.wantContains {
+				if !strings.Contains(got, want) {
+					t.Errorf("GetQaSymfonyConstraints(%q) missing %q; got %q", tt.version, want, got)
+				}
+			}
+			for _, absent := range tt.wantAbsent {
+				if strings.Contains(got, absent) {
+					t.Errorf("GetQaSymfonyConstraints(%q) should not contain %q; got %q", tt.version, absent, got)
+				}
+			}
+		})
+	}
+}
+
 func TestOroConfig_Validate(t *testing.T) {
 	tests := []struct {
 		name    string

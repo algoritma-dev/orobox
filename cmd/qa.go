@@ -114,7 +114,7 @@ func runQaCommand() {
 	stylelintCSSIgnore := fmt.Sprintf("$([ -f %s/.stylelintignore-css ] && echo %s/.stylelintignore-css || echo %s/.stylelintignore-css)", workingDir, workingDir, config.OroRootDir)
 
 	allTools := []qaTool{
-		{"phpstan", []string{config.OroRootDir + "/bin/phpstan", "analyze", "--configuration=" + phpstanConfig, "--autoload-file=" + config.OroRootDir + "/vendor/autoload.php"}, "", qaPhpstan},
+		{"phpstan", []string{config.OroRootDir + "/bin/phpstan", "analyze", config.GetQaAnalyzePath(), "--configuration=" + phpstanConfig, "--autoload-file=" + config.OroRootDir + "/vendor/autoload.php"}, "", qaPhpstan},
 		{"rector", []string{config.OroRootDir + "/bin/rector", "process", "--config=" + rectorConfig}, config.OroRootDir, qaRector},
 		{"php-cs-fixer", []string{config.OroRootDir + "/bin/php-cs-fixer", "fix", "--config=" + phpCSFixerConfig}, "", qaPhpCSFixer},
 		{"twig-cs-fixer", []string{config.OroRootDir + "/bin/twig-cs-fixer", "lint", twigTarget, "--fix", "--config=" + twigCSFixerConfig}, "", qaTwigCSFixer},

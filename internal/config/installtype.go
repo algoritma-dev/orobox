@@ -9,6 +9,7 @@ type InstallType interface {
 	Name() string                  // "bundle" | "project"
 	ImageSuffix() string           // image tag component: ...-<suffix>-latest
 	SourceRootContainer() string   // bundle: OroRoot/bundles/<ns>; project: OroRoot
+	QaAnalyzePath() string         // source tree PHPStan analyzes: bundle dir; project: OroRoot/src
 	RunsComposerRequire() bool     // bundle only
 	RunsComposerInstall() bool     // project only (vendor from repo's lock)
 	SyncsVendorToHost() bool       // bundle only
@@ -23,6 +24,7 @@ type bundleType struct{}
 func (bundleType) Name() string                    { return InstallTypeBundle }
 func (bundleType) ImageSuffix() string             { return "bundle" }
 func (bundleType) SourceRootContainer() string     { return GetBundleRootContainerPath() }
+func (bundleType) QaAnalyzePath() string           { return GetBundleRootContainerPath() }
 func (bundleType) RunsComposerRequire() bool       { return true }
 func (bundleType) RunsComposerInstall() bool       { return false }
 func (bundleType) SyncsVendorToHost() bool         { return true }
@@ -36,6 +38,7 @@ type projectType struct{}
 func (projectType) Name() string                    { return InstallTypeProject }
 func (projectType) ImageSuffix() string             { return "project" }
 func (projectType) SourceRootContainer() string     { return OroRootDir }
+func (projectType) QaAnalyzePath() string           { return OroRootDir + "/src" }
 func (projectType) RunsComposerRequire() bool       { return false }
 func (projectType) RunsComposerInstall() bool       { return true }
 func (projectType) SyncsVendorToHost() bool         { return false }

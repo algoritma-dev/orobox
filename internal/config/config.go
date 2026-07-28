@@ -76,6 +76,11 @@ type OroVersions struct {
 	PNPM          string
 	RabbitMQ      string
 	Elasticsearch string
+	// Symfony is the Symfony minor line this Oro version ships. QA tools install into
+	// an isolated vendor tree, but PHPStan co-loads Oro's classes with the tools'
+	// Symfony copies in one process, so those copies must match this line or PHP
+	// fatals on incompatible method signatures. See GetQaSymfonyConstraints.
+	Symfony string
 }
 
 // SupportedOroVersions is the list of supported OroCommerce versions.
@@ -93,6 +98,7 @@ func GetVersionsForOro(oroVersion string) OroVersions {
 			PNPM:          "10",
 			RabbitMQ:      "4.2-management-alpine",
 			Elasticsearch: "9.2.0",
+			Symfony:       "6.4",
 		}
 	case "6.1":
 		return OroVersions{
@@ -103,6 +109,7 @@ func GetVersionsForOro(oroVersion string) OroVersions {
 			NPM:           "10",
 			RabbitMQ:      "3.12-management-alpine",
 			Elasticsearch: "8.4.1",
+			Symfony:       "6.4",
 		}
 	case "6.0":
 		return OroVersions{
@@ -113,6 +120,7 @@ func GetVersionsForOro(oroVersion string) OroVersions {
 			NPM:           "10",
 			RabbitMQ:      "3.12-management-alpine",
 			Elasticsearch: "8.4.1",
+			Symfony:       "6.4",
 		}
 	case "5.1":
 		return OroVersions{
@@ -123,6 +131,7 @@ func GetVersionsForOro(oroVersion string) OroVersions {
 			NPM:           "9.3",
 			RabbitMQ:      "3.11-management-alpine",
 			Elasticsearch: "8.4.1",
+			Symfony:       "5.4",
 		}
 	default:
 		// Fallback for other versions or default
@@ -252,6 +261,59 @@ func GetSourceRootContainerPath() string {
 		return GetBundleRootContainerPath()
 	}
 	return installType.SourceRootContainer()
+}
+
+// GetQaAnalyzePath returns the source tree PHPStan should analyze for the active
+// install type. Passing this explicitly on the PHPStan CLI overrides the config's
+// own `paths`, which the algoritma plugin resolves against the isolated QA dir.
+func GetQaAnalyzePath() string {
+	installType, err := InstallTypeFor(viper.GetString("type"))
+	if err != nil {
+		return GetBundleRootContainerPath()
+	}
+	return installType.QaAnalyzePath()
+}
+
+// GetQaSymfonyConstraints returns Composer constraints that pin the QA tools'
+// Symfony components (and the ABI-critical PSR packages) to the same line Oro
+// ships. Without them, bamarni resolves the tools against the latest Symfony,
+// and PHPStan then fatals when it co-loads Oro's older Symfony classes with the
+// tools' newer copies (mismatched method signatures on ServiceLocator,
+// Command::execute, TraceableEventDispatcher, ...).
+func GetQaSymfonyConstraints(oroVersion string) []string {
+	sf := GetVersionsForOro(oroVersion).Symfony
+	if sf == "" {
+		sf = "6.4"
+	}
+
+	components := []string{
+		"console", "event-dispatcher", "string", "finder",
+		"filesystem", "process", "options-resolver", "stopwatch",
+	}
+	constraints := make([]string, 0, len(components)+4)
+	for _, c := range components {
+		constraints = append(constraints, "symfony/"+c+":^"+sf)
+	}
+
+	if sf == "5.4" {
+		// Symfony 5.4 pairs with service-contracts v2 / psr-container v1. psr/log is
+		// capped at ^2 because symfony/console 5.4 conflicts with psr/log >=3, which
+		// algoritma/php-coding-standards otherwise drags in via composer/composer.
+		constraints = append(constraints,
+			"symfony/service-contracts:^2.5",
+			"symfony/event-dispatcher-contracts:^2.5",
+			"psr/container:^1.1",
+			"psr/log:^2",
+		)
+	} else {
+		// Symfony 6.4 pairs with service-contracts v3 / psr-container v2.
+		constraints = append(constraints,
+			"symfony/service-contracts:^3.0",
+			"symfony/event-dispatcher-contracts:^3.0",
+			"psr/container:^2.0",
+		)
+	}
+	return constraints
 }
 
 // GetHostBundlePath returns the absolute path to the bundle on the host.
