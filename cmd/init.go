@@ -22,7 +22,6 @@ import (
 )
 
 var (
-	bundlePath      string
 	oroVersion      string
 	bundleNamespace string
 	installType     string
@@ -33,22 +32,10 @@ var (
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize the development environment",
+	Long: `Initialize provisions the environment in the current directory: it generates
+the configuration, the Docker Compose files, and runs the OroCommerce install. Use
+'orobox create project|bundle' first to scaffold the source tree.`,
 	Run: func(_ *cobra.Command, _ []string) {
-		absPath, err := filepath.Abs(bundlePath)
-		if err != nil {
-			panic(err)
-		}
-		bundlePath = absPath
-
-		err = os.MkdirAll(bundlePath, 0755)
-		if err != nil {
-			panic(err)
-		}
-
-		if err := os.Chdir(bundlePath); err != nil {
-			panic(err)
-		}
-
 		generateConfig()
 
 		// Reload config after generation
@@ -270,7 +257,6 @@ func performInstallation() bool {
 func init() {
 	rootCmd.AddCommand(initCmd)
 
-	initCmd.Flags().StringVarP(&bundlePath, "bundle-path", "b", ".", "Bundle path")
 	initCmd.Flags().StringVarP(&oroVersion, "oro-version", "v", "6.1", "OroCommerce version")
 	initCmd.Flags().StringVarP(&bundleNamespace, "bundle-namespace", "n", "", "Bundle namespace")
 	initCmd.Flags().StringVarP(&installType, "type", "t", "", "Installation type (bundle|project)")

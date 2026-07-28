@@ -23,7 +23,7 @@ var rootCmd = &cobra.Command{
 	Long:    `Orobox is a CLI tool to quickly configure an isolated development environment for OroCommerce bundles.`,
 	Version: Version,
 	PersistentPreRun: func(cmd *cobra.Command, _ []string) {
-		if ConfigError != nil && cmd.Name() != "init" && cmd.Name() != "self-update" && cmd.Name() != "internal-gen-docker" {
+		if ConfigError != nil && !isConfigExempt(cmd) {
 			utils.PrintError(ConfigError.Error())
 			os.Exit(1)
 		}
@@ -49,6 +49,20 @@ func init() {
 
 // ConfigError contains the error if the configuration file is invalid.
 var ConfigError error
+
+// isConfigExempt reports whether a command may run without a valid .orobox.yaml.
+// These commands either create the config/source tree or manage the binary itself.
+func isConfigExempt(cmd *cobra.Command) bool {
+	switch cmd.Name() {
+	case "init", "self-update", "internal-gen-docker", "create":
+		return true
+	}
+	// create's subcommands (project, bundle) run before any config exists.
+	if cmd.Parent() != nil && cmd.Parent().Name() == "create" {
+		return true
+	}
+	return false
+}
 
 func initConfig() {
 	if cfgFile != "" {

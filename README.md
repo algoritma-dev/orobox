@@ -155,8 +155,42 @@ These options can be used with any command:
 
 The main command is `oro` (or `orobox`, depending on how you installed it).
 
-### 1. Initialization (`init`)
-Prepares the development environment in your bundle repository.
+### 1. Scaffolding (`create`)
+Creates a new source tree on disk and stops. It does **not** touch Docker, the
+configuration, or the OroCommerce install — that is `init`'s job. The typical flow is
+`create` → `cd` into the new directory → `init`.
+
+Scaffold a bundle skeleton:
+```bash
+orobox create bundle 'Acme\FooBundle\AcmeFooBundle'
+# or a short class name (a top-level namespace is assumed unless --namespace is given)
+orobox create bundle AcmeFooBundle --namespace 'Acme\FooBundle'
+```
+This generates the bundle class, `DependencyInjection/` (Extension + Configuration),
+`Resources/config/services.yml`, `Resources/config/oro/bundles.yml`, `composer.json`,
+and `.gitignore`. No network access is required.
+
+Bundle options:
+- `--namespace`, `-n`: PHP namespace for the bundle (e.g. `Acme\FooBundle`).
+- `--package`, `-p`: Composer package name (e.g. `acme/foo-bundle`).
+- `--dir`: Target directory (default: the bundle class name).
+
+Scaffold a project checkout:
+```bash
+orobox create project my-project
+```
+This clones the public `oroinc/orocommerce-application` skeleton into `my-project/`
+(no credentials needed), then removes its `.git` so you start with a fresh history.
+
+Project options:
+- `--oro-version`, `-v`: OroCommerce version to scaffold (default "6.1").
+
+Both `create` subcommands refuse to write into a directory that already exists and is
+non-empty.
+
+### 2. Initialization (`init`)
+Provisions the development environment in the **current directory** (run it inside a
+directory produced by `create`, or an existing project/bundle checkout).
 ```bash
 orobox init
 ```
@@ -164,33 +198,33 @@ This command:
 - Creates the `.orobox.yaml` file if missing (interactive mode).
 - Generates SSL certificates if required.
 - Configures the necessary Docker files.
+- Runs the OroCommerce install.
 
 Options:
-- `--bundle-path`, `-b`: Bundle path (default ".").
 - `--oro-version`, `-v`: OroCommerce version to use (default "6.1").
 - `--bundle-namespace`, `-n`: Bundle namespace (e.g., "MyVendor/Bundle/MyBundle").
 - `--type`, `-t`: Installation type — `bundle` or `project`. If omitted, `init` prompts interactively (default `bundle`).
 
-### 2. Start Environment (`up`)
+### 3. Start Environment (`up`)
 Starts Docker containers and configures OroCommerce.
 ```bash
 orobox up
 ```
 The command dynamically generates the `docker-compose.yml` file, starts the services, and proceeds with the environment installation or update.
 
-### 3. Stop Environment (`down`)
+### 4. Stop Environment (`down`)
 Shuts down the Docker services associated with the bundle.
 ```bash
 orobox down
 ```
 
-### 4. Shell Access (`shell`)
+### 5. Shell Access (`shell`)
 Accesses a container in interactive mode (default: php).
 ```bash
 orobox shell
 ```
 
-### 5. View Logs (`logs`)
+### 6. View Logs (`logs`)
 Displays logs from different services in the development environment. At least one flag must be specified.
 ```bash
 orobox logs --app
@@ -203,25 +237,25 @@ Options:
 - `--cron`: Cron logs.
 - `--ws`: WebSocket logs.
 
-### 6. Symfony Console (`console`)
+### 7. Symfony Console (`console`)
 Executes Symfony commands in the application container.
 ```bash
 orobox console cache:clear
 ```
 
-### 7. Run Tests (`test`)
+### 8. Run Tests (`test`)
 Runs PHPUnit tests within the configured environment.
 ```bash
 orobox test
 ```
 
-### 8. QA Tools Initialization (`qa-init`)
+### 9. QA Tools Initialization (`qa-init`)
 Configures and installs the necessary QA tools (PHPStan, coding standards, ESLint, Stylelint) in your bundle.
 ```bash
 orobox qa-init
 ```
 
-### 9. Run QA Tools (`qa`)
+### 10. Run QA Tools (`qa`)
 Executes the QA analysis tools. When no flag is provided, runs the tools enabled in `.orobox.yaml` under `test.qa` (all tools are enabled by default if not configured).
 ```bash
 orobox qa
@@ -239,13 +273,13 @@ CLI flags always override the configuration. Example:
 orobox qa --phpstan --eslint
 ```
 
-### 10. Total Cleanup (`clean`)
+### 11. Total Cleanup (`clean`)
 Removes all associated containers and volumes to start from scratch.
 ```bash
 orobox clean
 ```
 
-### 11. Run Custom Commands (`run`)
+### 12. Run Custom Commands (`run`)
 Runs a custom command defined in your `.orobox.yaml` file.
 ```bash
 orobox run <command-name>

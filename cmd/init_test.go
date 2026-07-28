@@ -152,6 +152,12 @@ domains:
 	}
 }
 
+func TestBundlePathFlagRemoved(t *testing.T) {
+	if f := initCmd.Flags().Lookup("bundle-path"); f != nil {
+		t.Error("init should no longer register the --bundle-path flag (folder creation moved to 'create')")
+	}
+}
+
 func TestForceInstallFlagRegistered(t *testing.T) {
 	flag := initCmd.Flags().Lookup("force-install")
 	if flag == nil {
