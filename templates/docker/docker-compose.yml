@@ -151,9 +151,6 @@ services:
       interval: 5s
       timeout: 30s
       start_period: 15s
-    environment:
-      ORO_ENV: ${ORO_ENV:-dev}
-      ORO_LOG_PATH: php://stderr
     depends_on:
       {{if .Postgres -}}
       "db":
@@ -183,9 +180,6 @@ services:
     restart: unless-stopped
     user: ${ORO_USER_RUNTIME:-www-data}
     init: true
-    environment:
-      ORO_ENV: ${ORO_ENV:-dev}
-      ORO_LOG_PATH: php://stderr
     depends_on:
       "php-fpm-app":
         condition: service_healthy
@@ -200,8 +194,6 @@ services:
     env_file:
       - .env
     environment:
-      ORO_ENV: ${ORO_ENV:-dev}
-      ORO_LOG_PATH: php://stderr
       ORO_XDEBUG_ENABLED: ${ORO_CONSUMER_XDEBUG_ENABLED:-false}
     depends_on:
       "php-fpm-app":
@@ -220,8 +212,6 @@ services:
     env_file:
       - .env
     environment:
-      ORO_ENV: ${ORO_ENV:-dev}
-      ORO_LOG_PATH: php://stderr
       ORO_XDEBUG_ENABLED: ${ORO_CRON_XDEBUG_ENABLED:-false}
     volumes: *volumes-oro
     depends_on:
