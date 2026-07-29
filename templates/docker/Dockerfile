@@ -150,11 +150,13 @@ RUN { \
         echo "opcache.enable={{if eq .Type "demo"}}1{{else}}0{{end}}"; \
         echo "opcache.enable_cli={{if eq .Type "demo"}}1{{else}}0{{end}}"; \
         echo 'opcache.memory_consumption=256'; \
-        echo 'opcache.interned_strings_buffer=16'; \
-        echo 'opcache.max_accelerated_files=20000'; \
+        echo 'opcache.interned_strings_buffer=32'; \
+        echo 'opcache.max_accelerated_files=32531'; \
         echo 'opcache.validate_timestamps={{if eq .Type "demo"}}0{{else}}1{{end}}'; \
         echo 'opcache.revalidate_freq=0'; \
         echo 'opcache.fast_shutdown=1'; \
+        echo 'realpath_cache_size=4096K'; \
+        echo 'realpath_cache_ttl=600'; \
     } > /usr/local/etc/php/conf.d/oro-custom.ini \
     && { \
         echo '[www]'; \

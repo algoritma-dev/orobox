@@ -224,6 +224,7 @@ func EnsureDockerCompose() bool {
 		RunsComposerRequire     bool
 		RunsComposerInstall     bool
 		SyncsVendorToHost       bool
+		MountsEnvFiles          bool
 	}{
 		Type:                    viper.GetString("type"),
 		InternalDir:             internalDir,
@@ -250,6 +251,7 @@ func EnsureDockerCompose() bool {
 	data.RunsComposerRequire = installType.RunsComposerRequire()
 	data.RunsComposerInstall = installType.RunsComposerInstall()
 	data.SyncsVendorToHost = installType.SyncsVendorToHost()
+	data.MountsEnvFiles = installType.MountsInternalEnvFiles()
 
 	if data.TmpfsSize == "" {
 		data.TmpfsSize = "1g"

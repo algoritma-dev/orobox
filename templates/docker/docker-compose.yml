@@ -17,8 +17,10 @@ x-templates:
     - "cache:{{.OroRootDir}}/var/cache:delegated"
     - "public_storage:{{.OroRootDir}}/public/media:delegated"
     - "private_storage:{{.OroRootDir}}/var/data:delegated"
+    {{if .MountsEnvFiles -}}
     - "{{.InternalDir}}/.env:{{.OroRootDir}}/.env-app.local:cached"
     - "{{.InternalDir}}/.env.test:{{.OroRootDir}}/.env-app.test:cached"
+    {{- end}}
 
 services:
   application:

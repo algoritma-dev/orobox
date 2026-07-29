@@ -113,9 +113,20 @@ func TestOroConfig_Validate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "demo without namespace is valid",
+			config: OroConfig{
+				Type:       InstallTypeDemo,
+				OroVersion: "6.1",
+				Domains: []DomainConfig{
+					{Host: "example.com"},
+				},
+			},
+			wantErr: false,
+		},
+		{
 			name: "unknown type is rejected",
 			config: OroConfig{
-				Type:       "demo",
+				Type:       "garbage",
 				Namespace:  "MyNamespace",
 				OroVersion: "6.1",
 				Domains: []DomainConfig{

@@ -153,6 +153,9 @@ func bundleComposeData() map[string]any {
 		"SyncsVendorToHost":       true,
 		"RunsComposerRequire":     true,
 		"RunsComposerInstall":     false,
+		"MountsEnvFiles":          true,
+		"Type":                    "bundle",
+		"UserRuntime":             "1000:1000",
 		"InternalDir":             ".orobox",
 		"NginxHTTPPort":           "8080",
 		"NginxHTTPSPort":          "8443",
@@ -178,6 +181,17 @@ func projectComposeData() map[string]any {
 	d["RunsComposerRequire"] = false
 	d["RunsComposerInstall"] = true
 	d["BundlePackageName"] = ""
+	d["MountsEnvFiles"] = false
+	d["Type"] = "project"
+	return d
+}
+
+// demoComposeData is projectComposeData with the demo image tag: demo differs from project
+// only in its prebuilt image and its prod runtime, not in how volumes are wired.
+func demoComposeData() map[string]any {
+	d := projectComposeData()
+	d["ImageSuffix"] = "demo"
+	d["Type"] = "demo"
 	return d
 }
 
@@ -207,6 +221,16 @@ func TestComposeSetupGolden(t *testing.T) {
 		mustNotContain(t, out, "vendor-oro:/vendor-host")
 		mustNotContain(t, out, "Populating vendor folder")
 	})
+
+	t.Run("demo", func(t *testing.T) {
+		out := renderRealTemplate(t, path, demoComposeData())
+		assertValidYAML(t, "setup/demo", out)
+		mustContain(t, out, "6.1-demo-latest")
+		mustContain(t, out, `"/host/repo:/var/www/oro:cached"`)
+		mustContain(t, out, "composer install --no-interaction --no-scripts")
+		mustNotContain(t, out, "oro_app:/var/www/oro")
+		mustNotContain(t, out, "composer require")
+	})
 }
 
 func TestComposeRuntimeGolden(t *testing.T) {
@@ -221,6 +245,7 @@ func TestComposeRuntimeGolden(t *testing.T) {
 		mustContain(t, out, `/host/repo/vendor-oro:/var/www/oro/vendor`)
 		mustContain(t, out, "vendor-oro:/vendor-host:delegated")
 		mustContain(t, out, ".env-app.local")
+		mustContain(t, out, ".env-app.test")
 	})
 
 	t.Run("project", func(t *testing.T) {
@@ -228,10 +253,35 @@ func TestComposeRuntimeGolden(t *testing.T) {
 		assertValidYAML(t, "runtime/project", out)
 		mustContain(t, out, "6.1-project-latest")
 		mustContain(t, out, `"/host/repo:/var/www/oro:cached"`)
-		mustContain(t, out, ".env-app.local")
+		mustNotContain(t, out, ".env-app.local")
+		mustNotContain(t, out, ".env-app.test")
 		mustNotContain(t, out, "oro_app:/var/www/oro")
 		mustNotContain(t, out, "vendor-oro:/vendor-host")
 	})
+
+	t.Run("demo", func(t *testing.T) {
+		out := renderRealTemplate(t, path, demoComposeData())
+		assertValidYAML(t, "runtime/demo", out)
+		mustContain(t, out, "6.1-demo-latest")
+		mustContain(t, out, `"/host/repo:/var/www/oro:cached"`)
+		mustNotContain(t, out, ".env-app.local")
+		mustNotContain(t, out, ".env-app.test")
+		mustNotContain(t, out, "oro_app:/var/www/oro")
+		mustNotContain(t, out, "vendor-oro:/vendor-host")
+	})
+}
+
+func TestEnvTemplateOroEnvPerType(t *testing.T) {
+	const path = "../../templates/docker/.env"
+
+	out := renderRealTemplate(t, path, bundleComposeData())
+	mustContain(t, out, "ORO_ENV=dev")
+
+	out = renderRealTemplate(t, path, projectComposeData())
+	mustContain(t, out, "ORO_ENV=dev")
+
+	out = renderRealTemplate(t, path, demoComposeData())
+	mustContain(t, out, "ORO_ENV=prod")
 }
 
 func mustContain(t *testing.T, haystack, needle string) {

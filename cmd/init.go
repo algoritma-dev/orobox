@@ -98,6 +98,10 @@ func performInstallation() bool {
 		return false
 	}
 
+	// EnsureDockerCompose has already written the internal env files, so project and demo
+	// checkouts can be seeded before anything starts or clones.
+	seedProjectEnvFiles(strategy)
+
 	// Remove any existing containers to ensure fresh bind mounts after init.
 	// If vendor-oro was deleted and recreated, running containers would still hold
 	// a bind mount to the old (deleted) inode, causing an empty vendor inside containers.
@@ -267,13 +271,53 @@ func performInstallation() bool {
 	return true
 }
 
+// seedProjectEnvFiles copies Orobox's generated env files into the checkout for install
+// types that no longer bind-mount them (project, demo), so a freshly scaffolded
+// application starts with working DSNs. An existing file is never touched: from the first
+// init onwards the project owns these files. This runs only from init — wiring it into the
+// EnsureDockerCompose path shared by up, run, test and friends would clobber the project's
+// own edits on every command.
+func seedProjectEnvFiles(strategy config.InstallType) {
+	if strategy.MountsInternalEnvFiles() {
+		return
+	}
+
+	internalDir := config.GetInternalDir()
+	repoDir := config.GetHostBundlePath()
+
+	seeds := []struct{ src, dst string }{
+		{filepath.Join(internalDir, ".env"), filepath.Join(repoDir, ".env-app.local")},
+		{filepath.Join(internalDir, ".env.test"), filepath.Join(repoDir, ".env-app.test")},
+	}
+
+	for _, seed := range seeds {
+		if _, err := os.Stat(seed.dst); err == nil {
+			continue
+		} else if !errors.Is(err, os.ErrNotExist) {
+			utils.PrintWarning(fmt.Sprintf("Could not check %s: %v", seed.dst, err))
+			continue
+		}
+
+		content, err := os.ReadFile(seed.src)
+		if err != nil {
+			utils.PrintWarning(fmt.Sprintf("Could not read %s: %v", seed.src, err))
+			continue
+		}
+		if err := os.WriteFile(seed.dst, content, 0644); err != nil {
+			utils.PrintWarning(fmt.Sprintf("Could not seed %s: %v", seed.dst, err))
+			continue
+		}
+		utils.PrintInfo(fmt.Sprintf("Seeded %s from %s (the project owns it from now on).", filepath.Base(seed.dst), seed.src))
+	}
+}
+
 func init() {
 	rootCmd.AddCommand(initCmd)
 
 	initCmd.Flags().StringVarP(&bundlePath, "bundle-path", "b", ".", "Bundle path")
 	initCmd.Flags().StringVarP(&oroVersion, "oro-version", "v", "6.1", "OroCommerce version")
 	initCmd.Flags().StringVarP(&bundleNamespace, "bundle-namespace", "n", "", "Bundle namespace")
-	initCmd.Flags().StringVarP(&installType, "type", "t", "", "Installation type (bundle|project)")
+	initCmd.Flags().StringVarP(&installType, "type", "t", "", "Installation type (bundle|project|demo)")
 	initCmd.Flags().BoolVar(&forceInstall, "force-install", false, "Force oro:install even if the project already has composer.json")
 }
 
@@ -312,7 +356,7 @@ func generateConfig() {
 	typeOfInstall := installType
 	if typeOfInstall == "" {
 		typeOfInstall = utils.AskSelection(reader, "Installation type",
-			[]string{config.InstallTypeBundle, config.InstallTypeProject}, config.InstallTypeBundle)
+			[]string{config.InstallTypeBundle, config.InstallTypeProject, config.InstallTypeDemo}, config.InstallTypeBundle)
 	}
 
 	strategy, err := config.InstallTypeFor(typeOfInstall)

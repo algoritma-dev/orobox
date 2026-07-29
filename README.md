@@ -1,6 +1,6 @@
 # Orobox - CLI Tool for OroCommerce Development
 
-Orobox is a command-line tool (CLI) developed in Go to quickly set up an isolated and reproducible development environment for OroCommerce. It supports the development of individual **bundles** as well as whole OroCommerce **projects**.
+Orobox is a command-line tool (CLI) developed in Go to quickly set up an isolated and reproducible development environment for OroCommerce. It supports the development of individual **bundles**, whole OroCommerce **projects**, and production-tuned **demo** instances.
 
 ## ⚠️ Important Disclaimer
 **WARNING: This tool is designed EXCLUSIVELY for local development. It MUST NOT be used in production environments.** Orobox configures the environment to facilitate debugging and development, which may not comply with security requirements and best practices necessary for a production environment.
@@ -89,12 +89,14 @@ composer:
 
 ### Installation types (`type`)
 
-Orobox supports two installation types, selected via the `type` field (or the `init` prompt / `--type` flag):
+Orobox supports three installation types, selected via the `type` field (or the `init` prompt / `--type` flag):
 
 - **`bundle`** (default): your repository is a single bundle that gets grafted onto a prebuilt OroCommerce application. Orobox downloads the Oro app into a named volume, mounts your bundle under `bundles/<namespace>`, wires it via `composer config repositories.bundle` + `composer require`, and syncs the resolved vendor back to the host. Requires `class` / `namespace`.
 - **`project`**: your repository **is** the whole OroCommerce application. Orobox bind-mounts the checkout directly onto `/var/www/oro`, runs `composer install` (resolving dependencies from your repo's own `composer.lock`), then runs the Oro installer. No bundle `namespace`/`class` is needed, and no vendor is synced back to the host.
 
   > The project repository must contain a `composer.json` (and ideally a `composer.lock`). If the lock file is absent, Composer resolves from `composer.json`.
+
+- **`demo`**: identical to `project` in how sources and vendors are wired, but the stack runs production-tuned — `ORO_ENV=prod`, OPcache enabled with `opcache.validate_timestamps=0`, and no Xdebug compiled into the image. Intended for demo and staging instances, not for development: PHP will not pick up source edits until the container restarts.
 
 Example `project` config:
 ```yaml
@@ -106,8 +108,27 @@ domains:
     ssl: false
 ```
 
+Example `demo` config:
+```yaml
+type: demo
+oro_version: "6.1"
+domains:
+  - host: demo.local
+    root: public
+    ssl: false
+```
+
+#### Environment files per install type
+
+- **`bundle`**: Orobox bind-mounts its generated `.env` and `.env.test` over the application's `.env-app.local` and `.env-app.test`. Orobox owns those files; edit them through `.orobox.yaml` or by placing a `.env` / `.env.test` next to `.orobox.yaml`.
+- **`project` and `demo`**: the checkout owns `.env-app`, `.env-app.local` and `.env-app.test`. On the first `orobox init`, Orobox copies its generated `.env` to `.env-app.local` and `.env.test` to `.env-app.test` **only if those files do not already exist**, then never touches them again — subsequent `orobox up` / `run` / `test` invocations leave your edits alone.
+
+  > **Upgrading an existing `project` setup:** earlier Orobox versions bind-mounted the internal env files over `.env-app.local` and `.env-app.test`, so your checkout may not contain them. Either re-run `orobox init` to have them seeded, or copy them yourself from the Orobox internal directory. If they are missing, the application starts with no database DSN.
+
+  > The `db` and `db-test` containers still read `POSTGRES_*` from Orobox's internal `.env` and `.env.test`. If you change `ORO_DB_*` in your own `.env-app.local`, mirror it there, or the application and the database will disagree on credentials.
+
 ### Configuration Fields
-- `type`: Installation type — `bundle` (default) or `project`. See [Installation types](#installation-types-type).
+- `type`: Installation type — `bundle` (default), `project` or `demo`. See [Installation types](#installation-types-type).
 - `class`: Name of the bundle class (bundle type only).
 - `namespace`: PHP namespace of the bundle (bundle type only).
 - `oro_version`: OroCommerce version (e.g., "7.0", "6.1", "6.0", "5.1").
@@ -169,7 +190,7 @@ Options:
 - `--bundle-path`, `-b`: Bundle path (default ".").
 - `--oro-version`, `-v`: OroCommerce version to use (default "6.1").
 - `--bundle-namespace`, `-n`: Bundle namespace (e.g., "MyVendor/Bundle/MyBundle").
-- `--type`, `-t`: Installation type — `bundle` or `project`. If omitted, `init` prompts interactively (default `bundle`).
+- `--type`, `-t`: Installation type — `bundle`, `project` or `demo`. If omitted, `init` prompts interactively (default `bundle`).
 
 ### 2. Start Environment (`up`)
 Starts Docker containers and configures OroCommerce.

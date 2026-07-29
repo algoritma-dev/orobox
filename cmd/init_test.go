@@ -116,6 +116,57 @@ func TestGenerateConfigProject(t *testing.T) {
 	}
 }
 
+func TestGenerateConfigDemo(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "orobox-init-demo-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	origWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(origWd)
+
+	// Demo installs skip the bundle class/namespace prompt, exactly like project.
+	// 1. Installation type (selection 3 = demo)
+	// 2. OroCommerce version (selection 1 = 7.0)
+	// 3. Host: demo.local
+	// 4. Root: public
+	// 5. SSL: n
+	// 6. Redis: n
+	// 7. Mailpit: y
+	// 8. RabbitMQ: n
+	// 9. Elasticsearch: n
+	// 10. Adminer: y
+	input := "3\n1\ndemo.local\npublic\nn\nn\ny\nn\nn\ny\n"
+
+	oldType := installType
+	installType = ""
+	defer func() { installType = oldType }()
+
+	oldStdin := stdin
+	stdin = strings.NewReader(input)
+	defer func() { stdin = oldStdin }()
+
+	generateConfig()
+
+	data, err := os.ReadFile(".orobox.yaml")
+	if err != nil {
+		t.Fatalf(".orobox.yaml was not created: %v", err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, "type: demo") {
+		t.Errorf("Expected type demo in config, got:\n%s", content)
+	}
+	if !strings.Contains(content, "host: demo.local") {
+		t.Errorf("Expected host demo.local in config, got:\n%s", content)
+	}
+	if !strings.Contains(content, `namespace: ""`) || !strings.Contains(content, `class: ""`) {
+		t.Errorf("Demo config should have empty bundle namespace/class, got:\n%s", content)
+	}
+}
+
 func TestValidateConfig(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "orobox-validate-test")
 	if err != nil {
@@ -159,5 +210,17 @@ func TestForceInstallFlagRegistered(t *testing.T) {
 	}
 	if flag.DefValue != "false" {
 		t.Errorf("--force-install default should be false, got %q", flag.DefValue)
+	}
+}
+
+func TestInitTypeFlagOffersDemo(t *testing.T) {
+	flag := initCmd.Flags().Lookup("type")
+	if flag == nil {
+		t.Fatal("init command should register the --type flag")
+	}
+	for _, want := range []string{"bundle", "project", "demo"} {
+		if !strings.Contains(flag.Usage, want) {
+			t.Errorf("--type usage should mention %q, got %q", want, flag.Usage)
+		}
 	}
 }
