@@ -159,6 +159,9 @@ type OroConfig struct {
 	Test       TestConfig      `yaml:"test" mapstructure:"test"`
 	Commands   []CommandConfig `yaml:"commands" mapstructure:"commands"`
 	Composer   ComposerConfig  `yaml:"composer" mapstructure:"composer"`
+	// Deploy is a pointer so a project without deployment keeps a clean config file: a struct
+	// value would always be serialized, empty stages and all.
+	Deploy *DeployConfig `yaml:"deploy,omitempty" mapstructure:"deploy"`
 }
 
 // Install types for OroCommerce.
@@ -207,7 +210,7 @@ func (c *OroConfig) Validate() error {
 			return errors.New("config error: 'host' is required for domain at index " + string(rune(i)))
 		}
 	}
-	return nil
+	return c.ValidateDeploy()
 }
 
 // ParseConfig parses a configuration from bytes.
@@ -268,6 +271,17 @@ func GetSourceRootContainerPath() string {
 // own `paths`, which the algoritma plugin resolves against the isolated QA dir.
 func GetQaAnalyzePath() string {
 	installType, err := InstallTypeFor(viper.GetString("type"))
+	if err != nil {
+		return GetBundleRootContainerPath()
+	}
+	return installType.QaAnalyzePath()
+}
+
+// QaAnalyzePathFor returns the tree PHPStan analyzes for an explicit install type, for
+// callers that know the type without going through viper — the deploy pipeline, which is
+// always a project.
+func QaAnalyzePathFor(typeName string) string {
+	installType, err := InstallTypeFor(typeName)
 	if err != nil {
 		return GetBundleRootContainerPath()
 	}

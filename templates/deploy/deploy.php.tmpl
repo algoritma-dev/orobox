@@ -1,0 +1,28 @@
+<?php
+
+// Deployer entry point, created by `orobox deploy-init`.
+//
+// This file is yours: orobox never overwrites it. The Oro tasks live in
+// [[.RecipePath]], which orobox does rewrite on every deploy-init run.
+//
+// Host, user, port, path, repository, ref and keep_releases come from the OROBOX_DEPLOY_*
+// environment variables `orobox deploy` injects from .orobox.yaml.
+
+namespace Deployer;
+
+require 'recipe/common.php';
+require __DIR__ . '/[[.RecipePath]]';
+
+set('repository', getenv('OROBOX_DEPLOY_REPOSITORY'));
+set('branch', getenv('OROBOX_DEPLOY_REF'));
+set('keep_releases', (int) (getenv('OROBOX_DEPLOY_KEEP_RELEASES') ?: [[.DefaultKeepReleases]]));
+
+// Files and directories that survive a release. Adjust to the project's needs.
+set('shared_files', ['.env-app.local']);
+set('shared_dirs', ['var/log', 'public/media', 'var/import_export']);
+set('writable_dirs', ['var/cache', 'var/log']);
+
+host(getenv('OROBOX_DEPLOY_HOST'))
+    ->setRemoteUser(getenv('OROBOX_DEPLOY_USER'))
+    ->setPort((int) (getenv('OROBOX_DEPLOY_PORT') ?: [[.DefaultSSHPort]]))
+    ->setDeployPath(getenv('OROBOX_DEPLOY_PATH'));

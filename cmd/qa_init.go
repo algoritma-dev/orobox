@@ -2,12 +2,12 @@
 package cmd
 
 import (
-	"encoding/base64"
 	"fmt"
 	"strings"
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
+	"github.com/algoritma-dev/orobox/internal/qatools"
 	"github.com/algoritma-dev/orobox/internal/utils"
 
 	"github.com/spf13/cobra"
@@ -40,14 +40,9 @@ func runQaInitCommand(conf config.OroConfig) {
 	oroRoot := config.OroRootDir
 	qaToolsDir := config.QaToolsDir
 
-	needsPhpCodingStandards := config.IsQaToolEnabled("phpstan") || config.IsQaToolEnabled("rector") || config.IsQaToolEnabled("php-cs-fixer")
-	needsTwigCS := config.IsQaToolEnabled("twig-cs-fixer")
-	needsEslint := config.IsQaToolEnabled("eslint")
-	needsStylelint := config.IsQaToolEnabled("stylelint")
-	needsComposerTools := needsPhpCodingStandards || needsTwigCS
-	needsJsTools := needsEslint || needsStylelint
+	plan := qatools.NewInstallPlan(conf.OroVersion)
 
-	if !needsComposerTools && !needsJsTools {
+	if !plan.NeedsComposerTools && !plan.NeedsJSTools {
 		utils.PrintWarning("No QA tools are enabled in configuration. Nothing to install.")
 		return
 	}
@@ -55,7 +50,7 @@ func runQaInitCommand(conf config.OroConfig) {
 	// 1. Install PHP packages using bamarni/composer-bin-plugin.
 	//    This creates an isolated composer project at vendor-bin/ that shares
 	//    the OroCommerce autoloader, so PHPStan can resolve all OroCommerce classes.
-	if needsComposerTools {
+	if plan.NeedsComposerTools {
 		// 1a. Ensure the bin namespace directory and a minimal composer.json exist,
 		//     then use 'composer -d' to set allow-plugins — this works even if the file
 		//     was previously created by bamarni without the required plugin authorizations.
@@ -99,19 +94,6 @@ func runQaInitCommand(conf config.OroConfig) {
 		}
 		utils.PrintSuccess("bamarni/composer-bin-plugin installed.")
 
-		// 1c. Install QA packages in the isolated 'qa' bin namespace.
-		//     Using ':*' forces the latest version, bypassing OroCommerce's locked constraints.
-		var composerPackages []string
-		if needsPhpCodingStandards {
-			composerPackages = append(composerPackages, "phpstan/phpstan-symfony", "phpstan/phpstan-phpunit", "phpstan/phpstan-doctrine", "algoritma/php-coding-standards:*")
-			// Pin the tools' Symfony components to Oro's line so PHPStan can co-load
-			// Oro's classes with them without fatal signature mismatches.
-			composerPackages = append(composerPackages, config.GetQaSymfonyConstraints(conf.OroVersion)...)
-		}
-		if needsTwigCS {
-			composerPackages = append(composerPackages, "vincentlanglet/twig-cs-fixer:*")
-		}
-
 		// Remove project's own php-cs-fixer so it doesn't conflict with the QA namespace install.
 		removeArgs := []string{"exec", "-w", oroRoot, "-T", "application", "composer", "remove", "--dev", "--no-scripts", "friendsofphp/php-cs-fixer"}
 		if err := docker.RunComposeCommandSilently("Removing project php-cs-fixer...", removeArgs...); err != nil {
@@ -119,13 +101,17 @@ func runQaInitCommand(conf config.OroConfig) {
 			return
 		}
 
+		// 1c. Install QA packages in the isolated 'qa' bin namespace.
+		//     Using ':*' forces the latest version, bypassing OroCommerce's locked constraints.
 		composerArgs := []string{"exec", "-w", oroRoot}
 		if !isTTY() {
 			composerArgs = append(composerArgs, "-T")
 		}
-		// Pipe 'yes y' to auto-accept config file generation prompts from the plugin.
+		// Pipe 'yes y' to auto-accept config file generation prompts from the plugin; '|| true'
+		// swallows the SIGPIPE exit code 'yes' gets once composer stops reading, which a shell
+		// with pipefail would otherwise report as a failed install.
 		// -W allows the Symfony pins to downgrade transitively-locked packages on re-runs.
-		cmdLine := "yes y | composer bin qa require --dev -W " + strings.Join(composerPackages, " ")
+		cmdLine := "(yes y || true) | composer bin qa require --dev -W " + strings.Join(plan.ComposerPackages, " ")
 		composerArgs = append(composerArgs, "application", "bash", "-c", cmdLine)
 
 		if err := docker.RunComposeCommand("Installing Composer QA packages...", composerArgs...); err != nil {
@@ -134,176 +120,42 @@ func runQaInitCommand(conf config.OroConfig) {
 		}
 		utils.PrintSuccess("Composer QA packages installed.")
 
-		// The algoritma/php-coding-standards plugin generates phpstan.neon assuming it
-		// lives at the application root, writing paths relative to it (and hardcoding
-		// Symfony's App_Kernel container filename). Because bamarni places the config in
-		// the isolated QaToolsDir, PHPStan resolves those paths against QaToolsDir and
-		// fails ("Scanned file ... does not exist"). Rewrite them to absolute OroRoot
-		// paths and replace the stub bootstrap loaders with Oro-aware ones.
-		if config.IsQaToolEnabled("phpstan") {
-			fixPhpstanConfigForOro()
+		// The generated phpstan.neon and the missing twig-cs-fixer config both need fixing up
+		// for the Oro layout; the deploy pipeline runs the very same scripts.
+		if plan.NeedsPhpstan {
+			runQaScript("Adapting PHPStan config for Oro layout...", "PHPStan config adapted for Oro layout.", qatools.PhpstanConfigScript())
 		}
-
-		// vincentlanglet/twig-cs-fixer ships no config generator (unlike the
-		// algoritma plugin for the PHP tools), and the linter aborts without a
-		// config file. Write a default one into QaToolsDir so qa.go's fallback
-		// resolves. A bundle-local .twig-cs-fixer.php still takes precedence.
-		if needsTwigCS {
-			writeTwigCsFixerConfig()
+		if plan.NeedsTwigCS {
+			runQaScript("Writing default Twig-CS-Fixer config...", "Twig-CS-Fixer config written.", qatools.TwigConfigScript())
 		}
 	}
 
 	// 2. Install JS packages in the QA tools namespace directory.
-	if needsJsTools {
-		versions := config.GetVersionsForOro(conf.OroVersion)
-		jsManager := "npm"
-		jsInstallCmd := "install"
-		jsSaveDevFlag := "--save-dev"
-		if versions.PNPM != "" {
-			jsManager = "pnpm"
-			jsInstallCmd = "add"
-			jsSaveDevFlag = "-D"
-		}
-
-		var jsPackages []string
-		if needsEslint {
-			jsPackages = append(jsPackages, "eslint@^8.57.0", "eslint-plugin-no-jquery", "eslint-plugin-import")
-		}
-		if needsStylelint {
-			jsPackages = append(jsPackages, "stylelint@^15.11.0", "@oroinc/oro-stylelint-config")
-		}
-
-		npmArgs := []string{"exec", "-w", qaToolsDir, "-T", "application", jsManager, jsInstallCmd, jsSaveDevFlag}
-		if jsManager == "pnpm" {
+	if plan.NeedsJSTools {
+		npmArgs := []string{"exec", "-w", qaToolsDir, "-T", "application", plan.JSManager, plan.JSInstallArg, plan.JSSaveDevFlag}
+		if plan.JSManager == "pnpm" {
 			// pnpm refuses to add deps to a workspace root unless told it's intentional
 			// (ERR_PNPM_ADDING_TO_ROOT). The QA tools dir is such a root.
 			npmArgs = append(npmArgs, "--ignore-workspace-root-check")
 		}
-		npmArgs = append(npmArgs, jsPackages...)
-		if err := docker.RunComposeCommandSilently(fmt.Sprintf("Installing %s QA packages...", strings.ToUpper(jsManager)), npmArgs...); err != nil {
-			utils.PrintError(fmt.Sprintf("Failed to install %s packages: %v", jsManager, err))
+		npmArgs = append(npmArgs, plan.JSPackages...)
+		if err := docker.RunComposeCommandSilently(fmt.Sprintf("Installing %s QA packages...", strings.ToUpper(plan.JSManager)), npmArgs...); err != nil {
+			utils.PrintError(fmt.Sprintf("Failed to install %s packages: %v", plan.JSManager, err))
 			return
 		}
-		utils.PrintSuccess(fmt.Sprintf("%s QA packages installed.", strings.ToUpper(jsManager)))
+		utils.PrintSuccess(fmt.Sprintf("%s QA packages installed.", strings.ToUpper(plan.JSManager)))
 	}
 
 	utils.PrintSuccess("QA tools initialized successfully!")
 }
 
-// oroKernelClass is the OroCommerce application kernel. The Symfony container is
-// dumped to <KernelClass><Env>DebugContainer.xml, so this also drives the
-// containerXmlPath filename PHPStan expects.
-const oroKernelClass = "AppKernel"
-
-// consoleApplicationLoaderPHP boots the real Oro kernel so phpstan-symfony can
-// enumerate console commands. It uses OroRoot's autoloader (not the isolated QA
-// one, which lacks the application classes). It boots the 'dev' env to match the
-// containerXmlPath below: dev is warmed and its config is complete, whereas the
-// 'test' env qa.go exports references files (e.g. security_test.yml) that need a
-// full test setup PHPStan does not require.
-const consoleApplicationLoaderPHP = `<?php
-
-declare(strict_types=1);
-
-use Symfony\Bundle\FrameworkBundle\Console\Application;
-
-require '` + config.OroRootDir + `/vendor/autoload.php';
-require_once '` + config.OroRootDir + `/src/` + oroKernelClass + `.php';
-
-$kernel = new ` + oroKernelClass + `('dev', true);
-
-return new Application($kernel);
-`
-
-// objectManagerLoaderPHP returns Oro's Doctrine ObjectManager for phpstan-doctrine,
-// replacing the throwing stub the plugin generates. Boots 'dev' for the same
-// reason as the console loader above.
-const objectManagerLoaderPHP = `<?php
-
-declare(strict_types=1);
-
-require '` + config.OroRootDir + `/vendor/autoload.php';
-require_once '` + config.OroRootDir + `/src/` + oroKernelClass + `.php';
-
-$kernel = new ` + oroKernelClass + `('dev', true);
-$kernel->boot();
-
-return $kernel->getContainer()->get('doctrine')->getManager();
-`
-
-// twigCsFixerConfigPHP is the default config for vincentlanglet/twig-cs-fixer.
-// new Config() already applies the bundled TwigCsFixer standard ruleset, so this
-// is a minimal, override-friendly starting point.
-const twigCsFixerConfigPHP = `<?php
-
-$ruleset = new TwigCsFixer\Ruleset\Ruleset();
-$ruleset->addStandard(new TwigCsFixer\Standard\TwigCsFixer());
-
-$finder = new TwigCsFixer\File\Finder();
-$finder->in(['` + config.OroRootDir + `/templates', '` + config.OroRootDir + `/src']);
-$finder->exclude(['` + config.OroRootDir + `/vendor', '` + config.OroRootDir + `/vendor-bin']);
-
-$config = new TwigCsFixer\Config\Config();
-$config->setRuleset($ruleset);
-$config->allowNonFixableRules();
-$config->setFinder($finder);
-
-return $config;
-`
-
-// writeTwigCsFixerConfig drops a default .twig-cs-fixer.php into QaToolsDir when
-// none exists, so the twig-cs-fixer linter has a config to load. It never
-// overwrites an existing file, keeping re-runs and manual edits safe.
-func writeTwigCsFixerConfig() {
-	cfg := config.QaToolsDir + "/.twig-cs-fixer.php"
-	b64 := base64.StdEncoding.EncodeToString([]byte(twigCsFixerConfigPHP))
-	script := fmt.Sprintf("[ -f %[1]s ] || printf '%%s' '%[2]s' | base64 -d > %[1]s", cfg, b64)
-
+// runQaScript runs a shell script in the application container, warning rather than failing:
+// a missing generated config is not fatal to the rest of the initialization.
+func runQaScript(progress, success, script string) {
 	args := []string{"exec", "-T", "application", "sh", "-c", script}
-	if err := docker.RunComposeCommandSilently("Writing default Twig-CS-Fixer config...", args...); err != nil {
-		utils.PrintWarning(fmt.Sprintf("Could not write Twig-CS-Fixer config: %v", err))
+	if err := docker.RunComposeCommandSilently(progress, args...); err != nil {
+		utils.PrintWarning(fmt.Sprintf("%s failed: %v", progress, err))
 		return
 	}
-	utils.PrintSuccess("Twig-CS-Fixer config written.")
-}
-
-// fixPhpstanConfigForOro rewrites the generated vendor-bin/qa/phpstan.neon so its
-// paths resolve from OroRoot instead of the isolated QaToolsDir, and installs
-// Oro-aware bootstrap loaders. See the caller for why this is necessary.
-func fixPhpstanConfigForOro() {
-	oro := config.OroRootDir
-	qa := config.QaToolsDir
-	neon := qa + "/phpstan.neon"
-
-	consoleAbs := qa + "/tests/console-application.php"
-	objAbs := qa + "/tests/object-manager.php"
-	xmlAbs := fmt.Sprintf("%s/var/cache/dev/%sDevDebugContainer.xml", oro, oroKernelClass)
-	scanDirAbs := oro + "/var/cache/dev/Symfony/Config"
-	scanFileAbs := oro + "/vendor/symfony/dependency-injection/Loader/Configurator/ContainerConfigurator.php"
-
-	b64Console := base64.StdEncoding.EncodeToString([]byte(consoleApplicationLoaderPHP))
-	b64Obj := base64.StdEncoding.EncodeToString([]byte(objectManagerLoaderPHP))
-
-	// Anchoring each replacement to its key/list-marker keeps this idempotent: once a
-	// value is absolute it no longer matches the relative pattern on a re-run.
-	script := fmt.Sprintf(`set -e
-[ -f %[1]s ] || exit 0
-mkdir -p %[2]s/tests
-sed -i \
- -e 's#consoleApplicationLoader: tests/console-application.php#consoleApplicationLoader: %[3]s#' \
- -e 's#objectManagerLoader: tests/object-manager.php#objectManagerLoader: %[4]s#' \
- -e 's#containerXmlPath: var/cache/dev/App_KernelDevDebugContainer.xml#containerXmlPath: %[5]s#' \
- -e 's#- var/cache/dev/Symfony/Config#- %[6]s#' \
- -e 's#- vendor/symfony/dependency-injection/Loader/Configurator/ContainerConfigurator.php#- %[7]s#' \
- %[1]s
-printf '%%s' '%[8]s' | base64 -d > %[3]s
-printf '%%s' '%[9]s' | base64 -d > %[4]s`,
-		neon, qa, consoleAbs, objAbs, xmlAbs, scanDirAbs, scanFileAbs, b64Console, b64Obj)
-
-	args := []string{"exec", "-T", "application", "sh", "-c", script}
-	if err := docker.RunComposeCommandSilently("Adapting PHPStan config for Oro layout...", args...); err != nil {
-		utils.PrintWarning(fmt.Sprintf("Could not adapt PHPStan config for Oro: %v", err))
-		return
-	}
-	utils.PrintSuccess("PHPStan config adapted for Oro layout.")
+	utils.PrintSuccess(success)
 }

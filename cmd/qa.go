@@ -8,6 +8,7 @@ import (
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
+	"github.com/algoritma-dev/orobox/internal/qatools"
 	"github.com/algoritma-dev/orobox/internal/utils"
 
 	"github.com/spf13/cobra"
@@ -21,13 +22,6 @@ var (
 	qaEslint      bool
 	qaStylelint   bool
 )
-
-type qaTool struct {
-	name    string
-	args    []string
-	workDir string // optional override; uses workingDir if empty
-	enabled bool
-}
 
 var qaCmd = &cobra.Command{
 	Use:   "qa",
@@ -51,29 +45,18 @@ func init() {
 	qaCmd.Flags().BoolVar(&qaStylelint, "stylelint", false, "Run Stylelint")
 }
 
-// qaToolBinaryPaths maps tool names to their expected binary paths inside the isolated QA tools directory.
-var qaToolBinaryPaths = map[string]string{
-	"phpstan":       config.OroRootDir + "/bin/phpstan",
-	"rector":        config.OroRootDir + "/bin/rector",
-	"php-cs-fixer":  config.OroRootDir + "/bin/php-cs-fixer",
-	"twig-cs-fixer": config.OroRootDir + "/bin/twig-cs-fixer",
-	"eslint":        config.OroRootDir + "/node_modules/.bin/eslint",
-	"stylelint":     config.OroRootDir + "/node_modules/.bin/stylelint",
-	"stylelint-css": config.OroRootDir + "/node_modules/.bin/stylelint",
-}
-
 // checkMissingToolBinaries returns the names of tools whose binaries are not present in the container.
-func checkMissingToolBinaries(workingDir string, tools []qaTool) []string {
+func checkMissingToolBinaries(workingDir string, tools []qatools.Tool) []string {
 	seen := map[string]bool{}
 	var checks []string
 
 	for _, t := range tools {
-		binPath, ok := qaToolBinaryPaths[t.name]
+		binPath, ok := qatools.BinaryPaths[t.Name]
 		if !ok || seen[binPath] {
 			continue
 		}
 		seen[binPath] = true
-		checks = append(checks, fmt.Sprintf("test -f %s || printf 'MISSING:%s\\n'", binPath, t.name))
+		checks = append(checks, fmt.Sprintf("test -f %s || printf 'MISSING:%s\\n'", binPath, t.Name))
 	}
 
 	if len(checks) == 0 {
@@ -93,46 +76,36 @@ func checkMissingToolBinaries(workingDir string, tools []qaTool) []string {
 	return missing
 }
 
+// qaFlagFor maps a tool name to the CLI flag that selects it explicitly.
+func qaFlagFor(name string) bool {
+	switch name {
+	case "phpstan":
+		return qaPhpstan
+	case "rector":
+		return qaRector
+	case "php-cs-fixer":
+		return qaPhpCSFixer
+	case "twig-cs-fixer":
+		return qaTwigCSFixer
+	case "eslint":
+		return qaEslint
+	case "stylelint", "stylelint-css":
+		return qaStylelint
+	default:
+		return false
+	}
+}
+
 func runQaCommand() {
 	workingDir := config.GetSourceRootContainerPath()
-	qaToolsDir := config.QaToolsDir
 
-	// Recursive globs, single-quoted so POSIX sh (no globstar) forwards the raw
-	// `**` to the tool, which expands it. Matches bundle and project layouts:
-	// src/<Org>/Bundle/<X>Bundle/Resources/public/... in both install types.
-	jsTarget := "'src/**/Resources/public/**/*.js'"
-	scssTarget := "'src/**/Resources/public/**/*.{scss,less,sass,html}'"
-	cssTarget := "'src/**/Resources/public/**/*.css'"
-
-	// Shell expressions for bundle-first config resolution:
-	// use the bundle's own config if it exists, else fall back to the default generated in QaToolsDir.
-	phpstanConfig := fmt.Sprintf("$([ -f %s/phpstan.neon ] && echo %s/phpstan.neon || echo %s/phpstan.neon)", workingDir, workingDir, qaToolsDir)
-	rectorConfig := fmt.Sprintf("$([ -f %s/rector.php ] && echo %s/rector.php || echo %s/rector.php)", workingDir, workingDir, qaToolsDir)
-	phpCSFixerConfig := fmt.Sprintf("$([ -f %s/.php-cs-fixer.dist.php ] && echo %s/.php-cs-fixer.dist.php || echo %s/.php-cs-fixer.dist.php)", workingDir, workingDir, qaToolsDir)
-	twigCSFixerConfig := fmt.Sprintf("$([ -f %s/.twig-cs-fixer.php ] && echo %s/.twig-cs-fixer.php || echo %s/.twig-cs-fixer.php)", workingDir, workingDir, qaToolsDir)
-	eslintConfig := fmt.Sprintf("$([ -f %s/.eslintrc.yml ] && echo %s/.eslintrc.yml || echo %s/.eslintrc.yml)", workingDir, workingDir, config.OroRootDir)
-	eslintIgnore := fmt.Sprintf("$([ -f %s/.eslintignore ] && echo %s/.eslintignore || echo %s/.eslintignore)", workingDir, workingDir, config.OroRootDir)
-	stylelintConfig := fmt.Sprintf("$([ -f %s/.stylelintrc.yml ] && echo %s/.stylelintrc.yml || echo %s/.stylelintrc.yml)", workingDir, workingDir, config.OroRootDir)
-	stylelintIgnore := fmt.Sprintf("$([ -f %s/.stylelintignore ] && echo %s/.stylelintignore || echo %s/.stylelintignore)", workingDir, workingDir, config.OroRootDir)
-	stylelintCSSConfig := fmt.Sprintf("$([ -f %s/.stylelintrc-css.yml ] && echo %s/.stylelintrc-css.yml || echo %s/.stylelintrc-css.yml)", workingDir, workingDir, config.OroRootDir)
-	stylelintCSSIgnore := fmt.Sprintf("$([ -f %s/.stylelintignore-css ] && echo %s/.stylelintignore-css || echo %s/.stylelintignore-css)", workingDir, workingDir, config.OroRootDir)
-
-	allTools := []qaTool{
-		{"phpstan", []string{config.OroRootDir + "/bin/phpstan", "analyze", config.GetQaAnalyzePath(), "--configuration=" + phpstanConfig, "--autoload-file=" + config.OroRootDir + "/vendor/autoload.php"}, "", qaPhpstan},
-		{"rector", []string{config.OroRootDir + "/bin/rector", "process", "--config=" + rectorConfig}, config.OroRootDir, qaRector},
-		{"php-cs-fixer", []string{config.OroRootDir + "/bin/php-cs-fixer", "fix", "--config=" + phpCSFixerConfig}, "", qaPhpCSFixer},
-		// No positional path: the CLI path would override the config's Finder.
-		// Let the .twig-cs-fixer.php Finder (templates + src, recursive) discover
-		// bundle templates under src/<Org>/Bundle/<X>Bundle/Resources/views.
-		{"twig-cs-fixer", []string{config.OroRootDir + "/bin/twig-cs-fixer", "lint", "--fix", "--config=" + twigCSFixerConfig}, "", qaTwigCSFixer},
-		{"eslint", []string{"npx", "--yes", "eslint", "--resolve-plugins-relative-to", qaToolsDir + "/node_modules", "--config", eslintConfig, "--ignore-path", eslintIgnore, "--fix", "--quiet", "--no-error-on-unmatched-pattern", jsTarget}, "", qaEslint},
-		{"stylelint", []string{"npx", "--yes", "stylelint", scssTarget, "--config", stylelintConfig, "--ignore-path", stylelintIgnore, "--fix", "--quiet", "--allow-empty-input"}, "", qaStylelint},
-		{"stylelint-css", []string{"npx", "--yes", "stylelint", cssTarget, "--config", stylelintCSSConfig, "--ignore-path", stylelintCSSIgnore, "--fix", "--quiet", "--allow-empty-input"}, "", qaStylelint},
-	}
+	// Locally the tools may fix what they find; the deploy pipeline runs the same list in
+	// check-only mode.
+	allTools := qatools.Tools(workingDir, config.GetQaAnalyzePath(), qatools.ModeFix)
 
 	anyEnabled := false
 	for _, t := range allTools {
-		if t.enabled {
+		if qaFlagFor(t.Name) {
 			anyEnabled = true
 			break
 		}
@@ -140,13 +113,13 @@ func runQaCommand() {
 
 	utils.PrintInfo("Running QA tools in " + workingDir + "...")
 
-	var enabledTools []qaTool
+	var enabledTools []qatools.Tool
 	for _, t := range allTools {
 		if anyEnabled {
-			if t.enabled {
+			if qaFlagFor(t.Name) {
 				enabledTools = append(enabledTools, t)
 			}
-		} else if config.IsQaToolEnabled(t.name) {
+		} else if config.IsQaToolEnabled(t.Name) {
 			enabledTools = append(enabledTools, t)
 		}
 	}
@@ -162,20 +135,6 @@ func runQaCommand() {
 		os.Exit(1)
 	}
 
-	var compositeCmd strings.Builder
-	for i, t := range enabledTools {
-		if i > 0 {
-			compositeCmd.WriteString(" && ")
-		}
-		// Wrap each command with an echo for better visibility
-		compositeCmd.WriteString(fmt.Sprintf("echo '--- Running %s ---' && ", t.name))
-		cmd := strings.Join(t.args, " ")
-		if t.workDir != "" {
-			cmd = fmt.Sprintf("(cd %s && %s)", t.workDir, cmd)
-		}
-		compositeCmd.WriteString(cmd)
-	}
-
 	args := []string{"exec"}
 	args = append(args, "-w", workingDir)
 	if !isTTY() {
@@ -184,7 +143,7 @@ func runQaCommand() {
 
 	// Always set ORO_ENV to test for QA tools
 	args = append(args, "-e", "ORO_ENV=test")
-	args = append(args, "application", "sh", "-c", compositeCmd.String())
+	args = append(args, "application", "sh", "-c", qatools.Script(enabledTools))
 
 	err := docker.RunComposeCommand("", args...)
 	if err != nil {

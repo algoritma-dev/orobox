@@ -58,6 +58,17 @@ func composerAuthEnv(auth map[string]interface{}) string {
 	return "COMPOSER_AUTH=" + string(encoded)
 }
 
+// ComposerAuthJSON returns the JSON value for COMPOSER_AUTH built from the composer.auth
+// section, or "" when no auth is configured. Callers that inject it as a secret rather than
+// a plain env entry use this instead of CredentialRunArgs.
+func ComposerAuthJSON(auth map[string]interface{}) string {
+	env := composerAuthEnv(auth)
+	if env == "" {
+		return ""
+	}
+	return env[len("COMPOSER_AUTH="):]
+}
+
 // hostSSHAgentSocket returns the host-side path to bind-mount as the SSH agent
 // socket, and whether an agent is available. On Docker Desktop the well-known
 // forwarding socket is always used; on native Linux the live $SSH_AUTH_SOCK is used.
