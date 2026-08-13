@@ -18,9 +18,21 @@ set('branch', getenv('OROBOX_DEPLOY_REF'));
 set('keep_releases', (int) (getenv('OROBOX_DEPLOY_KEEP_RELEASES') ?: [[.DefaultKeepReleases]]));
 
 // Files and directories that survive a release. Adjust to the project's needs.
+// var/data and public/media hold Oro's private and public file storage: without them here the
+// files uploaded by users disappear with the release that received them.
 set('shared_files', ['.env-app.local']);
-set('shared_dirs', ['var/log', 'public/media', 'var/import_export']);
-set('writable_dirs', ['var/cache', 'var/log']);
+set('shared_dirs', ['var/logs', 'var/data', 'public/media', 'var/import_export']);
+set('writable_dirs', ['var/cache', 'var/logs', 'var/data']);
+
+// Deployer's default writable_mode is 'acl', which needs the web server user and fails with
+// "Can't detect http user name." on hosts where that process is not visible (shared hosting,
+// or PHP-FPM running under the deploy user). 'chmod' works there because the deploy user owns
+// the files it has to write. On a host where the web server runs as a different user, switch
+// back to 'acl' and name the user explicitly:
+//
+//     set('writable_mode', 'acl');
+//     set('http_user', 'www-data');
+set('writable_mode', 'chmod');
 
 host(getenv('OROBOX_DEPLOY_HOST'))
     ->setRemoteUser(getenv('OROBOX_DEPLOY_USER'))

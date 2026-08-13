@@ -346,6 +346,7 @@ The stage argument may be omitted when exactly one stage is configured.
 Options:
 - `--yes`, `-y`: Skip the confirmation prompt (implied when there is no TTY, e.g. in CI).
 - `--debug`, `-d`: Print every command's full output instead of its last lines, and stream the Dagger engine output.
+- `--no-cache`: Rebuild everything the run could have reused — the dependency layers, the QA install and the test database.
 
 Every command the pipeline runs is reported as it happens: a line when it starts, then its own
 output — `composer install`, `oro:assets:install`, each QA tool, `bin/simple-phpunit`, the
@@ -355,9 +356,9 @@ line is prefixed with the step it belongs to (`[qa]`, `[test]`).
 
 What happens, in order:
 
-1. **Build** — Dagger clones the stage's `ref` and runs `composer install --no-dev` in the published `algoritmadev/orobox:<oro_version>-project-latest` image, producing `vendor.tar.gz`. With `source_dir` set, only that subdirectory of the clone becomes the application root, so a monorepo builds just its Oro project.
+1. **Build** — Dagger clones the stage's `ref` and installs the dependencies in the published `algoritmadev/orobox:<oro_version>-project-latest` image, then dumps the production autoloader and packs `vendor.tar.gz`. The install itself sees only `composer.json` and `composer.lock`, which is what makes it reusable between runs (see [What the pipeline caches](#what-the-pipeline-caches)). With `source_dir` set, only that subdirectory of the clone becomes the application root, so a monorepo builds just its Oro project.
 2. **Assets** — only when `pre_built_assets_enabled: false`: runs `oro:assets:install --env=prod` and packs `public/build`, `public/js` and `public/media/js` into `assets.tar.gz`.
-3. **QA and tests** — run concurrently off the same vendor tree. QA runs every tool enabled under `test.qa` in check-only mode (`--dry-run`, no `--fix`), because a fix inside the pipeline container would be discarded. Tests first install the dev dependencies — PHPUnit is one of them, so the `--no-dev` tree from step 1 does not carry it — then run the suites listed in the stage's `test_suites` against a Dagger-managed PostgreSQL service; `functional` triggers an `oro:install --env=test` first. That install happens in the test container only, so `vendor.tar.gz` stays dev-free.
+3. **QA and tests** — run concurrently off a shared tree that also carries the dev dependencies, PHPUnit among them, so the `--no-dev` artifact from step 1 stays dev-free. QA runs every tool enabled under `test.qa` in check-only mode (`--dry-run`, no `--fix`), because a fix inside the pipeline container would be discarded. Tests run the suites listed in the stage's `test_suites` against a Dagger-managed PostgreSQL service; `functional` first restores the cached Oro test install, or performs one when the cache no longer matches.
 4. **Release** — only if everything passed. Deployer clones the same `ref` on the remote host (only `source_dir` when set, through its `sub_directory` option), uploads and extracts the tarballs, updates the application, installs the served assets, warms the cache, swaps the `current` symlink and runs the stage's `restart_command`.
 
 The tarballs are also exported to `var/orobox/deploy/<stage>/` on the host, so a CI job can publish them as artifacts.
@@ -417,6 +418,45 @@ deploy:production:
 ```
 
 Add the deploy key as a masked CI variable named `OROBOX_DEPLOY_SSH_KEY`. Cloning uses `CI_JOB_TOKEN` when the configured `repository` is an `https` URL.
+
+#### What the pipeline caches
+
+The pipeline installs the dependencies from `composer.json` and `composer.lock` alone, before the
+application sources are added, so Dagger reuses the whole vendor tree — production, development
+and the QA tools — for as long as the lock file does not change. A commit that touches only
+application code pays nothing for it.
+
+For a stage running the `functional` suite, the Oro test install is cached as a database dump and
+restored at the start of every run. The dump is rebuilt when `composer.lock` or any migration file
+under `src/` changes. Restoring rather than reusing the cluster means each run starts from an
+identical database.
+
+The QA and test caches are scoped to the Oro version and the stage's git ref, so two stages on
+different refs do not invalidate each other.
+
+`orobox deploy <stage> --no-cache` rebuilds all of it.
+
+#### Cache warmth in CI
+
+Both the layer cache and the mounted volumes live inside the Dagger engine, not in the repository.
+A GitLab job that starts a throwaway `docker:dind` service therefore begins with an empty cache
+every time. Two ways to keep it warm:
+
+- give the dind service a persistent data volume in the runner configuration, so the engine
+  container and its caches survive between jobs:
+
+  ```toml
+  # /etc/gitlab-runner/config.toml
+  [runners.docker]
+    volumes = ["/certs/client", "/var/lib/gitlab-runner/dind:/var/lib/docker"]
+  ```
+
+- or run one long-lived Dagger engine and point the jobs at it:
+
+  ```yaml
+  variables:
+    _EXPERIMENTAL_DAGGER_RUNNER_HOST: tcp://dagger-engine.internal:8080
+  ```
 
 ## Debugging with Xdebug
 

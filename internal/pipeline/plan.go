@@ -60,6 +60,17 @@ type Plan struct {
 	// ComposerAuth is the JSON COMPOSER_AUTH value for private repositories, injected as a
 	// secret so tokens never appear in a container's environment listing.
 	ComposerAuth string
+	// NoCache makes the run ignore everything it could have reused. It never changes what the
+	// pipeline does, only what it reuses.
+	NoCache bool
+
+	// Deps, DepsDev and QaTools are built from composer.json and composer.lock alone, before the
+	// application sources are overlaid. Dagger keys each exec on the container state before it, so
+	// they are reused across runs and across refs for as long as the lock does not change. That is
+	// the whole caching strategy for the dependency trees: no fingerprint, nothing to invalidate.
+	Deps    Step
+	DepsDev Step
+	QaTools Step
 
 	Vendor  Step
 	Assets  *Step // nil when the repository already ships pre-built assets
@@ -71,6 +82,20 @@ type Plan struct {
 // BuildsAssets reports whether the pipeline builds and ships the webpack assets.
 func (p *Plan) BuildsAssets() bool {
 	return p.Assets != nil
+}
+
+// CacheEnv is the environment that turns caching off. OROBOX_NO_CACHE is read by the fingerprint
+// scripts, which then rebuild the QA install and the test database. OROBOX_CACHE_BUST carries a
+// per-run value, which is the only way to make Dagger rebuild the dependency layers: they are
+// keyed on the container state, and nothing else about them changes between runs.
+func (p *Plan) CacheEnv(runID string) map[string]string {
+	if !p.NoCache {
+		return nil
+	}
+	return map[string]string{
+		"OROBOX_NO_CACHE":   "1",
+		"OROBOX_CACHE_BUST": runID,
+	}
 }
 
 // Artifacts lists the tarball names this plan produces, in upload order.
@@ -87,6 +112,7 @@ func (p *Plan) Artifacts() []string {
 func New(conf *config.OroConfig, stage config.StageConfig, repository string) *Plan {
 	oroRoot := config.OroRootDir
 	versions := config.GetVersionsForOro(conf.OroVersion)
+	suffix := volumeSuffix(conf.OroVersion, stage.Ref)
 
 	p := &Plan{
 		Stage:        stage,
@@ -99,12 +125,45 @@ func New(conf *config.OroConfig, stage config.StageConfig, repository string) *P
 		ComposerAuth: docker.ComposerAuthJSON(conf.Composer.Auth),
 	}
 
+	// --no-autoloader is not an optimization: the root package's classmap is built from src/,
+	// which this layer does not have, and an authoritative classmap missing the project's own
+	// classes makes them unloadable. Every consumer dumps the autoloader after the overlay.
+	p.Deps = Step{
+		Name:    "deps",
+		Workdir: oroRoot,
+		Env:     prodEnv(),
+		Commands: []string{
+			autoloadPlaceholderCommand(),
+			"composer install --no-dev --no-interaction --no-progress --no-scripts --no-autoloader",
+		},
+	}
+
+	// The QA and test steps both need the dev dependencies — PHPUnit and the bundles the test
+	// environment registers — so they share one layer instead of installing them twice. The
+	// exported vendor.tar.gz is archived from the vendor step, which branches off Deps, so the dev
+	// packages never reach a release.
+	p.DepsDev = Step{
+		Name:    "deps-dev",
+		Workdir: oroRoot,
+		Env:     prodEnv(),
+		Commands: []string{
+			"composer install --no-interaction --no-progress --no-scripts --no-autoloader",
+		},
+	}
+
+	p.QaTools = Step{
+		Name:     "qa-tools",
+		Workdir:  oroRoot,
+		Env:      prodEnv(),
+		Commands: qaToolCommands(conf.OroVersion),
+	}
+
 	p.Vendor = Step{
 		Name:    "vendor",
 		Workdir: oroRoot,
 		Env:     prodEnv(),
 		Commands: []string{
-			"composer install --no-dev --no-interaction --no-progress --optimize-autoloader --classmap-authoritative --no-scripts",
+			"composer dump-autoload --no-dev --optimize --classmap-authoritative --no-scripts",
 			archiveCommand(config.VendorArtifactName, "vendor"),
 		},
 	}
@@ -130,8 +189,8 @@ func New(conf *config.OroConfig, stage config.StageConfig, repository string) *P
 		// test container, the same environment the functional tests install.
 		Env:      qaEnv(versions.Postgres),
 		Commands: qaCommands(conf.OroVersion),
-		Services: qaServices(conf.OroVersion, versions.Postgres),
-		Caches:   qaCaches(conf.OroVersion),
+		Services: qaServices(suffix, versions.Postgres),
+		Caches:   qaCaches(suffix),
 	}
 
 	p.Test = Step{
@@ -140,6 +199,7 @@ func New(conf *config.OroConfig, stage config.StageConfig, repository string) *P
 		Env:      testEnv(versions.Postgres),
 		Commands: testCommands(stage),
 		Services: testServices(conf, versions),
+		Caches:   testCaches(stage, suffix),
 	}
 
 	p.Release = Step{
@@ -156,6 +216,35 @@ func New(conf *config.OroConfig, stage config.StageConfig, repository string) *P
 	}
 
 	return p
+}
+
+// autoloadPlaceholderCommand creates empty stand-ins for the root package's classmap and files
+// autoload entries.
+//
+// The dependency layers deliberately have no src/, and Composer's classmap generator treats a
+// missing classmap entry as fatal: an Oro application maps src/AppKernel.php, so every command
+// that dumps an autoloader — `require` does so whatever --no-scripts says — dies with `Could not
+// scan for classes inside "src/AppKernel.php"`. A psr-4 prefix pointing at a missing directory is
+// only skipped, so nothing else has to be faked.
+//
+// The stand-ins are replaced by the real files when the sources are overlaid, and the layers dump
+// no autoloader of their own, so nothing downstream ever sees them.
+func autoloadPlaceholderCommand() string {
+	return `php -r '$manifest = json_decode(@file_get_contents("composer.json"), true) ?: [];
+foreach (["autoload", "autoload-dev"] as $section) {
+    foreach (["classmap", "files"] as $kind) {
+        foreach ($manifest[$section][$kind] ?? [] as $entry) {
+            if ($entry === "" || file_exists($entry)) { continue; }
+            if (substr($entry, -4) === ".php") {
+                @mkdir(dirname($entry), 0777, true);
+                file_put_contents($entry, "<?php\n");
+            } else {
+                @mkdir($entry, 0777, true);
+            }
+            echo "Placeholder for the autoload entry ", $entry, "\n";
+        }
+    }
+}'`
 }
 
 // prodEnv is the environment every build command runs in: the artifacts must be the ones a
@@ -213,15 +302,34 @@ func qaEnv(postgresVersion string) map[string]string {
 	}
 }
 
+// volumeSuffix scopes a mutable cache volume to one Oro version and one git ref. Without the ref,
+// deploying two stages in turn makes each run invalidate the fingerprint the other just wrote, and
+// neither cache is ever reused. Two stages that share a ref share the volumes, which is correct:
+// what the cache holds is a function of the code at that ref.
+//
+// The download caches deliberately keep an Oro-version-only name: they are content-addressed
+// package stores, so sharing them across refs is a pure gain.
+func volumeSuffix(oroVersion, ref string) string {
+	sanitized := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			return r
+		default:
+			return '-'
+		}
+	}, ref)
+	return oroVersion + "-" + sanitized
+}
+
 // qaServices is the QA step's own Postgres, with its data directory on a named cache volume.
 // That is what makes the Oro install reusable: the next run finds the schema already there and
 // only has to check the fingerprint.
-func qaServices(oroVersion, postgresVersion string) []Service {
+func qaServices(suffix, postgresVersion string) []Service {
 	return []Service{{
 		Name:      qaDBService,
 		Image:     "postgres:" + postgresVersion,
 		Port:      5432,
-		DataCache: "orobox-qa-db-" + oroVersion,
+		DataCache: "orobox-qa-db-" + suffix,
 		DataPath:  "/var/lib/postgresql/data",
 		Env: map[string]string{
 			"POSTGRES_DB":       qaDBName,
@@ -238,10 +346,10 @@ func qaServices(oroVersion, postgresVersion string) []Service {
 //
 // The mount is var/cache, not the test cache inside it, so that oro:install's closing cache:clear
 // can remove var/cache/test: see qatools.CacheVolumeDir.
-func qaCaches(oroVersion string) []Cache {
+func qaCaches(suffix string) []Cache {
 	return []Cache{{
 		Path:   qatools.CacheVolumeDir(),
-		Volume: "orobox-qa-cache-" + oroVersion,
+		Volume: "orobox-qa-cache-" + suffix,
 	}}
 }
 
@@ -256,7 +364,7 @@ func qaWarmupCommand() string {
 	return fmt.Sprintf(`set -e
 stamp=%[1]s/.orobox-qa-fingerprint
 fingerprint=$(cat composer.lock $(find src -path '*Migrations*' -type f 2>/dev/null | sort) 2>/dev/null | md5sum | cut -c1-32)
-if [ "$(cat "$stamp" 2>/dev/null)" = "$fingerprint" ] && [ -f %[2]s ] && [ -d %[3]s ]; then
+if [ -z "$OROBOX_NO_CACHE" ] && [ "$(cat "$stamp" 2>/dev/null)" = "$fingerprint" ] && [ -f %[2]s ] && [ -d %[3]s ]; then
   echo 'Reusing the cached Oro install and warmed test cache.'
   exit 0
 fi
@@ -308,22 +416,14 @@ func oroWritableDirsCommand() string {
 	return "mkdir -p var/data var/cache var/logs public/uploads public/media/cache"
 }
 
-// qaCommands bootstraps the isolated QA tool set and then runs every enabled tool in
-// check-only mode. The pipeline works on a clean clone, so vendor-bin/qa never exists there
-// and has to be installed first; the scripts are the ones `orobox qa-init` uses.
-func qaCommands(oroVersion string) []string {
+// qaToolCommands populates the isolated QA tool set. It runs in the source-independent layer:
+// the pipeline works on a clean clone, so vendor-bin/qa is never installed there, and nothing
+// here reads the application sources.
+func qaToolCommands(oroVersion string) []string {
 	plan := qatools.NewInstallPlan(oroVersion)
-	oroRoot := config.OroRootDir
 	qaDir := config.QaToolsDir
 
-	// The inherited vendor tree was installed with --no-dev, but the test environment registers
-	// dev-only bundles and the QA tools themselves are dev packages. Like the test step, this
-	// container is a copy, so the dev dependencies never reach the exported vendor.tar.gz.
-	commands := []string{"composer install --no-interaction --no-progress --no-scripts"}
-
-	if plan.NeedsPhpstan {
-		commands = append(commands, qaWarmupCommand())
-	}
+	var commands []string
 
 	if plan.NeedsComposerTools {
 		commands = append(commands,
@@ -333,17 +433,8 @@ func qaCommands(oroVersion string) []string {
 			"composer config --no-plugins allow-plugins.bamarni/composer-bin-plugin true",
 			"composer require --dev --no-scripts --no-interaction bamarni/composer-bin-plugin",
 			"composer remove --dev --no-scripts --no-interaction friendsofphp/php-cs-fixer || true",
-			// `yes` is wrapped in `|| true` because the steps run under `bash -o pipefail`: as soon
-			// as composer stops reading, `yes` dies of SIGPIPE with 141 and the whole command
-			// would be reported as a failed QA step even though the install succeeded.
-			"(yes y || true) | composer bin qa require --dev -W --no-interaction "+strings.Join(plan.ComposerPackages, " "),
+			qatools.ComposerInstallCommand(plan.ComposerPackages),
 		)
-		if plan.NeedsPhpstan {
-			commands = append(commands, qatools.PhpstanConfigScript())
-		}
-		if plan.NeedsTwigCS {
-			commands = append(commands, qatools.TwigConfigScript())
-		}
 	}
 
 	if plan.NeedsJSTools {
@@ -352,6 +443,31 @@ func qaCommands(oroVersion string) []string {
 			jsInstall += " --ignore-workspace-root-check"
 		}
 		commands = append(commands, jsInstall+" "+strings.Join(plan.JSPackages, " "))
+	}
+
+	return commands
+}
+
+// qaCommands is the per-commit half of the QA stage: it runs after the sources are overlaid on
+// the qa-tools layer, and runs every enabled tool in check-only mode. The configuration scripts
+// are here rather than in the layer because they must not overwrite a configuration committed in
+// the repository, and the overlay is what puts that configuration in place.
+func qaCommands(oroVersion string) []string {
+	plan := qatools.NewInstallPlan(oroVersion)
+	oroRoot := config.OroRootDir
+
+	// The layers installed the packages without an autoloader; the classmap needs src/, which
+	// only exists now.
+	commands := []string{"composer dump-autoload --optimize --no-scripts"}
+
+	if plan.NeedsComposerTools && plan.NeedsPhpstan {
+		commands = append(commands, qatools.PhpstanConfigScript())
+	}
+	if plan.NeedsComposerTools && plan.NeedsTwigCS {
+		commands = append(commands, qatools.TwigConfigScript())
+	}
+	if plan.NeedsPhpstan {
+		commands = append(commands, qaWarmupCommand())
 	}
 
 	var enabled []qatools.Tool
@@ -394,6 +510,60 @@ const (
 	testDBPassword = "oro_db_pass"
 )
 
+// The test database cache holds a dump, not a data directory. Functional tests write to the
+// database, so a reused cluster would carry one run's leftovers into the next; restoring a dump
+// costs tens of seconds and gives every run a byte-identical starting point.
+const (
+	testDBCacheDir  = "/cache/test-db"
+	testDBDumpFile  = testDBCacheDir + "/dump.sql.gz"
+	testDBStampFile = testDBCacheDir + "/.orobox-test-fingerprint"
+)
+
+// testCaches mounts the database dump for a stage that installs Oro. A unit-only stage never
+// touches a schema, so it mounts nothing and pays nothing.
+func testCaches(stage config.StageConfig, suffix string) []Cache {
+	if !stage.RunsFunctionalTests() {
+		return nil
+	}
+	return []Cache{{
+		Path:   testDBCacheDir,
+		Volume: "orobox-test-dbdump-" + suffix,
+	}}
+}
+
+// testDatabaseCommand restores the cached Oro install, or performs one and caches it. The
+// fingerprint covers composer.lock and every migration file — what decides the schema — so a
+// normal commit restores and only a dependency or migration change pays for an install.
+//
+// psql and pg_dump come from the distribution rather than the image, as rsync does in the release
+// step. The dump is plain SQL, so a client newer than the pinned server is fine; the reverse never
+// happens, because the client always follows the distribution.
+func testDatabaseCommand() string {
+	return fmt.Sprintf(`set -e
+apk add --no-cache postgresql-client >/dev/null
+export PGPASSWORD=%[6]s
+psql_run() { psql -h %[4]s -U %[5]s -d %[7]s -v ON_ERROR_STOP=1 "$@"; }
+stamp=%[2]s
+fingerprint=$(cat composer.lock $(find src -path '*Migrations*' -type f 2>/dev/null | sort) 2>/dev/null | md5sum | cut -c1-32)
+php bin/console doctrine:database:create --env=test --if-not-exists
+if [ -z "$OROBOX_NO_CACHE" ] && [ "$(cat "$stamp" 2>/dev/null)" = "$fingerprint" ] && [ -f %[1]s ]; then
+  echo 'Restoring the cached test database.'
+  psql_run -c 'DROP SCHEMA IF EXISTS public CASCADE'
+  psql_run -c 'CREATE SCHEMA public'
+  psql_run -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"'
+  psql_run -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm'
+  gunzip -c %[1]s | psql_run
+  exit 0
+fi
+echo 'Installing Oro for the test suites and caching the result. Later runs restore the dump.'
+%[3]s
+php bin/console oro:install --no-interaction --env=test --skip-translations
+pg_dump -h %[4]s -U %[5]s --no-owner --no-privileges %[7]s | gzip -c > %[1]s
+printf '%%s' "$fingerprint" > "$stamp"`,
+		testDBDumpFile, testDBStampFile, oroWritableDirsCommand(),
+		testDBService, testDBUser, testDBPassword, testDBName)
+}
+
 // dsn builds the Doctrine URL for one of the pipeline's Postgres services. Both databases use
 // the same credentials, so only the host and the database name change.
 func dsn(service, database, postgresVersion string) string {
@@ -402,21 +572,15 @@ func dsn(service, database, postgresVersion string) string {
 }
 
 func testCommands(stage config.StageConfig) []string {
-	// The vendor tree this step inherits was installed with --no-dev, so PHPUnit itself is not
-	// there: bin/simple-phpunit is a Composer bin proxy for symfony/phpunit-bridge, a require-dev
-	// package. Installing the dev dependencies here keeps the exported vendor.tar.gz free of them,
-	// because that artifact was archived in the vendor step and this container is a copy.
-	commands := []string{"composer install --no-interaction --no-progress --no-scripts"}
+	// The dev dependencies — PHPUnit reaches the container through symfony/phpunit-bridge, a
+	// require-dev package — come from the deps-dev layer. All that is left here is an autoloader
+	// that knows the project's own classes.
+	commands := []string{"composer dump-autoload --optimize --no-scripts"}
 
 	if stage.RunsFunctionalTests() {
-		// Functional tests need a real schema. This mirrors `orobox test-init`: create the
-		// database, then install. The uuid-ossp and pg_trgm extensions come from the service's
-		// initdb script, the same one the compose stack mounts.
-		commands = append(commands,
-			oroWritableDirsCommand(),
-			"php bin/console doctrine:database:create --env=test --if-not-exists",
-			"php bin/console oro:install --no-interaction --env=test --skip-translations",
-		)
+		// Functional tests need a real schema. The install is cached as a dump and restored on
+		// every run, so the suites always start from the same database.
+		commands = append(commands, oroWritableDirsCommand(), testDatabaseCommand())
 	}
 
 	for _, suite := range stage.Suites() {

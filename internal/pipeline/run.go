@@ -6,6 +6,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
 
 	"dagger.io/dagger"
 	"golang.org/x/sync/errgroup"
@@ -50,6 +53,10 @@ type runner struct {
 	log    *logBuffer
 	report *reporter
 
+	// runID only matters when the plan disables caching, where it is what makes the dependency
+	// layers differ from the previous run's.
+	runID string
+
 	source    *dagger.Directory
 	sshSocket *dagger.Socket
 	sshKey    *dagger.Secret
@@ -85,6 +92,7 @@ func Run(ctx context.Context, plan *Plan, opts Options) ([]string, error) {
 		opts:   opts,
 		log:    log,
 		report: newReporter(os.Stdout, opts.Debug, log),
+		runID:  strconv.FormatInt(time.Now().UnixNano(), 10),
 	}
 
 	if opts.SSHAuthSock != "" {
@@ -127,37 +135,58 @@ func Run(ctx context.Context, plan *Plan, opts Options) ([]string, error) {
 	}
 	fmt.Printf("Building %s at %s (%s)\n", plan.Ref, commit, plan.Repository)
 
-	// The vendor tree is the root of everything else, so it is built first and then reused as
-	// a directory rather than re-resolved by each later step.
-	vendor, err := r.step(ctx, plan.Vendor)
+	// The dependency layers come first and are the only thing that survives between runs. They
+	// are built from the composer files alone, so a commit that does not change the lock reuses
+	// all three from Dagger's cache.
+	lockSource, err := r.lockSource(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	deps, err := r.exec(ctx, r.container(plan.Deps).WithDirectory(config.OroRootDir, lockSource), plan.Deps)
+	if err != nil {
+		return nil, r.describe("installing the dependencies", err)
+	}
+	depsDev, err := r.exec(ctx, deps, plan.DepsDev)
+	if err != nil {
+		return nil, r.describe("installing the development dependencies", err)
+	}
+	qaTools, err := r.exec(ctx, depsDev, plan.QaTools)
+	if err != nil {
+		return nil, r.describe("installing the QA tools", err)
+	}
+
+	// From here on every step overlays the sources, so all of it is per-commit work.
+	vendor, err := r.exec(ctx, r.on(deps, plan.Vendor), plan.Vendor)
 	if err != nil {
 		return nil, r.describe("building the vendor tree", err)
 	}
-	app := vendor.Directory(config.OroRootDir)
 
 	artifacts := map[string]*dagger.File{
 		config.VendorArtifactName: vendor.File(artifactContainerDir + "/" + config.VendorArtifactName),
 	}
 
 	if plan.BuildsAssets() {
-		assets, err := r.stepFrom(ctx, *plan.Assets, app)
+		// The assets are built on top of the finished vendor container: they need the production
+		// autoloader the vendor step just dumped.
+		assets, err := r.exec(ctx, r.on(vendor, *plan.Assets), *plan.Assets)
 		if err != nil {
 			return nil, r.describe("building the assets", err)
 		}
 		artifacts[config.AssetsArtifactName] = assets.File(artifactContainerDir + "/" + config.AssetsArtifactName)
 	}
 
-	// QA and tests are independent consumers of the same vendor tree, so they run together and
-	// the first failure cancels the other.
+	// QA and tests are independent consumers of the development dependencies, so they run
+	// together and the first failure cancels the other.
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.Go(func() error {
-		if _, err := r.stepFrom(groupCtx, plan.QA, app); err != nil {
+		if _, err := r.exec(groupCtx, r.on(qaTools, plan.QA), plan.QA); err != nil {
 			return r.describe("QA checks", err)
 		}
 		return nil
 	})
 	group.Go(func() error {
-		if _, err := r.stepFrom(groupCtx, plan.Test, app); err != nil {
+		if _, err := r.exec(groupCtx, r.on(depsDev, plan.Test), plan.Test); err != nil {
 			return r.describe("tests", err)
 		}
 		return nil
@@ -224,16 +253,61 @@ func (r *runner) knownHosts() string {
 	return string(content)
 }
 
-// step runs a step whose sources come straight from the git clone. The clone is mounted before
-// the commands are appended: a WithDirectory added afterwards would both run the commands
-// against an empty application root and overwrite whatever they produced.
-func (r *runner) step(ctx context.Context, step Step) (*dagger.Container, error) {
-	return r.exec(ctx, r.withCaches(r.container(step).WithDirectory(config.OroRootDir, r.source), step), step)
+// lockSource is the directory the dependency layers are built from: the composer files and the
+// few paths an install needs, and nothing else. Keeping the application sources out is what makes
+// the layers reusable — Dagger keys an exec on the container state before it, so a directory that
+// changed with every commit would make every install a cache miss.
+func (r *runner) lockSource(ctx context.Context) (*dagger.Directory, error) {
+	manifest, err := r.source.File("composer.json").Contents(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("could not read composer.json from %s at %s: %w", r.plan.Repository, r.plan.Ref, err)
+	}
+
+	entries, err := r.source.Entries(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("could not list the repository contents: %w", err)
+	}
+	present := map[string]bool{}
+	for _, entry := range entries {
+		present[strings.TrimSuffix(entry, "/")] = true
+	}
+	if !present["composer.lock"] {
+		return nil, fmt.Errorf("composer.lock is missing from %s at %s: the pipeline installs dependencies from the lock file and will not resolve them itself",
+			r.plan.Repository, r.plan.Ref)
+	}
+
+	dir := r.client.Directory()
+	for _, path := range LockLayerPaths([]byte(manifest)) {
+		// Only the top-level name can be checked cheaply; a nested path repository is trusted to
+		// exist, and composer reports it clearly enough when it does not.
+		if top := strings.SplitN(path, "/", 2)[0]; !present[top] {
+			continue
+		}
+		if strings.Contains(path, ".") && !strings.Contains(path, "/") {
+			dir = dir.WithFile(path, r.source.File(path))
+			continue
+		}
+		dir = dir.WithDirectory(path, r.source.Directory(path))
+	}
+	return dir, nil
 }
 
-// stepFrom runs a step that starts from an already-built application tree.
-func (r *runner) stepFrom(ctx context.Context, step Step, app *dagger.Directory) (*dagger.Container, error) {
-	return r.exec(ctx, r.withCaches(r.container(step).WithDirectory(config.OroRootDir, app), step), step)
+// on builds a step's container on top of an already-resolved layer: the step's own environment
+// and service bindings, then the application sources, then its caches. The sources come after the
+// layer because the layers deliberately do not contain them, and the caches after the sources
+// because a mount inside a directory being written would be shadowed by it.
+func (r *runner) on(base *dagger.Container, step Step) *dagger.Container {
+	ctr := base
+	for _, service := range step.Services {
+		ctr = ctr.WithServiceBinding(service.Name, r.service(service))
+	}
+	for name, value := range step.Env {
+		ctr = ctr.WithEnvVariable(name, value)
+	}
+	if step.Workdir != "" {
+		ctr = ctr.WithWorkdir(step.Workdir)
+	}
+	return r.withCaches(ctr.WithDirectory(config.OroRootDir, r.source), step)
 }
 
 // withCaches mounts the step's persistent directories. It runs after the application tree is in
@@ -261,6 +335,10 @@ func (r *runner) container(step Step) *dagger.Container {
 		WithEnvVariable("COMPOSER_ALLOW_SUPERUSER", "1").
 		WithEnvVariable("npm_config_cache", "/cache/js").
 		WithEnvVariable("npm_config_store_dir", "/cache/js/pnpm")
+
+	for name, value := range r.plan.CacheEnv(r.runID) {
+		ctr = ctr.WithEnvVariable(name, value)
+	}
 
 	// Private Composer repositories: the same auth block the dev environment uses, injected as
 	// a secret so tokens never land in a layer's environment.

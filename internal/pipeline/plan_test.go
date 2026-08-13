@@ -80,7 +80,12 @@ func TestPlanVendorStage(t *testing.T) {
 	p := New(testConf("7.0", true), testStage(), "repo")
 	vendor := joined(p.Vendor.Commands)
 
-	for _, want := range []string{"composer install", "--no-dev", "--optimize-autoloader", "--classmap-authoritative"} {
+	// The dependencies come from the deps layer, which skipped the autoloader because the
+	// classmap needs src/; the vendor step dumps it once the sources are in place.
+	if !strings.Contains(joined(p.Deps.Commands), "composer install --no-dev") {
+		t.Errorf("deps layer does not install the production dependencies: %s", joined(p.Deps.Commands))
+	}
+	for _, want := range []string{"composer dump-autoload", "--no-dev", "--optimize", "--classmap-authoritative"} {
 		if !strings.Contains(vendor, want) {
 			t.Errorf("vendor stage missing %q: %s", want, vendor)
 		}
@@ -93,6 +98,110 @@ func TestPlanVendorStage(t *testing.T) {
 	}
 }
 
+func TestPlanDependencyLayersAreSourceIndependent(t *testing.T) {
+	p := New(testConf("6.1", true), testStage(), "repo")
+
+	deps := joined(p.Deps.Commands)
+	for _, want := range []string{"composer install", "--no-dev", "--no-autoloader", "--no-scripts"} {
+		if !strings.Contains(deps, want) {
+			t.Errorf("deps layer missing %q: %s", want, deps)
+		}
+	}
+	// The classmap needs src/, which the layer does not have: dumping it here would produce an
+	// authoritative classmap without the project's own classes.
+	for _, forbidden := range []string{"--optimize-autoloader", "--classmap-authoritative"} {
+		if strings.Contains(deps, forbidden) {
+			t.Errorf("deps layer must not dump the autoloader (%s): %s", forbidden, deps)
+		}
+	}
+
+	depsDev := joined(p.DepsDev.Commands)
+	if !strings.Contains(depsDev, "composer install") || strings.Contains(depsDev, "--no-dev") {
+		t.Errorf("deps-dev layer must install the dev dependencies: %s", depsDev)
+	}
+	if !strings.Contains(depsDev, "--no-autoloader") {
+		t.Errorf("deps-dev layer must skip the autoloader: %s", depsDev)
+	}
+
+	// An Oro application maps src/AppKernel.php in its classmap, and Composer's classmap
+	// generator treats a missing entry as fatal, so every autoload dump in the layers — including
+	// the implicit one inside `composer require` — fails without a stand-in.
+	placeholder := strings.Index(deps, `"classmap", "files"`)
+	install := strings.Index(deps, "composer install")
+	if placeholder == -1 || placeholder > install {
+		t.Errorf("deps layer must create the autoload placeholders before installing: %s", deps)
+	}
+
+	// A layer keyed on composer.json and composer.lock cannot read the sources, so nothing in it
+	// may touch a path that only exists once the clone is overlaid.
+	for _, step := range []Step{p.Deps, p.DepsDev, p.QaTools} {
+		if strings.Contains(joined(step.Commands), "bin/console") {
+			t.Errorf("layer %q runs the application: %s", step.Name, joined(step.Commands))
+		}
+	}
+}
+
+func TestPlanQaToolsLayerHoldsTheToolInstall(t *testing.T) {
+	viper.Reset()
+	defer viper.Reset()
+
+	p := New(testConf("6.1", true), testStage(), "repo")
+	tools := joined(p.QaTools.Commands)
+
+	for _, want := range []string{"composer bin qa", "allow-plugins.bamarni/composer-bin-plugin"} {
+		if !strings.Contains(tools, want) {
+			t.Errorf("qa-tools layer missing %q: %s", want, tools)
+		}
+	}
+	// Every command runs under `bash -o pipefail`, where a bare `yes y |` turns the successful
+	// install into exit code 141 as soon as composer stops reading its stdin.
+	if strings.Contains(tools, "yes y | ") {
+		t.Errorf("the QA install pipes `yes` without swallowing its SIGPIPE status: %s", tools)
+	}
+
+	// The configuration scripts must not be in the layer: a configuration committed in the
+	// repository has to win, and the sources are not there yet.
+	if strings.Contains(tools, "phpstan.neon") || strings.Contains(tools, ".twig-cs-fixer.php") {
+		t.Errorf("qa-tools layer writes a configuration file before the sources exist: %s", tools)
+	}
+	qa := joined(p.QA.Commands)
+	if !strings.Contains(qa, "phpstan.neon") {
+		t.Errorf("qa step must write the PHPStan configuration after the overlay: %s", qa)
+	}
+}
+
+func TestPlanStepsDumpTheAutoloaderAfterTheOverlay(t *testing.T) {
+	stage := testStage()
+	stage.TestSuites = []string{config.TestSuiteUnit}
+	p := New(testConf("6.1", true), stage, "repo")
+
+	vendor := joined(p.Vendor.Commands)
+	for _, want := range []string{"composer dump-autoload", "--no-dev", "--optimize", "--classmap-authoritative"} {
+		if !strings.Contains(vendor, want) {
+			t.Errorf("vendor step missing %q: %s", want, vendor)
+		}
+	}
+	// The dependencies come from the deps layer; re-installing them would throw the cache away.
+	if strings.Contains(vendor, "composer install") {
+		t.Errorf("vendor step must not install: %s", vendor)
+	}
+	dump := strings.Index(vendor, "composer dump-autoload")
+	archive := strings.Index(vendor, "tar -czf")
+	if dump == -1 || archive == -1 || dump > archive {
+		t.Errorf("vendor step has dump=%d archive=%d, the autoloader must be in the tarball", dump, archive)
+	}
+
+	for name, commands := range map[string][]string{"qa": p.QA.Commands, "test": p.Test.Commands} {
+		joinedCommands := joined(commands)
+		if strings.Contains(joinedCommands, "composer install") {
+			t.Errorf("%s step must not install, the deps-dev layer already did: %s", name, joinedCommands)
+		}
+		if !strings.Contains(joinedCommands, "composer dump-autoload") {
+			t.Errorf("%s step must dump the autoloader after the overlay: %s", name, joinedCommands)
+		}
+	}
+}
+
 func TestPlanQAStageIsCheckOnlyAndSelfInstalling(t *testing.T) {
 	viper.Reset()
 	defer viper.Reset()
@@ -100,27 +209,18 @@ func TestPlanQAStageIsCheckOnlyAndSelfInstalling(t *testing.T) {
 	p := New(testConf("6.1", true), testStage(), "repo")
 	qa := joined(p.QA.Commands)
 
-	// A clean clone has no vendor-bin/qa, so the stage must install the tools itself.
-	for _, want := range []string{"composer bin qa require", "allow-plugins.bamarni/composer-bin-plugin", "phpstan.neon"} {
-		if !strings.Contains(qa, want) {
-			t.Errorf("qa stage missing bootstrap step %q", want)
-		}
-	}
-
-	// Every command runs under `bash -o pipefail`, where a bare `yes y |` turns the successful
-	// install into exit code 141 as soon as composer stops reading its stdin.
-	if strings.Contains(qa, "yes y | ") {
-		t.Errorf("the QA install pipes `yes` without swallowing its SIGPIPE status: %s", qa)
+	// A clean clone has no vendor-bin/qa, so the pipeline installs the tools itself; that work
+	// lives in the source-independent layer, which TestPlanQaToolsLayerHoldsTheToolInstall covers.
+	if !strings.Contains(joined(p.QaTools.Commands), "composer bin qa") {
+		t.Error("the pipeline never installs the QA tools")
 	}
 
 	// Nothing may mutate the sources.
 	if strings.Contains(qa, "--fix") {
 		t.Errorf("qa stage runs a tool with --fix: %s", qa)
 	}
-	for _, want := range []string{"--dry-run"} {
-		if !strings.Contains(qa, want) {
-			t.Errorf("qa stage is missing %q, so it is not check-only", want)
-		}
+	if !strings.Contains(qa, "--dry-run") {
+		t.Errorf("qa stage is missing --dry-run, so it is not check-only: %s", qa)
 	}
 }
 
@@ -173,13 +273,12 @@ func TestPlanQAStageReusesTheInstalledCache(t *testing.T) {
 		}
 	}
 
-	// The install has to precede the analysis, and the dev dependencies the test environment
-	// needs have to precede the install.
-	composer := strings.Index(qa, "composer install")
+	// The install has to precede the analysis, and the autoloader has to precede both.
+	dump := strings.Index(qa, "composer dump-autoload")
 	install := strings.Index(qa, "oro:install")
 	phpstan := strings.Index(qa, "bin/phpstan")
-	if composer == -1 || install == -1 || phpstan == -1 || composer > install || install > phpstan {
-		t.Errorf("qa stage order is composer=%d install=%d phpstan=%d: %s", composer, install, phpstan, qa)
+	if dump == -1 || install == -1 || phpstan == -1 || dump > install || install > phpstan {
+		t.Errorf("qa stage order is dump=%d install=%d phpstan=%d: %s", dump, install, phpstan, qa)
 	}
 }
 
@@ -240,6 +339,23 @@ func TestPlanQAStageRespectsDisabledTools(t *testing.T) {
 	}
 }
 
+func TestPlanCacheVolumesAreScopedToTheRef(t *testing.T) {
+	stage := testStage()
+	stage.Ref = "feature/big bang"
+	p := New(testConf("6.1", true), stage, "repo")
+
+	// A ref becomes part of a volume name, so anything but the usual identifier characters is
+	// folded into a dash.
+	const suffix = "6.1-feature-big-bang"
+
+	if got := p.QA.Caches[0].Volume; got != "orobox-qa-cache-"+suffix {
+		t.Errorf("qa cache volume = %q, want the ref-scoped name", got)
+	}
+	if got := p.QA.Services[0].DataCache; got != "orobox-qa-db-"+suffix {
+		t.Errorf("qa database volume = %q, want the ref-scoped name", got)
+	}
+}
+
 func TestPlanTestStageSuites(t *testing.T) {
 	unitOnly := New(testConf("6.1", true), testStage(), "repo")
 	unit := joined(unitOnly.Test.Commands)
@@ -249,15 +365,15 @@ func TestPlanTestStageSuites(t *testing.T) {
 	if !strings.Contains(unit, "bin/simple-phpunit --testsuite unit") {
 		t.Errorf("unit suite missing: %s", unit)
 	}
-	// PHPUnit itself is a require-dev package, absent from the --no-dev vendor tree the step
-	// inherits, so the dev dependencies have to be installed before any suite runs.
-	install := strings.Index(unit, "composer install")
+	// The dev dependencies come from the deps-dev layer; the step only has to dump an autoloader
+	// that knows the project's own classes before PHPUnit boots.
+	dump := strings.Index(unit, "composer dump-autoload")
 	phpunit := strings.Index(unit, "bin/simple-phpunit")
-	if install == -1 || install > phpunit {
-		t.Errorf("test stage must install the dev dependencies before running PHPUnit: %s", unit)
+	if dump == -1 || dump > phpunit {
+		t.Errorf("test stage must dump the autoloader before running PHPUnit: %s", unit)
 	}
-	if strings.Contains(unit, "composer install --no-dev") {
-		t.Errorf("test stage must not install without dev dependencies: %s", unit)
+	if strings.Contains(joined(unitOnly.DepsDev.Commands), "--no-dev") {
+		t.Errorf("the deps-dev layer must install the dev dependencies: %s", joined(unitOnly.DepsDev.Commands))
 	}
 
 	stage := testStage()
@@ -279,6 +395,69 @@ func TestPlanTestStageSuites(t *testing.T) {
 	for _, forbidden := range []string{"--skip-assets", "--timeout"} {
 		if strings.Contains(both, forbidden) {
 			t.Errorf("oro:install must not receive %q: %s", forbidden, both)
+		}
+	}
+}
+
+func TestPlanTestStageCachesTheOroInstall(t *testing.T) {
+	stage := testStage()
+	stage.TestSuites = []string{config.TestSuiteUnit, config.TestSuiteFunctional}
+	p := New(testConf("6.1", true), stage, "repo")
+	test := joined(p.Test.Commands)
+
+	if len(p.Test.Caches) != 1 || p.Test.Caches[0].Path != testDBCacheDir {
+		t.Fatalf("test stage does not persist the database dump: %+v", p.Test.Caches)
+	}
+	if got := p.Test.Caches[0].Volume; got != "orobox-test-dbdump-6.1-develop" {
+		t.Errorf("test dump volume = %q, want the ref-scoped name", got)
+	}
+	// The dump is the cache; the live database is not. A data volume here would carry whatever
+	// the previous run's tests wrote into the next run.
+	if p.Test.Services[0].DataCache != "" {
+		t.Errorf("the test database service must stay ephemeral: %+v", p.Test.Services[0])
+	}
+
+	for _, want := range []string{
+		"orobox-test-fingerprint",
+		"pg_dump",
+		"gunzip -c",
+		"oro:install --no-interaction --env=test",
+		"DROP SCHEMA IF EXISTS public CASCADE",
+		`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`,
+		"CREATE EXTENSION IF NOT EXISTS pg_trgm",
+		"apk add --no-cache postgresql-client",
+	} {
+		if !strings.Contains(test, want) {
+			t.Errorf("test stage missing %q: %s", want, test)
+		}
+	}
+
+	// The fingerprint covers exactly what decides the schema.
+	if !strings.Contains(test, "cat composer.lock $(find src -path '*Migrations*'") {
+		t.Errorf("test fingerprint does not cover composer.lock and the migrations: %s", test)
+	}
+
+	// var/ is gitignored, so the writable directories have to exist before the installer's
+	// requirements check runs, and the suites have to come after the database is ready.
+	mkdir := strings.Index(test, "mkdir -p var/data")
+	database := strings.Index(test, "orobox-test-fingerprint")
+	phpunit := strings.Index(test, "bin/simple-phpunit")
+	if mkdir == -1 || database == -1 || phpunit == -1 || mkdir > database || database > phpunit {
+		t.Errorf("test stage order is mkdir=%d database=%d phpunit=%d: %s", mkdir, database, phpunit, test)
+	}
+}
+
+func TestPlanUnitOnlyStageHasNoDatabaseCache(t *testing.T) {
+	p := New(testConf("6.1", true), testStage(), "repo")
+	test := joined(p.Test.Commands)
+
+	// Unit suites need no schema, so they must not pay for a restore or an install.
+	if len(p.Test.Caches) != 0 {
+		t.Errorf("unit-only stage must not mount a database cache: %+v", p.Test.Caches)
+	}
+	for _, forbidden := range []string{"oro:install", "pg_dump", "postgresql-client"} {
+		if strings.Contains(test, forbidden) {
+			t.Errorf("unit-only stage must not run %q: %s", forbidden, test)
 		}
 	}
 }
@@ -317,6 +496,41 @@ func TestPlanTestServices(t *testing.T) {
 	for _, want := range []string{"db-test", "redis", "elasticsearch"} {
 		if !names[want] {
 			t.Errorf("service %q not bound although enabled in config", want)
+		}
+	}
+}
+
+func TestPlanCacheEnvIsEmptyByDefault(t *testing.T) {
+	p := New(testConf("6.1", true), testStage(), "repo")
+	if got := p.CacheEnv("1700000000"); len(got) != 0 {
+		t.Errorf("CacheEnv() = %v, want nothing when the caches are wanted", got)
+	}
+}
+
+func TestPlanCacheEnvBustsEveryCache(t *testing.T) {
+	p := New(testConf("6.1", true), testStage(), "repo")
+	p.NoCache = true
+
+	env := p.CacheEnv("1700000000")
+	// The fingerprint scripts read this and treat it as a miss.
+	if env["OROBOX_NO_CACHE"] != "1" {
+		t.Errorf("OROBOX_NO_CACHE = %q, want 1", env["OROBOX_NO_CACHE"])
+	}
+	// Dagger keys a layer on the container state, so only a value that differs per run rebuilds
+	// the dependency layers.
+	if env["OROBOX_CACHE_BUST"] != "1700000000" {
+		t.Errorf("OROBOX_CACHE_BUST = %q, want the run id", env["OROBOX_CACHE_BUST"])
+	}
+}
+
+func TestPlanFingerprintScriptsHonourNoCache(t *testing.T) {
+	stage := testStage()
+	stage.TestSuites = []string{config.TestSuiteFunctional}
+	p := New(testConf("6.1", true), stage, "repo")
+
+	for name, commands := range map[string][]string{"qa": p.QA.Commands, "test": p.Test.Commands} {
+		if !strings.Contains(joined(commands), `[ -z "$OROBOX_NO_CACHE" ]`) {
+			t.Errorf("%s stage ignores OROBOX_NO_CACHE: %s", name, joined(commands))
 		}
 	}
 }

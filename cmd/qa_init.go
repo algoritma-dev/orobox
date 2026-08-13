@@ -101,18 +101,14 @@ func runQaInitCommand(conf config.OroConfig) {
 			return
 		}
 
-		// 1c. Install QA packages in the isolated 'qa' bin namespace.
-		//     Using ':*' forces the latest version, bypassing OroCommerce's locked constraints.
+		// 1c. Populate the isolated 'qa' bin namespace: install a committed manifest as-is,
+		//     otherwise require the packages with ':*', which forces the latest version and
+		//     bypasses OroCommerce's locked constraints.
 		composerArgs := []string{"exec", "-w", oroRoot}
 		if !isTTY() {
 			composerArgs = append(composerArgs, "-T")
 		}
-		// Pipe 'yes y' to auto-accept config file generation prompts from the plugin; '|| true'
-		// swallows the SIGPIPE exit code 'yes' gets once composer stops reading, which a shell
-		// with pipefail would otherwise report as a failed install.
-		// -W allows the Symfony pins to downgrade transitively-locked packages on re-runs.
-		cmdLine := "(yes y || true) | composer bin qa require --dev -W " + strings.Join(plan.ComposerPackages, " ")
-		composerArgs = append(composerArgs, "application", "bash", "-c", cmdLine)
+		composerArgs = append(composerArgs, "application", "bash", "-c", qatools.ComposerInstallCommand(plan.ComposerPackages))
 
 		if err := docker.RunComposeCommand("Installing Composer QA packages...", composerArgs...); err != nil {
 			utils.PrintError(fmt.Sprintf("Failed to install Composer packages: %v", err))

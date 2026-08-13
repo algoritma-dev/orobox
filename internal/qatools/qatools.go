@@ -203,6 +203,33 @@ func NewInstallPlan(oroVersion string) InstallPlan {
 	return plan
 }
 
+// ComposerInstallCommand returns the shell line that populates the QA tools directory.
+//
+// A project that commits vendor-bin/qa/composer.json (and its lock) has pinned the tool
+// versions on purpose, so re-requiring the packages there would silently undo the pin:
+// `require pkg:*` rewrites the constraint to the newest release. That directory is
+// installed as-is instead, which is also what reproduces the developer's versions in the
+// pipeline. Only a directory Orobox itself has just scaffolded — no require section — gets
+// the packages required into it.
+//
+// The check is `php -r` rather than a grep because the QA composer.json is committed and can
+// legitimately carry a `config` or `extra` section without any requirement.
+func ComposerInstallCommand(packages []string) string {
+	manifest := config.QaToolsDir + "/composer.json"
+	hasRequirements := fmt.Sprintf(
+		`php -r '$m = json_decode(@file_get_contents(%q), true) ?: []; exit(($m["require"] ?? []) || ($m["require-dev"] ?? []) ? 0 : 1);'`,
+		manifest)
+
+	// `yes` is wrapped in `|| true` because the steps run under `bash -o pipefail`: as soon as
+	// composer stops reading, `yes` dies of SIGPIPE with 141 and the whole command would be
+	// reported as failed even though the install succeeded. -W lets the Symfony pins downgrade
+	// transitively-locked packages on re-runs.
+	require := "(yes y || true) | composer bin qa require --dev -W --no-interaction " + strings.Join(packages, " ")
+
+	return fmt.Sprintf("if %s; then composer bin qa install --no-interaction --no-progress; else %s; fi",
+		hasRequirements, require)
+}
+
 // oroKernelClass is the OroCommerce application kernel. The Symfony container is dumped to
 // <KernelClass><Env>DebugContainer.xml, so this also drives the containerXmlPath filename
 // PHPStan expects.

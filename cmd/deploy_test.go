@@ -248,3 +248,9 @@ func TestAskStageDefaultsAndOverrides(t *testing.T) {
 		t.Error("RestartCommand was not read")
 	}
 }
+
+func TestDeployCommandHasNoCacheFlag(t *testing.T) {
+	if deployCmd.Flags().Lookup("no-cache") == nil {
+		t.Error("deploy is missing the --no-cache flag")
+	}
+}

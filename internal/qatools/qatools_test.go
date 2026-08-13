@@ -167,3 +167,24 @@ func TestConfigScripts(t *testing.T) {
 		t.Errorf("twig script must not overwrite an existing config: %s", twig)
 	}
 }
+
+func TestComposerInstallCommand(t *testing.T) {
+	cmd := ComposerInstallCommand([]string{"algoritma/php-coding-standards:*", "symfony/console:^6.4"})
+
+	for _, want := range []string{
+		config.QaToolsDir + "/composer.json",
+		"composer bin qa install --no-interaction --no-progress",
+		"composer bin qa require --dev -W --no-interaction algoritma/php-coding-standards:* symfony/console:^6.4",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("command missing %q: %s", want, cmd)
+		}
+	}
+
+	// A committed manifest must win, otherwise `require pkg:*` rewrites the pinned versions.
+	install := strings.Index(cmd, "composer bin qa install")
+	require := strings.Index(cmd, "composer bin qa require")
+	if install < 0 || require < 0 || install > require {
+		t.Errorf("install must be the then-branch, require the fallback: %s", cmd)
+	}
+}

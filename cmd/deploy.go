@@ -16,7 +16,10 @@ import (
 	"github.com/spf13/viper"
 )
 
-var deployAssumeYes bool
+var (
+	deployAssumeYes bool
+	deployNoCache   bool
+)
 
 var deployCmd = &cobra.Command{
 	Use:   "deploy [stage]",
@@ -39,6 +42,7 @@ upload the artifacts and update the application.`,
 
 func init() {
 	deployCmd.Flags().BoolVarP(&deployAssumeYes, "yes", "y", false, "Do not ask for confirmation before releasing")
+	deployCmd.Flags().BoolVar(&deployNoCache, "no-cache", false, "Rebuild everything: the dependency layers, the QA install and the test database")
 	rootCmd.AddCommand(deployCmd)
 }
 
@@ -74,6 +78,7 @@ func runDeployCommand(stageName string) {
 	}
 
 	plan := pipeline.New(conf, stage, repository)
+	plan.NoCache = deployNoCache
 	printDeploySummary(plan)
 
 	if !deployAssumeYes && isTTY() {

@@ -42,6 +42,7 @@ func TestRenderRecipe(t *testing.T) {
 	// The task chain and the conditional update are the contract with the spec.
 	for _, want := range []string{
 		"task('oro:upload_artifacts'",
+		"task('oro:required_dirs'",
 		"task('oro:update'",
 		"task('oro:assets_install'",
 		"task('oro:cache_warmup'",
@@ -55,6 +56,21 @@ func TestRenderRecipe(t *testing.T) {
 		if !strings.Contains(rendered, want) {
 			t.Errorf("rendered recipe is missing %q", want)
 		}
+	}
+
+	// Oro's requirements check refuses to start oro:platform:update unless every one of these
+	// exists and is writable, and none of them survive `git archive`.
+	requiredDirs := rendered[strings.Index(rendered, "oro_required_dirs"):]
+	requiredDirs = requiredDirs[:strings.Index(requiredDirs, ");")]
+	for _, want := range []string{"var/cache", "var/logs", "var/data", "public/media", "public/bundles", "public/js"} {
+		if !strings.Contains(requiredDirs, want) {
+			t.Errorf("oro_required_dirs is missing %q", want)
+		}
+	}
+
+	// The directories have to exist before the command that runs the requirements check.
+	if dirs, update := strings.Index(rendered, "'oro:required_dirs',"), strings.Index(rendered, "'oro:update',"); dirs > update {
+		t.Errorf("the deploy chain runs oro:required_dirs (%d) after oro:update (%d)", dirs, update)
 	}
 
 	// platform:update has no --skip-assets option on any supported Oro version.
@@ -104,6 +120,20 @@ func TestRenderStub(t *testing.T) {
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Errorf("rendered stub is missing %q", want)
+		}
+	}
+
+	// Oro writes to var/logs, not var/log: the singular spelling persists nothing.
+	if strings.Contains(rendered, "'var/log'") {
+		t.Error("rendered stub shares var/log; Oro logs to var/logs")
+	}
+
+	// The two file storage directories have to outlive the release that received the uploads.
+	sharedDirs := rendered[strings.Index(rendered, "shared_dirs"):]
+	sharedDirs = sharedDirs[:strings.Index(sharedDirs, ");")]
+	for _, want := range []string{"var/data", "public/media"} {
+		if !strings.Contains(sharedDirs, want) {
+			t.Errorf("shared_dirs is missing the file storage directory %q", want)
 		}
 	}
 

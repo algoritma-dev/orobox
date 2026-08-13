@@ -11,6 +11,15 @@
 
 namespace Deployer;
 
+// Deployer builds the new release as a symlink named `release` inside deploy_path and, by
+// default, makes it relative: `release -> releases/1`. deploy:symlink then moves that symlink
+// to current_path with `mv -T`. When current_path sits outside deploy_path — a project served
+// from /var/www/vhosts/example.com/shop while deploy_path is
+// /var/www/vhosts/example.com/.deployer/shop, say — the relative target no longer resolves from
+// the new location and the deploy reports success while current is a dangling symlink. Absolute
+// symlinks survive the move, so current is valid wherever it lives.
+set('use_relative_symlink', false);
+
 // Directory holding the tarballs built by the Dagger pipeline. `orobox deploy` mounts the
 // exported artifacts here inside the Deployer container.
 set('orobox_artifact_dir', static fn (): string => getenv('OROBOX_DEPLOY_ARTIFACT_DIR') ?: '/artifacts');
@@ -73,6 +82,14 @@ set('oro_permission_command', static function (): string {
     return '';
 });
 
+// Directories Oro's requirements check demands before it lets oro:platform:update or
+// oro:install run (PlatformRequirementsProvider). None of them reach the release on their own:
+// var/ and the built public/ directories are gitignored, so `git archive` leaves them out and
+// the check fails with 'Change the permissions of the "var/data" directory so that the web
+// server can write into it'. They are created by a task rather than through Deployer's
+// writable_dirs because deploy.php belongs to the project and orobox never rewrites it.
+set('oro_required_dirs', ['var/cache', 'var/logs', 'var/data', 'public/media', 'public/bundles', 'public/js']);
+
 // SHA of every migration file in the release: project migrations plus the ones shipped by
 // Oro packages, so an Oro version bump counts as new migrations too. Paths are relative to
 // the release, which keeps the checksum comparable between two releases.
@@ -105,6 +122,13 @@ task('oro:upload_artifacts', static function (): void {
         run('cd {{release_path}} && tar -xzf ' . $name . ' && rm -f ' . $name);
         info(sprintf('Extracted %s', $name));
     }
+});
+
+desc('Create the directories Oro requires to be writable');
+task('oro:required_dirs', static function (): void {
+    // mkdir -p accepts a shared directory that deploy:shared already turned into a symlink,
+    // so a project keeping var/data or public/media in shared_dirs stays untouched here.
+    run('cd {{release_path}} && mkdir -p ' . implode(' ', get('oro_required_dirs')));
 });
 
 desc('Update the application, skipping oro:platform:update when no migrations changed');
@@ -165,7 +189,7 @@ task('oro:cleanup_failed', static function (): void {
 
     if ($fallback !== '0') {
         run('if [ -d {{deploy_path}}/releases/' . $fallback . ' ]; then '
-            . 'ln -sfn {{deploy_path}}/releases/' . $fallback . ' {{deploy_path}}/current; fi');
+            . 'ln -sfn {{deploy_path}}/releases/' . $fallback . ' {{current_path}}; fi');
     }
 
     run('rm -rf {{deploy_path}}/releases/' . $release);
@@ -194,7 +218,7 @@ function orobox_has_new_migrations(): bool
 
     // current still points at the previous release: the symlink is swapped later, in
     // deploy:publish. Testing the symlink itself avoids readlink echoing back a dangling path.
-    $previous = trim(run('if [ -L {{deploy_path}}/current ]; then readlink -f {{deploy_path}}/current; fi'));
+    $previous = trim(run('if [ -L {{current_path}} ]; then readlink -f {{current_path}}; fi'));
     if ($previous === '') {
         info('No previous release found.');
 
@@ -211,6 +235,7 @@ desc('Deploy the Oro application');
 task('deploy', [
     'deploy:prepare',
     'oro:upload_artifacts',
+    'oro:required_dirs',
     'oro:update',
     'oro:assets_install',
     'oro:cache_warmup',
