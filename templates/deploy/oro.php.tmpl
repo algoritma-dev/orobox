@@ -11,15 +11,6 @@
 
 namespace Deployer;
 
-// Deployer builds the new release as a symlink named `release` inside deploy_path and, by
-// default, makes it relative: `release -> releases/1`. deploy:symlink then moves that symlink
-// to current_path with `mv -T`. When current_path sits outside deploy_path — a project served
-// from /var/www/vhosts/example.com/shop while deploy_path is
-// /var/www/vhosts/example.com/.deployer/shop, say — the relative target no longer resolves from
-// the new location and the deploy reports success while current is a dangling symlink. Absolute
-// symlinks survive the move, so current is valid wherever it lives.
-set('use_relative_symlink', false);
-
 // Directory holding the tarballs built by the Dagger pipeline. `orobox deploy` mounts the
 // exported artifacts here inside the Deployer container.
 set('orobox_artifact_dir', static fn (): string => getenv('OROBOX_DEPLOY_ARTIFACT_DIR') ?: '/artifacts');
@@ -48,6 +39,11 @@ set('oro_console', static fn (): string => '{{bin/php}} {{release_path}}/bin/con
 // That works because Deployer checks the code out with `git archive` (update_code_strategy
 // defaults to 'archive'), so those files never reach the release at all. Keep the strategy on
 // 'archive' if you rely on it.
+//
+// Monorepo: with sub_directory set, Deployer archives the subtree (`git archive <ref>:<dir>`) and
+// git only reads .gitattributes files contained in the archived tree. A repository-root
+// .gitattributes is therefore ignored — the file must live in the sub_directory itself, with
+// paths relative to it.
 
 // Commands that oro:platform:update would run anyway, minus the two migration commands.
 // Used when the release carries no new migrations, so changed workflow, cron, process,
@@ -122,6 +118,24 @@ task('oro:upload_artifacts', static function (): void {
         run('cd {{release_path}} && tar -xzf ' . $name . ' && rm -f ' . $name);
         info(sprintf('Extracted %s', $name));
     }
+});
+
+desc('Point the release symlink at an absolute path so it survives the move to current_path');
+task('oro:absolute_release_link', static function (): void {
+    // deploy:release links the new release with a path relative to deploy_path
+    // (`release -> releases/1`), and deploy:symlink then moves that very symlink to current_path
+    // with `mv -T`. A relative target is resolved against the symlink's own directory, so as soon
+    // as current_path lives outside deploy_path — say current_path /var/www/vhosts/example.com/shop
+    // against deploy_path /var/www/vhosts/example.com/.deployer/shop — the moved symlink points at
+    // a releases/ directory that does not exist there and the deploy reports success while the
+    // site is served from a dangling link. Rewriting the target as absolute fixes that without
+    // giving up the atomic `mv`; Deployer reads release_path back through readlink and accepts an
+    // absolute link, and when current_path is the default {{deploy_path}}/current the two forms
+    // resolve to the same directory anyway.
+    //
+    // set('use_relative_symlink', false) does NOT cover this: it only drops `ln`'s --relative
+    // flag, while the path deploy:release passes to ln is already the relative string.
+    run('ln -nfs {{deploy_path}}/releases/{{release_name}} {{deploy_path}}/release');
 });
 
 desc('Create the directories Oro requires to be writable');
@@ -217,8 +231,10 @@ function orobox_has_new_migrations(): bool
     $checksum = get('orobox_migration_checksum_command');
 
     // current still points at the previous release: the symlink is swapped later, in
-    // deploy:publish. Testing the symlink itself avoids readlink echoing back a dangling path.
-    $previous = trim(run('if [ -L {{current_path}} ]; then readlink -f {{current_path}}; fi'));
+    // deploy:publish. The test is -d, not -L: -d follows the symlink, so a current left dangling
+    // by an earlier deploy reads as "no previous release" instead of handing back a path that
+    // the checksum command below would then fail to cd into.
+    $previous = trim(run('if [ -d {{current_path}} ]; then readlink -f {{current_path}}; fi'));
     if ($previous === '') {
         info('No previous release found.');
 
@@ -234,6 +250,7 @@ function orobox_has_new_migrations(): bool
 desc('Deploy the Oro application');
 task('deploy', [
     'deploy:prepare',
+    'oro:absolute_release_link',
     'oro:upload_artifacts',
     'oro:required_dirs',
     'oro:update',

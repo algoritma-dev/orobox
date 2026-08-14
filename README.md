@@ -382,10 +382,18 @@ Use git's own mechanism: mark the paths `export-ignore` in `.gitattributes`.
 
 Deployer checks the code out with `git archive` (`update_code_strategy` defaults to `archive`), and `git archive` honors `export-ignore`, so those files never reach the remote host at all.
 
-Two things to know:
+Three things to know:
 
 - The rules are read from the `.gitattributes` of the tree being deployed. A tag created before you added them still carries the files.
 - Keep `update_code_strategy` on `archive`. Switching it to `clone` in `deploy.php` — which you would only do to get the `.git` directory into the release — disables `export-ignore`.
+- **With `deploy.source_dir` set, the `.gitattributes` must live inside that directory.** Deployer archives the subtree (`git archive <ref>:<source_dir>`), and git only reads `.gitattributes` files that are part of the archived tree, so a repository-root `.gitattributes` is never consulted. Put the rules in `<source_dir>/.gitattributes` with paths relative to that directory:
+
+  ```gitattributes
+  /tests           export-ignore
+  /.orobox.yaml    export-ignore
+  ```
+
+  A root `.gitattributes` listing `<source_dir>/tests` still works for a full-tree `git archive`, but not for the deploy.
 
 **Failed deploys.** If any remote step fails, the recipe removes `releases/<n>`, points `current` back at the previous release, drops `.dep/deploy.lock` and rewrites Deployer's bookkeeping — so the migration comparison above always has an intact previous release to work with.
 
