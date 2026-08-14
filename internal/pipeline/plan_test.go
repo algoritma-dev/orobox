@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -601,5 +602,62 @@ func TestPlanReleaseEnvOmitsUnsetRestartCommand(t *testing.T) {
 	}
 	if port := p.Release.Env["OROBOX_DEPLOY_PORT"]; port != "22" {
 		t.Errorf("OROBOX_DEPLOY_PORT = %q, want the default 22", port)
+	}
+}
+
+func TestPlanRunsEverythingByDefault(t *testing.T) {
+	p := New(testConf("6.1", false), testStage(), "repo")
+
+	if !p.RunsQA() || !p.RunsTests() || !p.RunsRelease() {
+		t.Error("a plan built by New must run every step")
+	}
+	if !p.NeedsDevDependencies() {
+		t.Error("NeedsDevDependencies() = false, want true when QA and the tests both run")
+	}
+	if got := p.SkippedSteps(); len(got) != 0 {
+		t.Errorf("SkippedSteps() = %v, want none", got)
+	}
+}
+
+func TestPlanSkipPredicates(t *testing.T) {
+	tests := []struct {
+		name        string
+		skipQA      bool
+		skipTest    bool
+		skipRelease bool
+		wantDevDeps bool
+		wantSkipped []string
+	}{
+		{name: "nothing skipped", wantDevDeps: true},
+		{name: "qa skipped", skipQA: true, wantDevDeps: true, wantSkipped: []string{"qa"}},
+		{name: "tests skipped", skipTest: true, wantDevDeps: true, wantSkipped: []string{"test"}},
+		{name: "release skipped", skipRelease: true, wantDevDeps: true, wantSkipped: []string{"release"}},
+		{name: "qa and tests skipped", skipQA: true, skipTest: true, wantDevDeps: false, wantSkipped: []string{"qa", "test"}},
+		{name: "qa and release skipped", skipQA: true, skipRelease: true, wantDevDeps: true, wantSkipped: []string{"qa", "release"}},
+		{name: "tests and release skipped", skipTest: true, skipRelease: true, wantDevDeps: true, wantSkipped: []string{"test", "release"}},
+		{name: "everything skipped", skipQA: true, skipTest: true, skipRelease: true, wantDevDeps: false, wantSkipped: []string{"qa", "test", "release"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := New(testConf("6.1", false), testStage(), "repo")
+			p.SkipQA, p.SkipTest, p.SkipRelease = tt.skipQA, tt.skipTest, tt.skipRelease
+
+			if p.RunsQA() == tt.skipQA {
+				t.Errorf("RunsQA() = %v, want %v", p.RunsQA(), !tt.skipQA)
+			}
+			if p.RunsTests() == tt.skipTest {
+				t.Errorf("RunsTests() = %v, want %v", p.RunsTests(), !tt.skipTest)
+			}
+			if p.RunsRelease() == tt.skipRelease {
+				t.Errorf("RunsRelease() = %v, want %v", p.RunsRelease(), !tt.skipRelease)
+			}
+			if p.NeedsDevDependencies() != tt.wantDevDeps {
+				t.Errorf("NeedsDevDependencies() = %v, want %v", p.NeedsDevDependencies(), tt.wantDevDeps)
+			}
+			if got := p.SkippedSteps(); !reflect.DeepEqual(got, tt.wantSkipped) {
+				t.Errorf("SkippedSteps() = %v, want %v", got, tt.wantSkipped)
+			}
+		})
 	}
 }

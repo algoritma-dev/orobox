@@ -68,6 +68,13 @@ type Plan struct {
 	// pipeline does, only what it reuses.
 	NoCache bool
 
+	// SkipQA, SkipTest and SkipRelease each drop one part of the pipeline. Like NoCache they never
+	// change what a step does, only whether it runs at all, so a run with none of them set is the
+	// only thing a stage's configuration alone describes.
+	SkipQA      bool
+	SkipTest    bool
+	SkipRelease bool
+
 	// Deps, DepsDev and QaTools are built from composer.json and composer.lock alone, before the
 	// application sources are overlaid. Dagger keys each exec on the container state before it, so
 	// they are reused across runs and across refs for as long as the lock does not change. That is
@@ -86,6 +93,36 @@ type Plan struct {
 // BuildsAssets reports whether the pipeline builds and ships the webpack assets.
 func (p *Plan) BuildsAssets() bool {
 	return p.Assets != nil
+}
+
+// RunsQA reports whether the QA step and the qa-tools layer it needs are part of this run.
+func (p *Plan) RunsQA() bool { return !p.SkipQA }
+
+// RunsTests reports whether the test step is part of this run.
+func (p *Plan) RunsTests() bool { return !p.SkipTest }
+
+// RunsRelease reports whether the pipeline ends on the remote host.
+func (p *Plan) RunsRelease() bool { return !p.SkipRelease }
+
+// NeedsDevDependencies reports whether the deps-dev layer still has a consumer. It feeds the test
+// step directly and the QA step through the qa-tools layer built on top of it, so skipping just
+// one of the two leaves it needed; only skipping both turns the run into a plain build.
+func (p *Plan) NeedsDevDependencies() bool { return p.RunsQA() || p.RunsTests() }
+
+// SkippedSteps names the parts of the pipeline this run leaves out, in pipeline order. It is nil
+// for a normal run, which is what keeps a normal deploy's summary unchanged.
+func (p *Plan) SkippedSteps() []string {
+	var skipped []string
+	if !p.RunsQA() {
+		skipped = append(skipped, "qa")
+	}
+	if !p.RunsTests() {
+		skipped = append(skipped, "test")
+	}
+	if !p.RunsRelease() {
+		skipped = append(skipped, "release")
+	}
+	return skipped
 }
 
 // CacheEnv is the environment that turns caching off. OROBOX_NO_CACHE is read by the fingerprint

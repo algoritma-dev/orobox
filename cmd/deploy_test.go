@@ -145,7 +145,7 @@ func TestDeployOptionsRequiresCredentials(t *testing.T) {
 	t.Setenv("OROBOX_DEPLOY_SSH_KEY", "")
 	t.Setenv("CI_JOB_TOKEN", "")
 
-	if _, err := deployOptions(t.TempDir(), config.StageConfig{Host: "acme.com"}); err == nil {
+	if _, err := deployOptions(t.TempDir(), config.StageConfig{Host: "acme.com"}, true); err == nil {
 		t.Error("deployOptions() error = nil, want a missing credentials error")
 	}
 }
@@ -157,7 +157,7 @@ func TestDeployOptionsUsesCIJobToken(t *testing.T) {
 	t.Setenv("OROBOX_DEPLOY_GIT_USER", "")
 	t.Setenv("CI_JOB_TOKEN", "job-token")
 
-	opts, err := deployOptions(t.TempDir(), config.StageConfig{Host: "acme.com"})
+	opts, err := deployOptions(t.TempDir(), config.StageConfig{Host: "acme.com"}, true)
 	if err != nil {
 		t.Fatalf("deployOptions() error = %v", err)
 	}
@@ -166,6 +166,16 @@ func TestDeployOptionsUsesCIJobToken(t *testing.T) {
 	}
 	if opts.SSHPrivateKey == "" {
 		t.Error("SSHPrivateKey was not picked up from the environment")
+	}
+}
+
+func TestDeployOptionsSkipsTheCredentialCheckWithoutARelease(t *testing.T) {
+	t.Setenv("SSH_AUTH_SOCK", "")
+	t.Setenv("OROBOX_DEPLOY_SSH_KEY", "")
+	t.Setenv("CI_JOB_TOKEN", "")
+
+	if _, err := deployOptions(t.TempDir(), config.StageConfig{Host: "acme.com"}, false); err != nil {
+		t.Errorf("deployOptions() error = %v, want nil when the release is skipped", err)
 	}
 }
 
@@ -252,5 +262,13 @@ func TestAskStageDefaultsAndOverrides(t *testing.T) {
 func TestDeployCommandHasNoCacheFlag(t *testing.T) {
 	if deployCmd.Flags().Lookup("no-cache") == nil {
 		t.Error("deploy is missing the --no-cache flag")
+	}
+}
+
+func TestDeployCommandHasSkipFlags(t *testing.T) {
+	for _, name := range []string{"skip-qa", "skip-test", "skip-release"} {
+		if deployCmd.Flags().Lookup(name) == nil {
+			t.Errorf("deploy is missing the --%s flag", name)
+		}
 	}
 }

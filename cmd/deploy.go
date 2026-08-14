@@ -17,8 +17,11 @@ import (
 )
 
 var (
-	deployAssumeYes bool
-	deployNoCache   bool
+	deployAssumeYes   bool
+	deployNoCache     bool
+	deploySkipQA      bool
+	deploySkipTest    bool
+	deploySkipRelease bool
 )
 
 var deployCmd = &cobra.Command{
@@ -43,6 +46,9 @@ upload the artifacts and update the application.`,
 func init() {
 	deployCmd.Flags().BoolVarP(&deployAssumeYes, "yes", "y", false, "Do not ask for confirmation before releasing")
 	deployCmd.Flags().BoolVar(&deployNoCache, "no-cache", false, "Rebuild everything: the dependency layers, the QA install and the test database")
+	deployCmd.Flags().BoolVar(&deploySkipQA, "skip-qa", false, "Skip the QA checks")
+	deployCmd.Flags().BoolVar(&deploySkipTest, "skip-test", false, "Skip the test suites")
+	deployCmd.Flags().BoolVar(&deploySkipRelease, "skip-release", false, "Build, check and export the artifacts, but do not release to the remote host")
 	rootCmd.AddCommand(deployCmd)
 }
 
@@ -71,7 +77,7 @@ func runDeployCommand(stageName string) {
 		os.Exit(1)
 	}
 
-	opts, err := deployOptions(projectDir, stage)
+	opts, err := deployOptions(projectDir, stage, !deploySkipRelease)
 	if err != nil {
 		utils.PrintError(err.Error())
 		os.Exit(1)
@@ -79,9 +85,14 @@ func runDeployCommand(stageName string) {
 
 	plan := pipeline.New(conf, stage, repository)
 	plan.NoCache = deployNoCache
+	plan.SkipQA = deploySkipQA
+	plan.SkipTest = deploySkipTest
+	plan.SkipRelease = deploySkipRelease
 	printDeploySummary(plan)
 
-	if !deployAssumeYes && isTTY() {
+	// The prompt exists because a release is irreversible. With --skip-release nothing reaches the
+	// stage host, so asking would only train the reader to confirm without looking.
+	if plan.RunsRelease() && !deployAssumeYes && isTTY() {
 		reader := bufio.NewReader(stdin)
 		if !utils.AskYesNo(reader, fmt.Sprintf("Release %s to %s?", stage.Ref, stage.Host), false) {
 			utils.PrintInfo("Aborted.")
@@ -98,6 +109,11 @@ func runDeployCommand(stageName string) {
 	if runErr != nil {
 		utils.PrintError(runErr.Error())
 		os.Exit(1)
+	}
+
+	if !plan.RunsRelease() {
+		utils.PrintSuccess(fmt.Sprintf("Built %s for %s and exported the artifacts; the release was skipped.", stage.Ref, stage.Name))
+		return
 	}
 
 	utils.PrintSuccess(fmt.Sprintf("Deployed %s to %s (%s).", stage.Ref, stage.Name, stage.Host))
@@ -135,7 +151,11 @@ func checkDeployerFiles(projectDir string) error {
 
 // deployOptions collects the host-side credentials the pipeline needs. Locally that is the
 // SSH agent; in CI it is a key and a git token from the job environment.
-func deployOptions(projectDir string, stage config.StageConfig) (pipeline.Options, error) {
+//
+// requireSSH is false when the run stops before the release. The SSH credentials exist for the
+// remote session, so demanding them from a job that never opens one would make --skip-release
+// unusable exactly where it is most useful: a CI job with no deploy key.
+func deployOptions(projectDir string, stage config.StageConfig, requireSSH bool) (pipeline.Options, error) {
 	opts := pipeline.Options{
 		ProjectDir:    projectDir,
 		Debug:         viper.GetBool("debug"),
@@ -155,7 +175,7 @@ func deployOptions(projectDir string, stage config.StageConfig) (pipeline.Option
 		}
 	}
 
-	if opts.SSHAuthSock == "" && opts.SSHPrivateKey == "" {
+	if requireSSH && opts.SSHAuthSock == "" && opts.SSHPrivateKey == "" {
 		return opts, fmt.Errorf("no SSH credentials found: start an agent (eval $(ssh-agent) && ssh-add) or set OROBOX_DEPLOY_SSH_KEY")
 	}
 
@@ -193,4 +213,7 @@ func printDeploySummary(plan *pipeline.Plan) {
 		fmt.Println("  Assets:     taken from the repository (pre_built_assets_enabled: true)")
 	}
 	fmt.Printf("  Artifacts:  %v\n", plan.Artifacts())
+	if skipped := plan.SkippedSteps(); len(skipped) > 0 {
+		fmt.Printf("  Skipping:   %v\n", skipped)
+	}
 }

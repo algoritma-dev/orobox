@@ -147,13 +147,22 @@ func Run(ctx context.Context, plan *Plan, opts Options) ([]string, error) {
 	if err != nil {
 		return nil, r.describe("installing the dependencies", err)
 	}
-	depsDev, err := r.exec(ctx, deps, plan.DepsDev)
-	if err != nil {
-		return nil, r.describe("installing the development dependencies", err)
+
+	// The dev dependencies and the QA tools are installed only when something still consumes them.
+	// Both stay nil otherwise, which is safe because the only readers are guarded by the same
+	// predicates: qa-tools is built whenever the QA step runs, and deps-dev whenever either does.
+	var depsDev, qaTools *dagger.Container
+	if plan.NeedsDevDependencies() {
+		depsDev, err = r.exec(ctx, deps, plan.DepsDev)
+		if err != nil {
+			return nil, r.describe("installing the development dependencies", err)
+		}
 	}
-	qaTools, err := r.exec(ctx, depsDev, plan.QaTools)
-	if err != nil {
-		return nil, r.describe("installing the QA tools", err)
+	if plan.RunsQA() {
+		qaTools, err = r.exec(ctx, depsDev, plan.QaTools)
+		if err != nil {
+			return nil, r.describe("installing the QA tools", err)
+		}
 	}
 
 	// From here on every step overlays the sources, so all of it is per-commit work.
@@ -177,20 +186,25 @@ func Run(ctx context.Context, plan *Plan, opts Options) ([]string, error) {
 	}
 
 	// QA and tests are independent consumers of the development dependencies, so they run
-	// together and the first failure cancels the other.
+	// together and the first failure cancels the other. With both skipped the group is empty and
+	// Wait returns at once.
 	group, groupCtx := errgroup.WithContext(ctx)
-	group.Go(func() error {
-		if _, err := r.exec(groupCtx, r.on(qaTools, plan.QA), plan.QA); err != nil {
-			return r.describe("QA checks", err)
-		}
-		return nil
-	})
-	group.Go(func() error {
-		if _, err := r.exec(groupCtx, r.on(depsDev, plan.Test), plan.Test); err != nil {
-			return r.describe("tests", err)
-		}
-		return nil
-	})
+	if plan.RunsQA() {
+		group.Go(func() error {
+			if _, err := r.exec(groupCtx, r.on(qaTools, plan.QA), plan.QA); err != nil {
+				return r.describe("QA checks", err)
+			}
+			return nil
+		})
+	}
+	if plan.RunsTests() {
+		group.Go(func() error {
+			if _, err := r.exec(groupCtx, r.on(depsDev, plan.Test), plan.Test); err != nil {
+				return r.describe("tests", err)
+			}
+			return nil
+		})
+	}
 	if err := group.Wait(); err != nil {
 		return nil, err
 	}
@@ -200,6 +214,12 @@ func Run(ctx context.Context, plan *Plan, opts Options) ([]string, error) {
 	exported, err := r.exportArtifacts(ctx, artifacts)
 	if err != nil {
 		return nil, err
+	}
+
+	// Everything up to here is local; the release is the only part that reaches the stage host, so
+	// skipping it leaves the exported artifacts as the run's whole result.
+	if !plan.RunsRelease() {
+		return exported, nil
 	}
 
 	release, err := r.releaseContainer(artifacts)

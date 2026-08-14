@@ -347,6 +347,14 @@ Options:
 - `--yes`, `-y`: Skip the confirmation prompt (implied when there is no TTY, e.g. in CI).
 - `--debug`, `-d`: Print every command's full output instead of its last lines, and stream the Dagger engine output.
 - `--no-cache`: Rebuild everything the run could have reused — the dependency layers, the QA install and the test database.
+- `--skip-qa`: Skip the QA checks. The QA tool set is not installed either, so nothing is paid for it.
+- `--skip-test`: Skip the test suites.
+- `--skip-release`: Build, check and export the artifacts, then stop before the remote release. Nothing connects to the stage host, so the confirmation prompt is skipped and no SSH deploy credentials are needed — only whatever the clone requires.
+
+The three `--skip-*` flags may be combined freely, including all at once: the vendor tree and the
+assets are always built and always exported, so even a run that skips everything else produces the
+artifacts a later release would upload. When at least one is set, the deploy plan printed before the
+run names the skipped steps on a `Skipping:` line.
 
 Every command the pipeline runs is reported as it happens: a line when it starts, then its own
 output — `composer install`, `oro:assets:install`, each QA tool, `bin/simple-phpunit`, the
