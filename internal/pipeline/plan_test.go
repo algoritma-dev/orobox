@@ -426,11 +426,22 @@ func TestPlanTestStageCachesTheOroInstall(t *testing.T) {
 		"DROP SCHEMA IF EXISTS public CASCADE",
 		`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`,
 		"CREATE EXTENSION IF NOT EXISTS pg_trgm",
-		"apk add --no-cache postgresql-client",
+		"apk add --no-cache postgresql16-client",
 	} {
 		if !strings.Contains(test, want) {
 			t.Errorf("test stage missing %q: %s", want, test)
 		}
+	}
+
+	// The client major follows the service's. An unversioned package is whatever the distribution
+	// defaults to, and a newer pg_dump writes settings the pinned server does not recognise.
+	if major := postgresMajor(p.Test.Services[0].Image[len("postgres:"):]); !strings.Contains(test, "postgresql"+major+"-client") {
+		t.Errorf("test stage installs a client that does not match the %s server: %s", major, test)
+	}
+	// A dump is only restorable by the version pair that wrote it, so the client is part of what
+	// decides whether the cached one can be reused.
+	if !strings.Contains(test, "-pg16") {
+		t.Errorf("test fingerprint does not cover the client major: %s", test)
 	}
 
 	// The fingerprint covers exactly what decides the schema.
@@ -659,5 +670,18 @@ func TestPlanSkipPredicates(t *testing.T) {
 				t.Errorf("SkippedSteps() = %v, want %v", got, tt.wantSkipped)
 			}
 		})
+	}
+}
+
+func TestPostgresMajorFromAPinnedTag(t *testing.T) {
+	for tag, want := range map[string]string{
+		"16.1-alpine": "16",
+		"17.6-alpine": "17",
+		"17-alpine":   "17",
+		"18":          "18",
+	} {
+		if got := postgresMajor(tag); got != want {
+			t.Errorf("postgresMajor(%q) = %q, want %q", tag, got, want)
+		}
 	}
 }

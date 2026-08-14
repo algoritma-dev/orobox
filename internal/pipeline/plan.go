@@ -11,8 +11,8 @@ import (
 	"github.com/algoritma-dev/orobox/internal/qatools"
 )
 
-// releaseStepName is the step the reporter streams in full: it runs alone and last, so its
-// output cannot interleave with another step's.
+// releaseStepName is the step that reaches the remote host. It runs alone and last, which is why
+// the deploy timings the reporter prints belong to it alone.
 const releaseStepName = "release"
 
 // Service is a container the pipeline binds to a step under Name as its hostname.
@@ -238,7 +238,7 @@ func New(conf *config.OroConfig, stage config.StageConfig, repository string) *P
 		Name:     "test",
 		Workdir:  oroRoot,
 		Env:      testEnv(versions.Postgres),
-		Commands: testCommands(stage),
+		Commands: testCommands(stage, versions.Postgres),
 		Services: testServices(conf, versions),
 		Caches:   testCaches(stage, suffix),
 	}
@@ -271,7 +271,8 @@ func New(conf *config.OroConfig, stage config.StageConfig, repository string) *P
 // The stand-ins are replaced by the real files when the sources are overlaid, and the layers dump
 // no autoloader of their own, so nothing downstream ever sees them.
 func autoloadPlaceholderCommand() string {
-	return `php -r '$manifest = json_decode(@file_get_contents("composer.json"), true) ?: [];
+	return `# Creating placeholders for the root package's autoload entries
+php -r '$manifest = json_decode(@file_get_contents("composer.json"), true) ?: [];
 foreach (["autoload", "autoload-dev"] as $section) {
     foreach (["classmap", "files"] as $kind) {
         foreach ($manifest[$section][$kind] ?? [] as $entry) {
@@ -402,7 +403,8 @@ func qaCaches(suffix string) []Cache {
 // schema and the compiled container. Anything else can change freely without paying for another
 // install, which is the whole point of keeping the cache.
 func qaWarmupCommand() string {
-	return fmt.Sprintf(`set -e
+	return fmt.Sprintf(`# Preparing the QA cache: Oro install and warmed test cache
+set -e
 stamp=%[1]s/.orobox-qa-fingerprint
 fingerprint=$(cat composer.lock $(find src -path '*Migrations*' -type f 2>/dev/null | sort) 2>/dev/null | md5sum | cut -c1-32)
 if [ -z "$OROBOX_NO_CACHE" ] && [ "$(cat "$stamp" 2>/dev/null)" = "$fingerprint" ] && [ -f %[2]s ] && [ -d %[3]s ]; then
@@ -574,18 +576,26 @@ func testCaches(stage config.StageConfig, suffix string) []Cache {
 
 // testDatabaseCommand restores the cached Oro install, or performs one and caches it. The
 // fingerprint covers composer.lock and every migration file — what decides the schema — so a
-// normal commit restores and only a dependency or migration change pays for an install.
+// normal commit restores and only a dependency or migration change pays for an install. The
+// client's major version is part of it too: a dump is only restorable by the version pair that
+// wrote it, so a changed client must produce a new dump rather than read the old one.
 //
 // psql and pg_dump come from the distribution rather than the image, as rsync does in the release
-// step. The dump is plain SQL, so a client newer than the pinned server is fine; the reverse never
-// happens, because the client always follows the distribution.
-func testDatabaseCommand() string {
-	return fmt.Sprintf(`set -e
-apk add --no-cache postgresql-client >/dev/null
+// step, and the major is pinned to the service's. The unversioned package is whatever the
+// distribution defaults to — Alpine 3.24 ships 18 — and a newer client is not compatible in this
+// direction: pg_dump writes the settings its own server understands, so a dump from 18 restored
+// into 16 dies on `unrecognized configuration parameter "transaction_timeout"`, a setting that
+// only exists from 17 on. The fallback covers a major the distribution has not packaged; it is
+// no worse than what the unversioned package would have given.
+func testDatabaseCommand(postgresVersion string) string {
+	major := postgresMajor(postgresVersion)
+	return fmt.Sprintf(`# Preparing the test database: restoring the cached Oro install, or installing and caching it
+set -e
+apk add --no-cache postgresql%[8]s-client >/dev/null 2>&1 || apk add --no-cache postgresql-client >/dev/null
 export PGPASSWORD=%[6]s
 psql_run() { psql -h %[4]s -U %[5]s -d %[7]s -v ON_ERROR_STOP=1 "$@"; }
 stamp=%[2]s
-fingerprint=$(cat composer.lock $(find src -path '*Migrations*' -type f 2>/dev/null | sort) 2>/dev/null | md5sum | cut -c1-32)
+fingerprint=$(cat composer.lock $(find src -path '*Migrations*' -type f 2>/dev/null | sort) 2>/dev/null | md5sum | cut -c1-32)-pg%[8]s
 php bin/console doctrine:database:create --env=test --if-not-exists
 if [ -z "$OROBOX_NO_CACHE" ] && [ "$(cat "$stamp" 2>/dev/null)" = "$fingerprint" ] && [ -f %[1]s ]; then
   echo 'Restoring the cached test database.'
@@ -602,7 +612,16 @@ php bin/console oro:install --no-interaction --env=test --skip-translations
 pg_dump -h %[4]s -U %[5]s --no-owner --no-privileges %[7]s | gzip -c > %[1]s
 printf '%%s' "$fingerprint" > "$stamp"`,
 		testDBDumpFile, testDBStampFile, oroWritableDirsCommand(),
-		testDBService, testDBUser, testDBPassword, testDBName)
+		testDBService, testDBUser, testDBPassword, testDBName, major)
+}
+
+// postgresMajor is the major version of a pinned image tag: "16.1-alpine" is 16. It names the
+// Alpine client package, and the client must not be newer than the server it talks to.
+func postgresMajor(version string) string {
+	if idx := strings.IndexAny(version, ".-"); idx >= 0 {
+		return version[:idx]
+	}
+	return version
 }
 
 // dsn builds the Doctrine URL for one of the pipeline's Postgres services. Both databases use
@@ -612,7 +631,7 @@ func dsn(service, database, postgresVersion string) string {
 		testDBUser, testDBPassword, service, database, postgresVersion)
 }
 
-func testCommands(stage config.StageConfig) []string {
+func testCommands(stage config.StageConfig, postgresVersion string) []string {
 	// The dev dependencies — PHPUnit reaches the container through symfony/phpunit-bridge, a
 	// require-dev package — come from the deps-dev layer. All that is left here is an autoloader
 	// that knows the project's own classes.
@@ -621,7 +640,7 @@ func testCommands(stage config.StageConfig) []string {
 	if stage.RunsFunctionalTests() {
 		// Functional tests need a real schema. The install is cached as a dump and restored on
 		// every run, so the suites always start from the same database.
-		commands = append(commands, oroWritableDirsCommand(), testDatabaseCommand())
+		commands = append(commands, oroWritableDirsCommand(), testDatabaseCommand(postgresVersion))
 	}
 
 	for _, suite := range stage.Suites() {

@@ -61,6 +61,21 @@ func TestLabelFitsOneLine(t *testing.T) {
 		t.Errorf("label = %q, want the first meaningful line", got)
 	}
 
+	// A script whose first line says nothing about the ten minutes after it titles itself.
+	script := "# Preparing the test database\nset -e\napk add --no-cache postgresql-client\nphp bin/console oro:install"
+	if got := label(script); got != "Preparing the test database" {
+		t.Errorf("label = %q, want the script's own title", got)
+	}
+	// The engine renders the arguments, so the span is still matched on a line really run.
+	if got := commandKey(script); got != "apk add --no-cache postgresql-client" {
+		t.Errorf("commandKey = %q, want the first executable line", got)
+	}
+
+	// A comment further down documents that line, not the script.
+	if got := label("composer install\n# dumps the autoloader\ncomposer dump-autoload"); got != "composer install" {
+		t.Errorf("label = %q, want the first line, not the comment below it", got)
+	}
+
 	long := label(strings.Repeat("x", commandLabelLimit+50))
 	if len([]rune(long)) != commandLabelLimit {
 		t.Errorf("label length = %d, want %d", len([]rune(long)), commandLabelLimit)
@@ -109,7 +124,7 @@ func TestReleaseStreamsEveryLine(t *testing.T) {
 	var engine strings.Builder
 	engine.WriteString(releaseLine + "\n")
 	engine.WriteString("14  : [1.0s] | task oro:update\n")
-	for i := 0; i < heartbeatTailLines*3; i++ {
+	for i := 0; i < streamBurstLines; i++ {
 		engine.WriteString("14  : [1.0s] | migration line\n")
 	}
 	log.Write([]byte(engine.String()))
@@ -118,8 +133,8 @@ func TestReleaseStreamsEveryLine(t *testing.T) {
 	if !task.pollStream(now) {
 		t.Fatal("pollStream should report the lines it printed")
 	}
-	if got := strings.Count(out.String(), "    migration line"); got != heartbeatTailLines*3 {
-		t.Errorf("printed %d lines, want %d: streaming must not use the tail cap", got, heartbeatTailLines*3)
+	if got := strings.Count(out.String(), "    migration line"); got != streamBurstLines {
+		t.Errorf("printed %d lines, want %d: streaming must print the whole burst", got, streamBurstLines)
 	}
 	if task.tracker.currentTask() != "oro:update" {
 		t.Errorf("currentTask = %q, want the streamed task line to have been tracked", task.tracker.currentTask())
@@ -164,7 +179,7 @@ func TestReleaseUnderDebugDoesNotStream(t *testing.T) {
 	}
 }
 
-func TestNonStreamingStepDoesNotPrintItsOutputTwice(t *testing.T) {
+func TestEveryStepStreamsItsOutputExactlyOnce(t *testing.T) {
 	now := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
 	var out strings.Builder
 	log := newLogBuffer(nil)
@@ -172,17 +187,68 @@ func TestNonStreamingStepDoesNotPrintItsOutputTwice(t *testing.T) {
 	r.now = func() time.Time { return now }
 
 	task := r.start("qa", "set -e\nstamp=/var/www/oro/var/cache/.orobox-qa-fingerprint\nphp bin/console oro:install")
+	// The stream goroutine polls once a second; this test drives the polls itself.
 	task.finish()
+	if !task.stream {
+		t.Fatal("every step streams: a build that says nothing for ten minutes is what this is for")
+	}
 
-	// Lines the heartbeat never got round to quoting are still in the reader when the command
-	// ends. The closing block prints the command's real stdout, so draining them again would
-	// show the same output twice.
 	log.Write([]byte(installLine + "\n12  : [1.0s] | Installing Oro\n"))
 	out.Reset()
+	// Whatever the last poll missed is drained by the closing block, so the line appears there —
+	// and printing the captured stdout as well would show it twice.
 	task.ok("Installing Oro\n")
 
 	if got := strings.Count(out.String(), "Installing Oro"); got != 1 {
 		t.Errorf("printed the line %d times, want once:\n%s", got, out.String())
+	}
+}
+
+func TestACommandWithNoMatchedSpanStillPrintsItsOutput(t *testing.T) {
+	now := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
+	var out strings.Builder
+	log := newLogBuffer(nil)
+	r := newReporter(&out, false, log)
+	r.now = func() time.Time { return now }
+
+	// "ls" carries nothing distinctive enough to bind a span, so nothing is ever streamed for it.
+	task := r.start("qa", "ls")
+	task.finish()
+	out.Reset()
+	task.ok("composer.json\n")
+
+	if !strings.Contains(out.String(), "    composer.json") {
+		t.Errorf("closing block = %q, want the captured output when nothing was streamed", out.String())
+	}
+}
+
+func TestStreamedOutputIsMarkedWhenTheStepChanges(t *testing.T) {
+	now := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
+	var out strings.Builder
+	log := newLogBuffer(nil)
+	r := newReporter(&out, false, log)
+	r.now = func() time.Time { return now }
+
+	qa := r.start("qa", "set -e\nstamp=/var/www/oro/var/cache/.orobox-qa-fingerprint\nphp bin/console oro:install")
+	tests := r.start("test", "vendor/bin/phpunit --testsuite unit")
+	qa.finish()
+	tests.finish()
+
+	log.Write([]byte(installLine + "\n12  : [1.0s] | Installing Oro\n" +
+		testsLine + "\n13  : [1.1s] | PHPUnit 10\n"))
+
+	out.Reset()
+	qa.pollStream(now)
+	tests.pollStream(now)
+	// The qa marker is not reprinted: its block was the last thing written before this one.
+	qa.pollStream(now)
+
+	text := out.String()
+	if !strings.Contains(text, "┄ [test]") {
+		t.Errorf("output = %q, want a marker where the streaming step changes", text)
+	}
+	if got := strings.Count(text, "┄ [qa]"); got != 1 {
+		t.Errorf("printed the qa marker %d times, want once: consecutive lines of one step need no marker", got)
 	}
 }
 
@@ -228,7 +294,7 @@ func TestSilenceLineBeforeAnyOutput(t *testing.T) {
 	}
 }
 
-func TestPollTailPrintsTheHeartbeatBlockOnlyWithOutput(t *testing.T) {
+func TestPollStreamPrintsNothingBeforeTheCommandSpeaks(t *testing.T) {
 	now := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
 	var out strings.Builder
 	log := newLogBuffer(nil)
@@ -238,17 +304,12 @@ func TestPollTailPrintsTheHeartbeatBlockOnlyWithOutput(t *testing.T) {
 	task := r.start("qa", "set -e\nstamp=/var/www/oro/var/cache/.orobox-qa-fingerprint\nphp bin/console oro:install")
 	task.finish()
 
-	if task.pollTail(now) {
-		t.Error("pollTail reported output before anything was written")
-	}
-
-	log.Write([]byte(installLine + "\n12  : [1.0s] | Installing Oro\n"))
 	out.Reset()
-	if !task.pollTail(now) {
-		t.Error("pollTail should report the line it printed")
+	if task.pollStream(now) {
+		t.Error("pollStream reported output before anything was written")
 	}
-	if text := out.String(); !strings.Contains(text, "still running") || !strings.Contains(text, "Installing Oro") {
-		t.Errorf("heartbeat block = %q, want the progress line and the output", text)
+	if out.String() != "" {
+		t.Errorf("wrote %q, want nothing: the silence line is the loop's business", out.String())
 	}
 }
 

@@ -73,18 +73,9 @@ func (w *engineWatch) follow(command string) *engineReader {
 	return r
 }
 
-// next returns up to limit new lines of this command's output, oldest hidden. A nil reader
-// returns nothing, so a reporter without an engine log needs no special case.
-func (r *engineReader) next(limit int, now time.Time) []string {
-	lines := r.drain(now)
-	if len(lines) > limit {
-		lines = lines[len(lines)-limit:]
-	}
-	return lines
-}
-
-// drain returns every line of this command's output not yet returned. The release step prints
-// all of them, so unlike next it never drops the middle of a burst.
+// drain returns every line of this command's output not yet returned. All of them are printed,
+// so the middle of a burst is never dropped. A nil reader returns nothing, so a reporter without
+// an engine log needs no special case.
 func (r *engineReader) drain(now time.Time) []string {
 	if r == nil || r.key == "" {
 		return nil
@@ -228,7 +219,9 @@ func parseEngineLine(line string) (id, text string, isOutput bool) {
 // exec arguments. The rendering escapes quotes and newlines, so the key stops at the first
 // character whose escaped form would no longer match the command as written.
 func commandKey(command string) string {
-	key := label(command)
+	// The title a script gives itself is not matched against: the engine renders the arguments,
+	// so only a line the command really runs can be found there.
+	key := strings.Join(strings.Fields(firstCommandLine(command)), " ")
 	if idx := strings.IndexAny(key, `"'\`); idx >= 0 {
 		key = key[:idx]
 	}

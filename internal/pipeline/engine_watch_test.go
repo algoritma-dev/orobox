@@ -6,9 +6,13 @@ import (
 	"time"
 )
 
-// clockStart is the fixed instant the reader tests hand to drain and next, so lastSeen is
-// comparable without touching the wall clock.
+// clockStart is the fixed instant the reader tests hand to drain, so lastSeen is comparable
+// without touching the wall clock.
 var clockStart = time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
+
+// streamBurstLines is more output than one poll would ever have printed under the old tail cap,
+// which is the point: a burst is streamed whole.
+const streamBurstLines = 24
 
 // installLine is what the engine prints when it starts the QA warmup command. The arguments are
 // rendered on one line, with the script's newlines escaped.
@@ -48,39 +52,21 @@ func TestEngineWatchGivesEachCommandItsOwnOutput(t *testing.T) {
 	log.Write([]byte(installLine + "\n12  : [1.0s] | Installing Oro\n" +
 		testsLine + "\n13  : [1.1s] | PHPUnit 10\n12  : [2.0s] | Warming the cache\n"))
 
-	if got := qa.next(8, clockStart); len(got) != 2 || got[0] != "Installing Oro" || got[1] != "Warming the cache" {
+	if got := qa.drain(clockStart); len(got) != 2 || got[0] != "Installing Oro" || got[1] != "Warming the cache" {
 		t.Errorf("qa output = %q, want only the install command's lines", got)
 	}
-	if got := tests.next(8, clockStart); len(got) != 1 || got[0] != "PHPUnit 10" {
+	if got := tests.drain(clockStart); len(got) != 1 || got[0] != "PHPUnit 10" {
 		t.Errorf("test output = %q, want only the test command's lines", got)
 	}
 
-	// A heartbeat with nothing new since the last one prints the progress line alone.
-	if got := qa.next(8, clockStart); len(got) != 0 {
+	// A poll with nothing new since the last one prints nothing at all.
+	if got := qa.drain(clockStart); len(got) != 0 {
 		t.Errorf("qa output = %q, want nothing repeated", got)
 	}
 
 	log.Write([]byte("12  : [3.0s] | Done\n"))
-	if got := qa.next(8, clockStart); len(got) != 1 || got[0] != "Done" {
-		t.Errorf("qa output = %q, want the line written since the last heartbeat", got)
-	}
-}
-
-func TestEngineReaderShowsTheTailOfALoudCommand(t *testing.T) {
-	log := newLogBuffer(nil)
-	watch := newEngineWatch(log)
-	qa := watch.follow("set -e\nstamp=/var/www/oro/var/cache/.orobox-qa-fingerprint\nphp bin/console oro:install")
-
-	var engine strings.Builder
-	engine.WriteString(installLine + "\n")
-	for i := 0; i < spanLineLimit+50; i++ {
-		engine.WriteString("12  : [1.0s] | line\n")
-	}
-	log.Write([]byte(engine.String()))
-
-	got := qa.next(heartbeatTailLines, clockStart)
-	if len(got) != heartbeatTailLines {
-		t.Errorf("printed %d lines, want at most %d", len(got), heartbeatTailLines)
+	if got := qa.drain(clockStart); len(got) != 1 || got[0] != "Done" {
+		t.Errorf("qa output = %q, want the line written since the last poll", got)
 	}
 }
 
@@ -91,13 +77,13 @@ func TestDrainReturnsEverySeenLine(t *testing.T) {
 
 	var engine strings.Builder
 	engine.WriteString(releaseLine + "\n")
-	for i := 0; i < heartbeatTailLines*3; i++ {
+	for i := 0; i < streamBurstLines; i++ {
 		engine.WriteString("14  : [1.0s] | line\n")
 	}
 	log.Write([]byte(engine.String()))
 
-	if got := release.drain(clockStart); len(got) != heartbeatTailLines*3 {
-		t.Errorf("drained %d lines, want %d: streaming must not be capped", len(got), heartbeatTailLines*3)
+	if got := release.drain(clockStart); len(got) != streamBurstLines {
+		t.Errorf("drained %d lines, want %d: streaming must not be capped", len(got), streamBurstLines)
 	}
 	if got := release.drain(clockStart); len(got) != 0 {
 		t.Errorf("drained %q, want nothing repeated", got)

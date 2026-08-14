@@ -13,8 +13,9 @@ import (
 // defeats the purpose of a progress line.
 const commandLabelLimit = 100
 
-// outputTailLines is how many lines of a command's own output are printed without --debug.
-// Enough for a PHPUnit summary or the end of a composer run, short enough to stay readable.
+// outputTailLines caps the fallback block: the captured output of a command whose live lines
+// never reached the terminal. Enough for a PHPUnit summary or the end of a composer run, short
+// enough to stay readable.
 const outputTailLines = 30
 
 const (
@@ -25,15 +26,19 @@ const (
 	progressRed   = "\033[31m"
 )
 
-// reporter prints what the pipeline is doing, one block per command: a line when the command
-// starts and its output when it ends. The QA and test steps run concurrently, so every block
-// is written under the mutex and carries its step name.
+// reporter prints what the pipeline is doing: a line when a command starts, its own output as it
+// arrives, and a line with the timings when it ends. The QA and test steps run concurrently, so
+// every block is written under the mutex and says which step it belongs to.
 type reporter struct {
 	mu sync.Mutex
 	// out is where the progress goes; the engine log keeps using its own writer.
 	out io.Writer
 	// verbose prints every line of output instead of the tail.
 	verbose bool
+	// lastStep is the step whose block was written last. Streamed output carries no step name of
+	// its own, so a marker is printed whenever it changes and consecutive lines are otherwise
+	// known to belong to the same command.
+	lastStep string
 
 	// watch turns the engine log into per-command output a heartbeat can quote. Nil when there
 	// is no engine log to read, which is what the tests of the block format use.
@@ -71,10 +76,6 @@ func heartbeatDelay(quiet int) time.Duration {
 	return heartbeatDelays[quiet]
 }
 
-// heartbeatTailLines caps how much of a running command's output one heartbeat prints. A chatty
-// command would otherwise turn every progress line into a log dump, which is what --debug is for.
-const heartbeatTailLines = 8
-
 // task is one running command. It keeps the terminal alive while the command runs and prints
 // the closing block when it ends.
 type task struct {
@@ -94,14 +95,18 @@ type task struct {
 	// stopping makes finish idempotent: ok and fail call it, and a test that wants to drive the
 	// polls by hand calls it first to stop the goroutine.
 	stopping sync.Once
-	// stream prints every line as it arrives instead of a tail per heartbeat. Only the release
-	// step does this: it runs alone, so nothing else can interleave with it.
+	// stream prints every line as it arrives. It is off only when there is no engine log to read
+	// or when --debug is streaming it in full already.
 	stream bool
+	// printed counts the lines streamed so far. A command whose span the watcher never matched
+	// streams nothing, and the closing block then falls back to printing its captured output.
+	printed int
 }
 
-// start announces a command and starts its heartbeat. Exactly one of ok/fail must be called.
+// start announces a command and begins following its output. Exactly one of ok/fail must be
+// called.
 func (r *reporter) start(step, command string) *task {
-	r.write(fmt.Sprintf("%s▸ [%s]%s %s\n", progressCyan, step, progressReset, label(command)))
+	r.write(step, fmt.Sprintf("%s▸ [%s]%s %s\n", progressCyan, step, progressReset, label(command)))
 
 	t := &task{
 		reporter: r,
@@ -116,22 +121,21 @@ func (r *reporter) start(step, command string) *task {
 		// With --debug the engine log is streamed in full already, so quoting it again would
 		// print every line twice.
 		t.reader = r.watch.follow(command)
-		t.stream = step == releaseStepName
+		t.stream = true
 	}
-	if t.stream {
-		go t.streamLoop()
-	} else {
-		go t.beat()
-	}
+	go t.loop()
 	return t
 }
 
-// streamPoll is how often a streaming step drains its output. It is the latency between a line
-// being written on the remote host and appearing here, so it is short; a drain that finds
+// streamPoll is how often a running command's output is drained. It is the latency between a
+// line being written inside the container and appearing here, so it is short; a drain that finds
 // nothing costs one mutex and one buffer read.
 const streamPoll = time.Second
 
-func (t *task) streamLoop() {
+// loop drains the running command's output every second and, when there is none, says so on the
+// backoff schedule. A task with no reader behind it — no engine log, or --debug streaming it
+// already — drains nothing and only ever prints the silence lines.
+func (t *task) loop() {
 	defer close(t.stopped)
 
 	poll := time.NewTicker(streamPoll)
@@ -153,7 +157,7 @@ func (t *task) streamLoop() {
 			if now.Before(next) {
 				continue
 			}
-			t.reporter.write(t.silence(now))
+			t.reporter.write(t.step, t.silence(now))
 			quiet++
 			next = now.Add(heartbeatDelay(quiet))
 		}
@@ -161,8 +165,8 @@ func (t *task) streamLoop() {
 }
 
 // pollStream prints everything the command has written since the last poll and reports whether
-// there was any. Unlike pollTail it prints nothing when there is nothing: the silence line is
-// the loop's business, because only the loop knows how long the quiet has lasted.
+// there was any. It prints nothing when there is nothing: the silence line is the loop's
+// business, because only the loop knows how long the quiet has lasted.
 func (t *task) pollStream(now time.Time) bool {
 	lines := t.reader.drain(now)
 	if len(lines) == 0 {
@@ -174,48 +178,8 @@ func (t *task) pollStream(now time.Time) bool {
 		t.tracker.observe(line, now)
 		block.WriteString("    " + line + "\n")
 	}
-	t.reporter.write(block.String())
-	return true
-}
-
-func (t *task) beat() {
-	defer close(t.stopped)
-
-	quiet := 0
-	timer := time.NewTimer(heartbeatDelay(quiet))
-	defer timer.Stop()
-	for {
-		select {
-		case <-t.done:
-			return
-		case <-timer.C:
-			if t.pollTail(t.reporter.now()) {
-				quiet = 0
-			} else {
-				quiet++
-			}
-			timer.Reset(heartbeatDelay(quiet))
-		}
-	}
-}
-
-// pollTail prints one beat of a non-streaming step: the tail of whatever arrived since the last
-// one, or the silence line when nothing did. It reports whether there was output, which is what
-// resets the backoff.
-func (t *task) pollTail(now time.Time) bool {
-	lines := t.reader.next(heartbeatTailLines, now)
-	if len(lines) == 0 {
-		t.reporter.write(t.silence(now))
-		return false
-	}
-
-	var block strings.Builder
-	block.WriteString(fmt.Sprintf("%s  … [%s] still running: %s (%s)%s\n",
-		progressDim, t.step, label(t.command), elapsed(t.started, now), progressReset))
-	for _, line := range lines {
-		block.WriteString(fmt.Sprintf("%s      %s%s\n", progressDim, line, progressReset))
-	}
-	t.reporter.write(block.String())
+	t.printed += len(lines)
+	t.reporter.writeOutput(t.step, block.String())
 	return true
 }
 
@@ -255,28 +219,38 @@ func (t *task) finish() {
 	})
 }
 
-// ok prints the command's own output, cleaned of progress-bar redraws and trimmed to the tail
-// unless --debug is on. A streaming step has printed it all already, so it closes with the
-// timings instead.
+// ok closes a command that succeeded. Everything it wrote has been streamed line by line
+// already, so the closing block carries only the timings. The captured output is the fallback
+// for a command the watcher never found a span for, which would otherwise end without ever
+// having shown anything.
 func (t *task) ok(output string) {
 	t.finish()
 	now := t.reporter.now()
 
+	// Whatever the last poll missed is printed before the closing line, so the block still reads
+	// in the order the command wrote it.
+	if t.stream {
+		t.pollStream(now)
+	}
+
 	var block strings.Builder
 	block.WriteString(fmt.Sprintf("%s✔ [%s]%s %s %s(%s)%s\n",
 		progressGreen, t.step, progressReset, label(t.command), progressDim, elapsed(t.started, now), progressReset))
-	if t.stream {
-		// Whatever the last poll missed is still worth printing, and only a streaming step can
-		// print it: for the others the closing body below is the command's whole output, so
-		// draining the reader too would show the tail twice.
-		t.pollStream(now)
+	if t.streamed() {
 		if summary := t.tracker.summary(now); summary != "" {
 			block.WriteString(fmt.Sprintf("%s    %s%s\n", progressDim, summary, progressReset))
 		}
 	} else if body := t.reporter.body(output); body != "" {
 		block.WriteString(body + "\n")
 	}
-	t.reporter.write(block.String())
+	t.reporter.write(t.step, block.String())
+}
+
+// streamed reports whether this command's output reached the terminal as it ran. It did not when
+// there is no engine log behind the task, and it did not when the command's span was never
+// matched — a short or heavily quoted command line has no key distinctive enough to bind one.
+func (t *task) streamed() bool {
+	return t.stream && t.printed > 0
 }
 
 // fail marks a command as failed. The output itself is not printed here: the error report
@@ -286,21 +260,39 @@ func (t *task) fail() {
 	t.finish()
 	now := t.reporter.now()
 
+	if t.stream {
+		t.pollStream(now)
+	}
+
 	var block strings.Builder
 	block.WriteString(fmt.Sprintf("%s✘ [%s]%s %s %s(%s)%s\n",
 		progressRed, t.step, progressReset, label(t.command), progressDim, elapsed(t.started, now), progressReset))
-	if t.stream {
-		t.pollStream(now)
+	if t.streamed() {
 		if summary := t.tracker.summary(now); summary != "" {
 			block.WriteString(fmt.Sprintf("%s    %s%s\n", progressDim, summary, progressReset))
 		}
 	}
-	t.reporter.write(block.String())
+	t.reporter.write(t.step, block.String())
 }
 
-func (r *reporter) write(text string) {
+// write prints a block that names its own step, so nothing has to be prefixed.
+func (r *reporter) write(step, text string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.lastStep = step
+	fmt.Fprint(r.out, text)
+}
+
+// writeOutput prints a block of a command's own output. The lines carry nothing that says whose
+// they are, and the QA and test steps run at the same time, so a marker is printed whenever the
+// step changes: between two markers every line belongs to the same command.
+func (r *reporter) writeOutput(step, text string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.lastStep != step {
+		fmt.Fprintf(r.out, "%s  ┄ [%s]%s\n", progressDim, step, progressReset)
+		r.lastStep = step
+	}
 	fmt.Fprint(r.out, text)
 }
 
@@ -363,25 +355,48 @@ func cleanOutput(output string) []string {
 	return lines
 }
 
-// label shortens a command to a single readable line. Some steps run small shell scripts
-// (the generated PHPStan and Twig configs), so the first line that actually does something is
-// what identifies the command, not the whole script.
+// label shortens a command to a single readable line. Some steps run small shell scripts (the
+// test database restore, the QA warmup, the generated PHPStan and Twig configs), and their first
+// executable line describes none of what follows: a script whose eleven minutes are an Oro
+// install opens with an apk call. Those scripts title themselves with a leading comment, which
+// is what the progress lines then name them by; anything else is identified by the first line
+// that actually does something.
 func label(command string) string {
-	first := command
+	if title := commandTitle(command); title != "" {
+		return truncate(title, commandLabelLimit)
+	}
+	return truncate(strings.Join(strings.Fields(firstCommandLine(command)), " "), commandLabelLimit)
+}
+
+// commandTitle returns the name a script gives itself in a comment on its first line, empty
+// when it does not. Only the first line counts: a comment further down documents that line,
+// not the script.
+func commandTitle(command string) string {
 	for _, line := range strings.Split(command, "\n") {
 		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || trimmed == "set -e" {
+		if trimmed == "" {
 			continue
 		}
-		first = trimmed
-		break
+		if rest, ok := strings.CutPrefix(trimmed, "#"); ok {
+			return strings.TrimSpace(rest)
+		}
+		return ""
 	}
+	return ""
+}
 
-	first = strings.Join(strings.Fields(first), " ")
-	if len([]rune(first)) > commandLabelLimit {
-		first = string([]rune(first)[:commandLabelLimit-1]) + "…"
+// firstCommandLine is the first line of a script that runs something. The title comment and the
+// shell bookkeeping around it identify nothing, and the engine's rendering of the arguments is
+// matched against this too, so it must be a line the command really contains.
+func firstCommandLine(command string) string {
+	for _, line := range strings.Split(command, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || trimmed == "set -e" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		return trimmed
 	}
-	return first
+	return command
 }
 
 // elapsed renders how long ago from was, measured against the reporter's clock.
