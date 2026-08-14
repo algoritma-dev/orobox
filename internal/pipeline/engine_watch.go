@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 // The Dagger SDK hands a command's own output over only when the command exits, so a step that
@@ -34,9 +35,10 @@ type engineSpan struct {
 	lines       []string
 }
 
-// spanLineLimit caps what is kept per span. A heartbeat prints a handful of lines and a long
-// install writes tens of thousands, so only the recent tail is worth holding on to.
-const spanLineLimit = 200
+// spanLineLimit caps what is kept per span. The release step drains its span once a second and
+// a chatty command can write thousands of lines in that time, so the cap has to be well above
+// one poll's worth of output while still bounding a run that prints for an hour.
+const spanLineLimit = 2000
 
 // engineReader follows one command's output. Each running command has its own, so two
 // concurrent steps never consume each other's lines.
@@ -47,6 +49,10 @@ type engineReader struct {
 	spanID string
 	// seen counts the lines of this span already returned, in the span's own numbering.
 	seen int
+	// lastLine and lastAt are the most recent line handed out and the moment it was, which is
+	// what tells a silent command apart from one nobody has looked at yet.
+	lastLine string
+	lastAt   time.Time
 }
 
 func newEngineWatch(log *logBuffer) *engineWatch {
@@ -69,7 +75,17 @@ func (w *engineWatch) follow(command string) *engineReader {
 
 // next returns up to limit new lines of this command's output, oldest hidden. A nil reader
 // returns nothing, so a reporter without an engine log needs no special case.
-func (r *engineReader) next(limit int) []string {
+func (r *engineReader) next(limit int, now time.Time) []string {
+	lines := r.drain(now)
+	if len(lines) > limit {
+		lines = lines[len(lines)-limit:]
+	}
+	return lines
+}
+
+// drain returns every line of this command's output not yet returned. The release step prints
+// all of them, so unlike next it never drops the middle of a burst.
+func (r *engineReader) drain(now time.Time) []string {
 	if r == nil || r.key == "" {
 		return nil
 	}
@@ -89,12 +105,27 @@ func (r *engineReader) next(limit int) []string {
 	if span == nil || len(span.lines) <= r.seen {
 		return nil
 	}
-	lines := span.lines[r.seen:]
+	lines := append([]string(nil), span.lines[r.seen:]...)
 	r.seen = len(span.lines)
-	if len(lines) > limit {
-		lines = lines[len(lines)-limit:]
+	r.lastLine = lines[len(lines)-1]
+	r.lastAt = now
+	return lines
+}
+
+// lastSeen reports the most recent line this reader handed out and when. ok is false while
+// nothing has arrived, which is also the case for a reader with no engine log behind it.
+func (r *engineReader) lastSeen() (string, time.Time, bool) {
+	if r == nil {
+		return "", time.Time{}, false
 	}
-	return append([]string(nil), lines...)
+
+	r.watch.mu.Lock()
+	defer r.watch.mu.Unlock()
+
+	if r.lastAt.IsZero() {
+		return "", time.Time{}, false
+	}
+	return r.lastLine, r.lastAt, true
 }
 
 // consume folds everything written to the engine log since the last call into the spans. The

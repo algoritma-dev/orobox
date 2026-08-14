@@ -11,6 +11,10 @@ import (
 	"github.com/algoritma-dev/orobox/internal/qatools"
 )
 
+// releaseStepName is the step the reporter streams in full: it runs alone and last, so its
+// output cannot interleave with another step's.
+const releaseStepName = "release"
+
 // Service is a container the pipeline binds to a step under Name as its hostname.
 type Service struct {
 	Name  string
@@ -203,7 +207,7 @@ func New(conf *config.OroConfig, stage config.StageConfig, repository string) *P
 	}
 
 	p.Release = Step{
-		Name:    "release",
+		Name:    releaseStepName,
 		Workdir: oroRoot,
 		Env:     releaseEnv(stage, repository, p.SourceDir),
 		Commands: []string{

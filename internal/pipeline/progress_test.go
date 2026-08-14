@@ -91,11 +91,193 @@ func TestHeartbeatStaysQuietWithDebug(t *testing.T) {
 	}
 }
 
+func TestReleaseStreamsEveryLine(t *testing.T) {
+	now := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
+	var out strings.Builder
+	log := newLogBuffer(nil)
+	r := newReporter(&out, false, log)
+	r.now = func() time.Time { return now }
+
+	task := r.start(releaseStepName, "php vendor-bin/deploy/vendor/bin/dep deploy --file=deploy.php --no-interaction -v")
+	// The stream goroutine polls once a second; this test drives pollStream itself.
+	task.finish()
+
+	if !task.stream {
+		t.Fatal("the release step must stream")
+	}
+
+	var engine strings.Builder
+	engine.WriteString(releaseLine + "\n")
+	engine.WriteString("14  : [1.0s] | task oro:update\n")
+	for i := 0; i < heartbeatTailLines*3; i++ {
+		engine.WriteString("14  : [1.0s] | migration line\n")
+	}
+	log.Write([]byte(engine.String()))
+
+	out.Reset()
+	if !task.pollStream(now) {
+		t.Fatal("pollStream should report the lines it printed")
+	}
+	if got := strings.Count(out.String(), "    migration line"); got != heartbeatTailLines*3 {
+		t.Errorf("printed %d lines, want %d: streaming must not use the tail cap", got, heartbeatTailLines*3)
+	}
+	if task.tracker.currentTask() != "oro:update" {
+		t.Errorf("currentTask = %q, want the streamed task line to have been tracked", task.tracker.currentTask())
+	}
+}
+
+func TestReleaseClosesWithTheTaskTimings(t *testing.T) {
+	now := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
+	var out strings.Builder
+	log := newLogBuffer(nil)
+	r := newReporter(&out, false, log)
+	r.now = func() time.Time { return now }
+
+	task := r.start(releaseStepName, "php vendor-bin/deploy/vendor/bin/dep deploy --file=deploy.php --no-interaction -v")
+	task.finish()
+	log.Write([]byte(releaseLine + "\n14  : [1.0s] | task oro:update\n"))
+	task.pollStream(now)
+
+	r.now = func() time.Time { return now.Add(6*time.Minute + 12*time.Second) }
+	out.Reset()
+	task.ok("run /usr/bin/php bin/console oro:platform:update --force\n")
+
+	text := out.String()
+	if !strings.Contains(text, "oro:update 6m12s") {
+		t.Errorf("closing block = %q, want the task timing", text)
+	}
+	// Everything the release printed was streamed already; printing the tail again would repeat it.
+	if strings.Contains(text, "oro:platform:update --force") {
+		t.Errorf("closing block = %q, want no duplicated output tail", text)
+	}
+}
+
+func TestReleaseUnderDebugDoesNotStream(t *testing.T) {
+	log := newLogBuffer(nil)
+	r := newReporter(&strings.Builder{}, true, log)
+
+	task := r.start(releaseStepName, "php vendor-bin/deploy/vendor/bin/dep deploy --file=deploy.php --no-interaction -v")
+	task.finish()
+
+	if task.stream {
+		t.Error("--debug streams the engine log already; the release step must not print it twice")
+	}
+}
+
+func TestNonStreamingStepDoesNotPrintItsOutputTwice(t *testing.T) {
+	now := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
+	var out strings.Builder
+	log := newLogBuffer(nil)
+	r := newReporter(&out, false, log)
+	r.now = func() time.Time { return now }
+
+	task := r.start("qa", "set -e\nstamp=/var/www/oro/var/cache/.orobox-qa-fingerprint\nphp bin/console oro:install")
+	task.finish()
+
+	// Lines the heartbeat never got round to quoting are still in the reader when the command
+	// ends. The closing block prints the command's real stdout, so draining them again would
+	// show the same output twice.
+	log.Write([]byte(installLine + "\n12  : [1.0s] | Installing Oro\n"))
+	out.Reset()
+	task.ok("Installing Oro\n")
+
+	if got := strings.Count(out.String(), "Installing Oro"); got != 1 {
+		t.Errorf("printed the line %d times, want once:\n%s", got, out.String())
+	}
+}
+
+func TestSilenceLineNamesTheRunningDeployerTask(t *testing.T) {
+	now := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
+	log := newLogBuffer(nil)
+	r := newReporter(&strings.Builder{}, false, log)
+	r.now = func() time.Time { return now }
+
+	task := r.start("release", "php vendor-bin/deploy/vendor/bin/dep deploy --file=deploy.php --no-interaction -v")
+	// Stop the beat goroutine first: this test drives the polls itself and would otherwise race
+	// it for the reader and the writer.
+	task.finish()
+
+	log.Write([]byte(releaseLine + "\n14  : [1.0s] | task oro:update\n" +
+		"14  : [2.0s] | [host] run oro:platform:update --force\n"))
+	for _, line := range task.reader.drain(now) {
+		task.tracker.observe(line, now)
+	}
+
+	got := task.silence(now.Add(3*time.Minute + 30*time.Second))
+	for _, want := range []string{"[release]", "oro:update", "no output for 3m30s", "last: [host] run oro:platform:update --force"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("silence line %q is missing %q", got, want)
+		}
+	}
+}
+
+func TestSilenceLineBeforeAnyOutput(t *testing.T) {
+	now := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
+	r := newReporter(&strings.Builder{}, false, nil)
+	r.now = func() time.Time { return now }
+
+	task := r.start("qa", "php bin/console oro:install --env=test")
+	task.finish()
+
+	got := task.silence(now.Add(45 * time.Second))
+	if !strings.Contains(got, "no output yet (running for 45s)") {
+		t.Errorf("silence line = %q, want the running-for form", got)
+	}
+	if strings.Contains(got, "last:") {
+		t.Errorf("silence line = %q, want no last-line clause when nothing arrived", got)
+	}
+}
+
+func TestPollTailPrintsTheHeartbeatBlockOnlyWithOutput(t *testing.T) {
+	now := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
+	var out strings.Builder
+	log := newLogBuffer(nil)
+	r := newReporter(&out, false, log)
+	r.now = func() time.Time { return now }
+
+	task := r.start("qa", "set -e\nstamp=/var/www/oro/var/cache/.orobox-qa-fingerprint\nphp bin/console oro:install")
+	task.finish()
+
+	if task.pollTail(now) {
+		t.Error("pollTail reported output before anything was written")
+	}
+
+	log.Write([]byte(installLine + "\n12  : [1.0s] | Installing Oro\n"))
+	out.Reset()
+	if !task.pollTail(now) {
+		t.Error("pollTail should report the line it printed")
+	}
+	if text := out.String(); !strings.Contains(text, "still running") || !strings.Contains(text, "Installing Oro") {
+		t.Errorf("heartbeat block = %q, want the progress line and the output", text)
+	}
+}
+
 func TestElapsedSwitchesToMinutes(t *testing.T) {
-	if got := elapsed(time.Now().Add(-90 * time.Second)); got != "1m30s" {
+	now := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
+	if got := elapsed(now.Add(-90*time.Second), now); got != "1m30s" {
 		t.Errorf("elapsed = %q, want 1m30s", got)
 	}
-	if got := elapsed(time.Now().Add(-5 * time.Second)); got != "5s" {
+	if got := elapsed(now.Add(-5*time.Second), now); got != "5s" {
 		t.Errorf("elapsed = %q, want 5s", got)
+	}
+}
+
+func TestHeartbeatBacksOffWhileNothingHappens(t *testing.T) {
+	want := []time.Duration{
+		30 * time.Second,
+		60 * time.Second,
+		2 * time.Minute,
+		5 * time.Minute,
+	}
+	for quiet, d := range want {
+		if got := heartbeatDelay(quiet); got != d {
+			t.Errorf("heartbeatDelay(%d) = %v, want %v", quiet, got, d)
+		}
+	}
+
+	// Past the end of the schedule the last interval repeats: a mute command keeps proving it
+	// is alive without filling the terminal.
+	if got := heartbeatDelay(99); got != 5*time.Minute {
+		t.Errorf("heartbeatDelay(99) = %v, want the last interval repeated", got)
 	}
 }
