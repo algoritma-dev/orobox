@@ -51,7 +51,7 @@ func init() {
 	deployCmd.Flags().BoolVar(&deployNoCache, "no-cache", false, "Rebuild everything: the dependency layers, the QA install and the test database")
 	deployCmd.Flags().BoolVar(&deploySkipQA, "skip-qa", false, "Skip the QA checks")
 	deployCmd.Flags().BoolVar(&deploySkipTest, "skip-test", false, "Skip the test suites")
-	deployCmd.Flags().BoolVar(&deploySkipRelease, "skip-release", false, "Build, check and export the artifacts, but do not release to the remote host")
+	deployCmd.Flags().BoolVar(&deploySkipRelease, "skip-release", false, "Check the code but do not release to the remote host; the artifacts are built only when there is nothing to check either")
 	deployCmd.Flags().StringVar(&deployRef, "ref", "", "Build this ref instead of the one configured for the stage")
 	deployCmd.Flags().StringVar(&deployCacheScope, "cache-scope", "", "Name the cache volume family (default: the ref being built)")
 	deployCmd.Flags().StringVar(&deployBaseCacheScope, "base-cache-scope", "", "Seed a missing test database dump from this cache scope")
@@ -122,6 +122,12 @@ func runDeployCommand(stageName string) {
 	}
 
 	if !plan.RunsRelease() {
+		// A check-only run produces no tarball on purpose, so claiming an export would be a lie and
+		// would send the reader looking for a file that is not there.
+		if !plan.BuildsArtifacts() {
+			utils.PrintSuccess(fmt.Sprintf("Checked %s for %s; the artifacts and the release were skipped.", plan.Ref, stage.Name))
+			return
+		}
 		utils.PrintSuccess(fmt.Sprintf("Built %s for %s and exported the artifacts; the release was skipped.", plan.Ref, stage.Name))
 		return
 	}
@@ -226,7 +232,11 @@ func printDeploySummary(plan *pipeline.Plan) {
 	} else {
 		fmt.Println("  Assets:     taken from the repository (pre_built_assets_enabled: true)")
 	}
-	fmt.Printf("  Artifacts:  %v\n", plan.Artifacts())
+	if plan.BuildsArtifacts() {
+		fmt.Printf("  Artifacts:  %v\n", plan.Artifacts())
+	} else {
+		fmt.Println("  Artifacts:  none (nothing to release)")
+	}
 	if skipped := plan.SkippedSteps(); len(skipped) > 0 {
 		fmt.Printf("  Skipping:   %v\n", skipped)
 	}

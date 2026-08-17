@@ -342,3 +342,66 @@ func TestHeartbeatBacksOffWhileNothingHappens(t *testing.T) {
 		t.Errorf("heartbeatDelay(99) = %v, want the last interval repeated", got)
 	}
 }
+
+// depsCachedLines are the two lines dagger 0.21.8 prints for a dependency install it serves from
+// its cache: the arguments, then the closing status. There is no output line between them, and the
+// stdout the SDK returns is nonetheless the full composer run — read from the cache with the rest
+// of the exec's result.
+const depsCachedLines = `18  : ┆ withExec bash -o pipefail -c 'exec 2>&1\ncomposer install --no-dev --no-interaction --no-progress --no-scripts --no-autoloader'
+18  : ┆ Container.withExec CACHED [0.0s]
+`
+
+// depsRanLines are the same two lines for an install that really ran. A command can be silent for
+// its whole span — tar is, and so is a composer install whose progress is switched off — so the
+// closing status is what tells the two apart, not the absence of output.
+const depsRanLines = `18  : ┆ withExec bash -o pipefail -c 'exec 2>&1\ncomposer install --no-dev --no-interaction --no-progress --no-scripts --no-autoloader'
+18  : ┆ Container.withExec DONE [187.4s]
+`
+
+const depsCommand = "composer install --no-dev --no-interaction --no-progress --no-scripts --no-autoloader"
+
+// composerOutput is what the cache holds for the command above, and what a reader mistakes for
+// this run's work when it is printed.
+const composerOutput = "Installing dependencies from lock file\nGenerating optimized autoload files\n"
+
+func TestACachedCommandNamesTheCacheInsteadOfReplayingItsOutput(t *testing.T) {
+	now := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
+	var out strings.Builder
+	log := newLogBuffer(nil)
+	r := newReporter(&out, false, log)
+	r.now = func() time.Time { return now }
+
+	task := r.start("deps", depsCommand)
+	task.finish()
+	log.Write([]byte(depsCachedLines))
+	out.Reset()
+	task.ok(composerOutput)
+
+	if !strings.Contains(out.String(), "from cache") {
+		t.Errorf("closing block = %q, want it to say the result came from the cache", out.String())
+	}
+	if strings.Contains(out.String(), "Installing dependencies") {
+		t.Errorf("closing block = %q, want no replayed output for a command that never ran", out.String())
+	}
+}
+
+func TestACommandTheEngineRanKeepsItsOutput(t *testing.T) {
+	now := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
+	var out strings.Builder
+	log := newLogBuffer(nil)
+	r := newReporter(&out, false, log)
+	r.now = func() time.Time { return now }
+
+	task := r.start("deps", depsCommand)
+	task.finish()
+	log.Write([]byte(depsRanLines))
+	out.Reset()
+	task.ok(composerOutput)
+
+	if strings.Contains(out.String(), "from cache") {
+		t.Errorf("closing block = %q, want no cache claim for a command that ran", out.String())
+	}
+	if !strings.Contains(out.String(), "Installing dependencies") {
+		t.Errorf("closing block = %q, want the output of a command that produced none live", out.String())
+	}
+}

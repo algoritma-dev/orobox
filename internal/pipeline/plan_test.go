@@ -646,21 +646,25 @@ func TestPlanRunsEverythingByDefault(t *testing.T) {
 
 func TestPlanSkipPredicates(t *testing.T) {
 	tests := []struct {
-		name        string
-		skipQA      bool
-		skipTest    bool
-		skipRelease bool
-		wantDevDeps bool
-		wantSkipped []string
+		name          string
+		skipQA        bool
+		skipTest      bool
+		skipRelease   bool
+		wantDevDeps   bool
+		wantArtifacts bool
+		wantSkipped   []string
 	}{
-		{name: "nothing skipped", wantDevDeps: true},
-		{name: "qa skipped", skipQA: true, wantDevDeps: true, wantSkipped: []string{"qa"}},
-		{name: "tests skipped", skipTest: true, wantDevDeps: true, wantSkipped: []string{"test"}},
+		{name: "nothing skipped", wantDevDeps: true, wantArtifacts: true},
+		{name: "qa skipped", skipQA: true, wantDevDeps: true, wantArtifacts: true, wantSkipped: []string{"qa"}},
+		{name: "tests skipped", skipTest: true, wantDevDeps: true, wantArtifacts: true, wantSkipped: []string{"test"}},
 		{name: "release skipped", skipRelease: true, wantDevDeps: true, wantSkipped: []string{"release"}},
-		{name: "qa and tests skipped", skipQA: true, skipTest: true, wantDevDeps: false, wantSkipped: []string{"qa", "test"}},
+		{name: "qa and tests skipped", skipQA: true, skipTest: true, wantArtifacts: true, wantSkipped: []string{"qa", "test"}},
+		// The two CI check jobs: each runs one half of the checks and releases nothing, so neither
+		// pays for a tarball the other job, and then the deploy, would build again anyway.
 		{name: "qa and release skipped", skipQA: true, skipRelease: true, wantDevDeps: true, wantSkipped: []string{"qa", "release"}},
 		{name: "tests and release skipped", skipTest: true, skipRelease: true, wantDevDeps: true, wantSkipped: []string{"test", "release"}},
-		{name: "everything skipped", skipQA: true, skipTest: true, skipRelease: true, wantDevDeps: false, wantSkipped: []string{"qa", "test", "release"}},
+		// Nothing to check and nothing to ship leaves the tarballs as the run's only product.
+		{name: "everything skipped", skipQA: true, skipTest: true, skipRelease: true, wantArtifacts: true, wantSkipped: []string{"qa", "test", "release"}},
 	}
 
 	for _, tt := range tests {
@@ -679,6 +683,14 @@ func TestPlanSkipPredicates(t *testing.T) {
 			}
 			if p.NeedsDevDependencies() != tt.wantDevDeps {
 				t.Errorf("NeedsDevDependencies() = %v, want %v", p.NeedsDevDependencies(), tt.wantDevDeps)
+			}
+			if p.BuildsArtifacts() != tt.wantArtifacts {
+				t.Errorf("BuildsArtifacts() = %v, want %v", p.BuildsArtifacts(), tt.wantArtifacts)
+			}
+			// Artifacts() is what the export loop and the summary read, so the predicate has to
+			// reach both through it rather than being re-tested at each call site.
+			if got := p.Artifacts(); tt.wantArtifacts != (len(got) > 0) {
+				t.Errorf("Artifacts() = %v, want %d entries", got, map[bool]int{true: 1, false: 0}[tt.wantArtifacts])
 			}
 			if got := p.SkippedSteps(); !reflect.DeepEqual(got, tt.wantSkipped) {
 				t.Errorf("SkippedSteps() = %v, want %v", got, tt.wantSkipped)

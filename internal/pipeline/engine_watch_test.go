@@ -131,3 +131,71 @@ func TestCommandKeyStopsBeforeEscapedCharacters(t *testing.T) {
 		t.Errorf("commandKey = %q, want no key for a command too short to identify", got)
 	}
 }
+
+// cachedExecLines are dagger 0.21.8's rendering of an exec served from the cache: the arguments
+// first, then the closing status. The status line names the operation, not the command, so letting
+// it become the span's description would leave the span matchable by nothing.
+const cachedExecLines = `18  : ┆ withExec bash -o pipefail -c 'exec 2>&1\ncomposer install --no-dev --no-interaction'
+18  : ┆ Container.withExec CACHED [0.0s]
+`
+
+func TestEngineWatchReadsTheClosingStatusOfASpan(t *testing.T) {
+	log := newLogBuffer(nil)
+	watch := newEngineWatch(log)
+	reader := watch.follow("composer install --no-dev --no-interaction")
+
+	// Nothing has been written yet: an unbound span is not something to wait for.
+	if status, bound := reader.status(); status != "" || bound {
+		t.Errorf("status() = (%q, %v), want the span not found yet", status, bound)
+	}
+
+	log.Write([]byte(cachedExecLines))
+
+	status, bound := reader.status()
+	if !bound || status != engineStatusCached {
+		t.Errorf("status() = (%q, %v), want the span reported as cached", status, bound)
+	}
+	// The arguments line has to survive as the description, or nothing would have bound the span.
+	if got := watch.spans["18"].description; !strings.Contains(got, "composer install") {
+		t.Errorf("description = %q, want the rendered arguments, not the closing line", got)
+	}
+	if got := reader.drain(clockStart); len(got) != 0 {
+		t.Errorf("drain() = %q, want nothing: a cached exec writes no output line", got)
+	}
+}
+
+func TestEngineWatchDistinguishesAFinishedSpanFromACachedOne(t *testing.T) {
+	log := newLogBuffer(nil)
+	watch := newEngineWatch(log)
+	reader := watch.follow("vendor/bin/phpunit --testsuite unit")
+
+	log.Write([]byte(testsLine + "\n13  : ┆ Container.withExec DONE [187.4s]\n"))
+
+	if status, bound := reader.status(); !bound || status == engineStatusCached {
+		t.Errorf("status() = (%q, %v), want a span that ran", status, bound)
+	}
+}
+
+func TestEngineSpanStatusMatchesOnlyAClosingLine(t *testing.T) {
+	for _, line := range []string{
+		"Container.withExec CACHED [0.0s]",
+		"Container.withExec DONE [1.5s]",
+		"Container.withExec ERROR [0.3s]",
+		// A session the engine closes without timing it still says what became of it.
+		"Container.withExec CACHED",
+	} {
+		if !engineSpanStatus.MatchString(line) {
+			t.Errorf("engineSpanStatus did not match the closing line %q", line)
+		}
+	}
+
+	for _, line := range []string{
+		// The arguments of a command that happens to mention one of the words.
+		`withExec bash -o pipefail -c 'echo DONE > /tmp/flag'`,
+		`withExec bash -o pipefail -c 'php bin/console cache:warmup'`,
+	} {
+		if engineSpanStatus.MatchString(line) {
+			t.Errorf("engineSpanStatus matched %q, which is a description", line)
+		}
+	}
+}

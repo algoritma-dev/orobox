@@ -223,6 +223,12 @@ func (t *task) finish() {
 // already, so the closing block carries only the timings. The captured output is the fallback
 // for a command the watcher never found a span for, which would otherwise end without ever
 // having shown anything.
+//
+// A command the engine served from its cache takes neither path. Its output is genuine — it is what
+// the command printed the last time it really ran, kept in the cache with the rest of the exec's
+// result and replayed verbatim by the SDK — and printing it says "composer installed the
+// dependencies" about a run in which composer was never started. So the cache is named instead and
+// the output left out.
 func (t *task) ok(output string) {
 	t.finish()
 	now := t.reporter.now()
@@ -233,17 +239,68 @@ func (t *task) ok(output string) {
 		t.pollStream(now)
 	}
 
+	// Before the closing line, because it decides what that line says.
+	cached := t.cachedByEngine()
+
+	suffix := elapsed(t.started, now)
+	if cached {
+		suffix += ", from cache"
+	}
+
 	var block strings.Builder
 	block.WriteString(fmt.Sprintf("%s✔ [%s]%s %s %s(%s)%s\n",
-		progressGreen, t.step, progressReset, label(t.command), progressDim, elapsed(t.started, now), progressReset))
-	if t.streamed() {
+		progressGreen, t.step, progressReset, label(t.command), progressDim, suffix, progressReset))
+	switch {
+	case cached:
+		// Nothing to add: the command did not run, so it has no output of this run to show.
+	case t.streamed():
 		if summary := t.tracker.summary(now); summary != "" {
 			block.WriteString(fmt.Sprintf("%s    %s%s\n", progressDim, summary, progressReset))
 		}
-	} else if body := t.reporter.body(output); body != "" {
-		block.WriteString(body + "\n")
+	default:
+		if body := t.reporter.body(output); body != "" {
+			block.WriteString(body + "\n")
+		}
 	}
 	t.reporter.write(t.step, block.String())
+}
+
+// cacheStatusWait bounds how long the closing block waits for the engine to say what became of a
+// command. The engine writes its progress concurrently with the SDK call that returns the output,
+// and for a cached exec it writes all of it afterwards: measured against a real engine, the span
+// appears and closes some 180ms after Stdout returns. The budget is an order of magnitude above
+// that, because being slow to admit a cache hit is better than claiming a command ran, and still
+// bounded, because a run must not hang on one unlucky span.
+const (
+	cacheStatusWait = 2 * time.Second
+	cacheStatusPoll = 25 * time.Millisecond
+)
+
+// cachedByEngine reports whether the engine served this command from its cache instead of running
+// it. A command whose live output was streamed plainly ran, so it is answered without asking.
+//
+// The wait covers a span that is not merely status-less but altogether absent: that is the normal
+// state of a cached exec at this point, and returning early on it would answer "not cached" for
+// every one of them. A reader with no key is the one case nothing will ever arrive for — the
+// command is too short to be matched against the engine's rendering — so it is not waited for.
+//
+// The wait is measured against the real clock and not the reporter's: it is a race with a
+// concurrent writer rather than a duration anything reports.
+func (t *task) cachedByEngine() bool {
+	if t.streamed() || t.reader == nil || t.reader.key == "" {
+		return false
+	}
+
+	deadline := time.Now().Add(cacheStatusWait)
+	for {
+		if status, _ := t.reader.status(); status != "" {
+			return status == engineStatusCached
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(cacheStatusPoll)
+	}
 }
 
 // streamed reports whether this command's output reached the terminal as it ran. It did not when

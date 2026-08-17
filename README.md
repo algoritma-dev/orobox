@@ -349,18 +349,29 @@ Options:
 - `--no-cache`: Rebuild everything the run could have reused — the dependency layers, the QA install and the test database.
 - `--skip-qa`: Skip the QA checks. The QA tool set is not installed either, so nothing is paid for it.
 - `--skip-test`: Skip the test suites.
-- `--skip-release`: Build, check and export the artifacts, then stop before the remote release. Nothing connects to the stage host, so the confirmation prompt is skipped and no SSH deploy credentials are needed — only whatever the clone requires.
+- `--skip-release`: Check the code, then stop before the remote release. Nothing connects to the stage host, so the confirmation prompt is skipped and no SSH deploy credentials are needed — only whatever the clone requires.
 
-The three `--skip-*` flags may be combined freely, including all at once: the vendor tree and the
-assets are always built and always exported, so even a run that skips everything else produces the
-artifacts a later release would upload. When at least one is set, the deploy plan printed before the
-run names the skipped steps on a `Skipping:` line.
+The three `--skip-*` flags may be combined freely, including all at once. When at least one is set,
+the deploy plan printed before the run names the skipped steps on a `Skipping:` line.
+
+The release artifacts — the vendor tree and, unless the repository ships them, the assets — are
+built by a run that releases, and by a run that has nothing to check either
+(`--skip-qa --skip-test --skip-release`), which is how a build is asked for on its own. They are
+*not* built by a run that only checks, because nothing but a release reads them and, unlike the
+dependency layers, they are rebuilt from scratch at every commit: a lint job that produced them
+would pay an authoritative `dump-autoload` and a tar of the whole vendor tree for a file it then
+discards. The plan's `Artifacts:` line says which of the two a run is.
 
 Every command the pipeline runs is reported as it happens: a line when it starts, then its own
 output — `composer install`, `oro:assets:install`, each QA tool, `bin/simple-phpunit`, the
 Deployer run — with the elapsed time and, without `--debug`, only the last lines of the output.
 A command that is still running says so once a minute. QA and tests run concurrently, so each
 line is prefixed with the step it belongs to (`[qa]`, `[test]`).
+
+A command the engine serves from its cache is reported as `(0s, from cache)` and shows no output.
+Its output does exist — a cached exec's stdout is part of what the cache holds, and the SDK replays
+it verbatim — but it is what the command printed the last time it really ran, so printing it would
+report an installation that did not happen.
 
 What happens, in order:
 

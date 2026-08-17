@@ -33,7 +33,15 @@ type engineSpan struct {
 	// description is the operation line, which for an exec contains the command arguments.
 	description string
 	lines       []string
+	// status is what the engine closed the span with — DONE, CACHED or ERROR. It stays empty while
+	// the operation runs, which is what tells "it was not cached" apart from "not known yet".
+	status string
 }
+
+// engineStatusCached is the status the engine gives a command it served from its cache instead of
+// running. Nothing else in the output distinguishes the two: a cached exec's stdout is part of what
+// the cache holds, so the SDK replays it verbatim.
+const engineStatusCached = "CACHED"
 
 // spanLineLimit caps what is kept per span. The release step drains its span once a second and
 // a chatty command can write thousands of lines in that time, so the cap has to be well above
@@ -103,6 +111,32 @@ func (r *engineReader) drain(now time.Time) []string {
 	return lines
 }
 
+// status reports the outcome the engine closed this command's span with, and whether the span has
+// been found at all. An unbound reader returns ("", false): there is nothing to wait for, because
+// the engine either has not started the command or never rendered arguments this reader could match.
+func (r *engineReader) status() (string, bool) {
+	if r == nil || r.key == "" {
+		return "", false
+	}
+
+	r.watch.mu.Lock()
+	defer r.watch.mu.Unlock()
+
+	r.watch.consume()
+	if r.spanID == "" {
+		r.spanID = r.watch.findSpan(r.key)
+		if r.spanID == "" {
+			return "", false
+		}
+	}
+
+	span := r.watch.spans[r.spanID]
+	if span == nil {
+		return "", false
+	}
+	return span.status, true
+}
+
 // lastSeen reports the most recent line this reader handed out and when. ok is false while
 // nothing has arrived, which is also the case for a reader with no engine log behind it.
 func (r *engineReader) lastSeen() (string, time.Time, bool) {
@@ -137,6 +171,14 @@ func (w *engineWatch) consume() {
 			w.spans[id] = span
 		}
 		if !isOutput {
+			// A closing line is not a description: it carries the engine's own wording for the
+			// operation, not the arguments a command is matched on, and it arrives last — so
+			// letting it through would leave a cached span described as "Container.withExec
+			// CACHED" and matchable by nothing.
+			if status := engineSpanStatus.FindStringSubmatch(text); status != nil {
+				span.status = status[1]
+				continue
+			}
 			// The description is repeated every time the engine reprints the span; keeping the
 			// first one is enough to match a command against it.
 			if span.description == "" {
@@ -192,6 +234,14 @@ var (
 	engineSpanLine = regexp.MustCompile(`^\s*(\d+)\s*:\s*(.*)$`)
 	// Output lines carry the elapsed time and a pipe before the text the command wrote.
 	engineOutputLine = regexp.MustCompile(`^[┆|\s]*\[[\d.]+m?s\]\s*\|\s?(.*)$`)
+	// A span is closed by its own description followed by the outcome and the elapsed time:
+	//
+	//	18  : ┆ Container.withExec CACHED [0.0s]
+	//	20  : ┆ Container.withExec DONE [1.5s]
+	//
+	// The elapsed time is optional because a span the engine closes without timing it — an aborted
+	// session does — still says what became of it.
+	engineSpanStatus = regexp.MustCompile(`(?:^|\s)(DONE|CACHED|ERROR)(?:\s+\[[\d.]+m?s\])?$`)
 )
 
 // parseEngineLine splits one line of plain progress output into the span it belongs to and its

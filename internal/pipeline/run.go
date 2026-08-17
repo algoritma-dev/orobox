@@ -172,24 +172,25 @@ func Run(ctx context.Context, plan *Plan, opts Options) ([]string, error) {
 		}
 	}
 
-	// From here on every step overlays the sources, so all of it is per-commit work.
-	vendor, err := r.exec(ctx, r.on(deps, plan.Vendor), plan.Vendor)
-	if err != nil {
-		return nil, r.describe("building the vendor tree", err)
-	}
-
-	artifacts := map[string]*dagger.File{
-		config.VendorArtifactName: vendor.File(artifactContainerDir + "/" + config.VendorArtifactName),
-	}
-
-	if plan.BuildsAssets() {
-		// The assets are built on top of the finished vendor container: they need the production
-		// autoloader the vendor step just dumped.
-		assets, err := r.exec(ctx, r.on(vendor, *plan.Assets), *plan.Assets)
+	// From here on every step overlays the sources, so all of it is per-commit work — which is
+	// exactly why a run that will not release skips it: see Plan.BuildsArtifacts.
+	artifacts := map[string]*dagger.File{}
+	if plan.BuildsArtifacts() {
+		vendor, err := r.exec(ctx, r.on(deps, plan.Vendor), plan.Vendor)
 		if err != nil {
-			return nil, r.describe("building the assets", err)
+			return nil, r.describe("building the vendor tree", err)
 		}
-		artifacts[config.AssetsArtifactName] = assets.File(artifactContainerDir + "/" + config.AssetsArtifactName)
+		artifacts[config.VendorArtifactName] = vendor.File(artifactContainerDir + "/" + config.VendorArtifactName)
+
+		if plan.BuildsAssets() {
+			// The assets are built on top of the finished vendor container: they need the
+			// production autoloader the vendor step just dumped.
+			assets, err := r.exec(ctx, r.on(vendor, *plan.Assets), *plan.Assets)
+			if err != nil {
+				return nil, r.describe("building the assets", err)
+			}
+			artifacts[config.AssetsArtifactName] = assets.File(artifactContainerDir + "/" + config.AssetsArtifactName)
+		}
 	}
 
 	// QA and tests are independent consumers of the development dependencies, so they run
@@ -250,6 +251,12 @@ func (p *Plan) ExportedArtifacts(projectDir string) []string {
 }
 
 func (r *runner) exportArtifacts(ctx context.Context, artifacts map[string]*dagger.File) ([]string, error) {
+	// A run that builds none must not even create the directory: an empty artifact directory on a
+	// lint job reads as a build that produced nothing rather than one that was never asked to.
+	if len(artifacts) == 0 {
+		return nil, nil
+	}
+
 	dir := filepath.Join(r.opts.ProjectDir, r.plan.ArtifactDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("could not create the artifact directory %s: %w", dir, err)

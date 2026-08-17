@@ -113,6 +113,23 @@ func (p *Plan) RunsRelease() bool { return !p.SkipRelease }
 // one of the two leaves it needed; only skipping both turns the run into a plain build.
 func (p *Plan) NeedsDevDependencies() bool { return p.RunsQA() || p.RunsTests() }
 
+// BuildsArtifacts reports whether the vendor and assets tarballs are produced and exported.
+//
+// They are the release payload and nothing else reads them, so a run that releases needs them and
+// a run that only checks does not. That distinction matters because the artifact steps overlay the
+// application sources, which makes their cache key change with every commit: unlike the dependency
+// layers they are never reused, so a lint job that builds them pays a full authoritative
+// dump-autoload and a tar of the whole vendor tree for a file it then throws away — three times
+// per commit across a pipeline of lint, test and deploy.
+//
+// The exception is the run that skips everything: with no QA, no tests and no release the tarballs
+// are the only thing left to produce, so building them is the whole point rather than waste. The
+// reasoning is the same as NeedsDevDependencies': skipping every check turns the run into a plain
+// build.
+func (p *Plan) BuildsArtifacts() bool {
+	return p.RunsRelease() || !p.NeedsDevDependencies()
+}
+
 // SkippedSteps names the parts of the pipeline this run leaves out, in pipeline order. It is nil
 // for a normal run, which is what keeps a normal deploy's summary unchanged.
 func (p *Plan) SkippedSteps() []string {
@@ -143,8 +160,13 @@ func (p *Plan) CacheEnv(runID string) map[string]string {
 	}
 }
 
-// Artifacts lists the tarball names this plan produces, in upload order.
+// Artifacts lists the tarball names this plan produces, in upload order. It is empty for a run
+// that builds none, which is what keeps the summary and the export loop honest without either of
+// them repeating the predicate.
 func (p *Plan) Artifacts() []string {
+	if !p.BuildsArtifacts() {
+		return nil
+	}
 	artifacts := []string{config.VendorArtifactName}
 	if p.BuildsAssets() {
 		artifacts = append(artifacts, config.AssetsArtifactName)
