@@ -685,3 +685,71 @@ func TestPostgresMajorFromAPinnedTag(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanDefaultsToStageRefAndScope(t *testing.T) {
+	p := New(testConf("6.1", true), testStage(), "repo")
+
+	if p.Ref != "develop" {
+		t.Errorf("Ref = %q, want %q", p.Ref, "develop")
+	}
+	if p.CacheScope != "develop" {
+		t.Errorf("CacheScope = %q, want %q", p.CacheScope, "develop")
+	}
+	if p.BaseCacheScope != "" {
+		t.Errorf("BaseCacheScope = %q, want empty", p.BaseCacheScope)
+	}
+	if got := p.QA.Services[0].DataCache; got != "orobox-qa-db-6.1-develop" {
+		t.Errorf("QA data cache = %q", got)
+	}
+}
+
+func TestPlanRefOverrideMovesBuildAndRelease(t *testing.T) {
+	p := NewWithOverrides(testConf("6.1", true), testStage(), "repo", Overrides{Ref: "abc123"})
+
+	if p.Ref != "abc123" {
+		t.Errorf("Ref = %q, want %q", p.Ref, "abc123")
+	}
+	if got := p.Release.Env["OROBOX_DEPLOY_REF"]; got != "abc123" {
+		t.Errorf("OROBOX_DEPLOY_REF = %q, want %q", got, "abc123")
+	}
+	// Senza --cache-scope lo scope segue il ref effettivo.
+	if p.CacheScope != "abc123" {
+		t.Errorf("CacheScope = %q, want %q", p.CacheScope, "abc123")
+	}
+}
+
+func TestPlanCacheScopeIsIndependentOfRef(t *testing.T) {
+	p := NewWithOverrides(testConf("6.1", true), testStage(), "repo", Overrides{
+		Ref:            "abc123",
+		CacheScope:     "feature/x",
+		BaseCacheScope: "main",
+	})
+
+	if p.Ref != "abc123" {
+		t.Errorf("Ref = %q", p.Ref)
+	}
+	if p.CacheScope != "feature/x" {
+		t.Errorf("CacheScope = %q", p.CacheScope)
+	}
+	if p.BaseCacheScope != "main" {
+		t.Errorf("BaseCacheScope = %q", p.BaseCacheScope)
+	}
+	// volumeSuffix sanifica: "/" non è ammesso in un nome di volume.
+	if got := p.QA.Services[0].DataCache; got != "orobox-qa-db-6.1-feature-x" {
+		t.Errorf("QA data cache = %q", got)
+	}
+	if got := p.QA.Caches[0].Volume; got != "orobox-qa-cache-6.1-feature-x" {
+		t.Errorf("QA cache volume = %q", got)
+	}
+}
+
+func TestPlanBaseCacheScopeEqualToScopeIsDropped(t *testing.T) {
+	p := NewWithOverrides(testConf("6.1", true), testStage(), "repo", Overrides{
+		CacheScope:     "main",
+		BaseCacheScope: "main",
+	})
+
+	if p.BaseCacheScope != "" {
+		t.Errorf("BaseCacheScope = %q, want empty when it equals the scope", p.BaseCacheScope)
+	}
+}

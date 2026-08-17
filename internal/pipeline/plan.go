@@ -51,12 +51,16 @@ type Step struct {
 // assets, qa and test; release consumes the artifacts — so the plan only carries the
 // contents of each step.
 type Plan struct {
-	Stage       config.StageConfig
-	Repository  string
-	Ref         string
-	Image       string
-	OroVersion  string
-	ArtifactDir string // host directory the tarballs are exported to
+	Stage      config.StageConfig
+	Repository string
+	Ref        string
+	// CacheScope and BaseCacheScope are recorded for the deploy summary. The volume names
+	// themselves are already resolved into the steps.
+	CacheScope     string
+	BaseCacheScope string
+	Image          string
+	OroVersion     string
+	ArtifactDir    string // host directory the tarballs are exported to
 	// SourceDir is the repository-relative directory holding the application, empty when the
 	// repository root is the application. Every step's sources are taken from it, so a monorepo
 	// builds only its Oro project.
@@ -148,22 +152,63 @@ func (p *Plan) Artifacts() []string {
 	return artifacts
 }
 
-// New resolves a stage into a plan. repository is passed in rather than read from the config
-// so the caller can fall back to the git origin and report that failure with context.
+// Overrides are the per-invocation values that replace what the stage configuration would
+// otherwise decide. They exist for CI, where the commit under test is not the stage's ref and
+// the caches belong to a branch rather than to that ref.
+type Overrides struct {
+	// Ref replaces stage.Ref as the commit the pipeline builds and the release checks out.
+	Ref string
+	// CacheScope names the cache volume family. Empty means the effective ref, which is what
+	// keeps a run without flags identical to one before this existed.
+	CacheScope string
+	// BaseCacheScope is the family a missing test database dump is seeded from. Empty, or equal
+	// to CacheScope, means no seeding.
+	BaseCacheScope string
+}
+
+// New resolves a stage into a plan with no overrides: everything comes from the configuration.
+// repository is passed in rather than read from the config so the caller can fall back to the
+// git origin and report that failure with context.
 func New(conf *config.OroConfig, stage config.StageConfig, repository string) *Plan {
+	return NewWithOverrides(conf, stage, repository, Overrides{})
+}
+
+// NewWithOverrides is New with the per-invocation values a CI job needs: a ref that is not the
+// stage's, and a cache scope that outlives it.
+func NewWithOverrides(conf *config.OroConfig, stage config.StageConfig, repository string, o Overrides) *Plan {
+	ref := stage.Ref
+	if o.Ref != "" {
+		ref = o.Ref
+	}
+	scope := o.CacheScope
+	if scope == "" {
+		scope = ref
+	}
+	baseScope := o.BaseCacheScope
+	if baseScope == scope {
+		// A base equal to the scope would mount the same volume twice under two paths.
+		baseScope = ""
+	}
+
 	oroRoot := config.OroRootDir
 	versions := config.GetVersionsForOro(conf.OroVersion)
-	suffix := volumeSuffix(conf.OroVersion, stage.Ref)
+	suffix := volumeSuffix(conf.OroVersion, scope)
+	baseSuffix := ""
+	if baseScope != "" {
+		baseSuffix = volumeSuffix(conf.OroVersion, baseScope)
+	}
 
 	p := &Plan{
-		Stage:        stage,
-		Repository:   repository,
-		Ref:          stage.Ref,
-		Image:        fmt.Sprintf("algoritmadev/orobox:%s-%s-latest", conf.OroVersion, config.InstallTypeProject),
-		OroVersion:   conf.OroVersion,
-		ArtifactDir:  filepath.Join(config.DeployArtifactsDir, stage.Name),
-		SourceDir:    conf.Deploy.Source(),
-		ComposerAuth: docker.ComposerAuthJSON(conf.Composer.Auth),
+		Stage:          stage,
+		Repository:     repository,
+		Ref:            ref,
+		CacheScope:     scope,
+		BaseCacheScope: baseScope,
+		Image:          fmt.Sprintf("algoritmadev/orobox:%s-%s-latest", conf.OroVersion, config.InstallTypeProject),
+		OroVersion:     conf.OroVersion,
+		ArtifactDir:    filepath.Join(config.DeployArtifactsDir, stage.Name),
+		SourceDir:      conf.Deploy.Source(),
+		ComposerAuth:   docker.ComposerAuthJSON(conf.Composer.Auth),
 	}
 
 	// --no-autoloader is not an optimization: the root package's classmap is built from src/,
@@ -240,13 +285,13 @@ func New(conf *config.OroConfig, stage config.StageConfig, repository string) *P
 		Env:      testEnv(versions.Postgres),
 		Commands: testCommands(stage, versions.Postgres),
 		Services: testServices(conf, versions),
-		Caches:   testCaches(stage, suffix),
+		Caches:   testCaches(stage, suffix, baseSuffix),
 	}
 
 	p.Release = Step{
 		Name:    releaseStepName,
 		Workdir: oroRoot,
-		Env:     releaseEnv(stage, repository, p.SourceDir),
+		Env:     releaseEnv(stage, ref, repository, p.SourceDir),
 		Commands: []string{
 			// The clone carries vendor-bin/deploy/composer.json but not its vendor tree, so
 			// Deployer itself is installed here rather than uploaded from the developer's disk.
@@ -351,7 +396,7 @@ func qaEnv(postgresVersion string) map[string]string {
 //
 // The download caches deliberately keep an Oro-version-only name: they are content-addressed
 // package stores, so sharing them across refs is a pure gain.
-func volumeSuffix(oroVersion, ref string) string {
+func volumeSuffix(oroVersion, scope string) string {
 	sanitized := strings.Map(func(r rune) rune {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
@@ -359,7 +404,7 @@ func volumeSuffix(oroVersion, ref string) string {
 		default:
 			return '-'
 		}
-	}, ref)
+	}, scope)
 	return oroVersion + "-" + sanitized
 }
 
@@ -564,7 +609,7 @@ const (
 
 // testCaches mounts the database dump for a stage that installs Oro. A unit-only stage never
 // touches a schema, so it mounts nothing and pays nothing.
-func testCaches(stage config.StageConfig, suffix string) []Cache {
+func testCaches(stage config.StageConfig, suffix, _ string) []Cache {
 	if !stage.RunsFunctionalTests() {
 		return nil
 	}
@@ -686,10 +731,14 @@ func testServices(conf *config.OroConfig, versions config.OroVersions) []Service
 
 // releaseEnv is the bridge between .orobox.yaml and deploy.php: the stub reads exactly these
 // variables, so the two can never disagree about where a stage deploys.
-func releaseEnv(stage config.StageConfig, repository, sourceDir string) map[string]string {
+//
+// ref is passed in rather than read from the stage: with --ref the pipeline builds a commit the
+// stage configuration does not name, and Deployer has to check out that same commit or the
+// uploaded artifacts and the deployed code would belong to two different revisions.
+func releaseEnv(stage config.StageConfig, ref, repository, sourceDir string) map[string]string {
 	env := map[string]string{
 		"OROBOX_DEPLOY_REPOSITORY":    repository,
-		"OROBOX_DEPLOY_REF":           stage.Ref,
+		"OROBOX_DEPLOY_REF":           ref,
 		"OROBOX_DEPLOY_HOST":          stage.Host,
 		"OROBOX_DEPLOY_USER":          stage.User,
 		"OROBOX_DEPLOY_PORT":          strconv.Itoa(stage.SSHPort()),

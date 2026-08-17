@@ -17,11 +17,14 @@ import (
 )
 
 var (
-	deployAssumeYes   bool
-	deployNoCache     bool
-	deploySkipQA      bool
-	deploySkipTest    bool
-	deploySkipRelease bool
+	deployAssumeYes      bool
+	deployNoCache        bool
+	deploySkipQA         bool
+	deploySkipTest       bool
+	deploySkipRelease    bool
+	deployRef            string
+	deployCacheScope     string
+	deployBaseCacheScope string
 )
 
 var deployCmd = &cobra.Command{
@@ -49,6 +52,9 @@ func init() {
 	deployCmd.Flags().BoolVar(&deploySkipQA, "skip-qa", false, "Skip the QA checks")
 	deployCmd.Flags().BoolVar(&deploySkipTest, "skip-test", false, "Skip the test suites")
 	deployCmd.Flags().BoolVar(&deploySkipRelease, "skip-release", false, "Build, check and export the artifacts, but do not release to the remote host")
+	deployCmd.Flags().StringVar(&deployRef, "ref", "", "Build this ref instead of the one configured for the stage")
+	deployCmd.Flags().StringVar(&deployCacheScope, "cache-scope", "", "Name the cache volume family (default: the ref being built)")
+	deployCmd.Flags().StringVar(&deployBaseCacheScope, "base-cache-scope", "", "Seed a missing test database dump from this cache scope")
 	rootCmd.AddCommand(deployCmd)
 }
 
@@ -83,7 +89,11 @@ func runDeployCommand(stageName string) {
 		os.Exit(1)
 	}
 
-	plan := pipeline.New(conf, stage, repository)
+	plan := pipeline.NewWithOverrides(conf, stage, repository, pipeline.Overrides{
+		Ref:            deployRef,
+		CacheScope:     deployCacheScope,
+		BaseCacheScope: deployBaseCacheScope,
+	})
 	plan.NoCache = deployNoCache
 	plan.SkipQA = deploySkipQA
 	plan.SkipTest = deploySkipTest
@@ -94,7 +104,7 @@ func runDeployCommand(stageName string) {
 	// stage host, so asking would only train the reader to confirm without looking.
 	if plan.RunsRelease() && !deployAssumeYes && isTTY() {
 		reader := bufio.NewReader(stdin)
-		if !utils.AskYesNo(reader, fmt.Sprintf("Release %s to %s?", stage.Ref, stage.Host), false) {
+		if !utils.AskYesNo(reader, fmt.Sprintf("Release %s to %s?", plan.Ref, stage.Host), false) {
 			utils.PrintInfo("Aborted.")
 			return
 		}
@@ -112,11 +122,11 @@ func runDeployCommand(stageName string) {
 	}
 
 	if !plan.RunsRelease() {
-		utils.PrintSuccess(fmt.Sprintf("Built %s for %s and exported the artifacts; the release was skipped.", stage.Ref, stage.Name))
+		utils.PrintSuccess(fmt.Sprintf("Built %s for %s and exported the artifacts; the release was skipped.", plan.Ref, stage.Name))
 		return
 	}
 
-	utils.PrintSuccess(fmt.Sprintf("Deployed %s to %s (%s).", stage.Ref, stage.Name, stage.Host))
+	utils.PrintSuccess(fmt.Sprintf("Deployed %s to %s (%s).", plan.Ref, stage.Name, stage.Host))
 }
 
 // loadDeployConfig reads the configuration and rejects install types that cannot be deployed.
@@ -201,6 +211,10 @@ func printDeploySummary(plan *pipeline.Plan) {
 	fmt.Printf("  Stage:      %s\n", stage.Name)
 	fmt.Printf("  Ref:        %s\n", plan.Ref)
 	fmt.Printf("  Repository: %s\n", plan.Repository)
+	fmt.Printf("  Cache:      %s\n", plan.CacheScope)
+	if plan.BaseCacheScope != "" {
+		fmt.Printf("  Cache base: %s\n", plan.BaseCacheScope)
+	}
 	if plan.SourceDir != "" {
 		fmt.Printf("  Source dir: %s\n", plan.SourceDir)
 	}
