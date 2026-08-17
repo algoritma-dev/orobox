@@ -80,6 +80,15 @@ func TestToolsAreOrderedAndSelfContained(t *testing.T) {
 	if !strings.Contains(phpstan, "/src/root/src") {
 		t.Errorf("phpstan does not analyze the requested path: %s", phpstan)
 	}
+	// PHPStan analyses in parallel workers sized from the core count. A worker that hits PHP's
+	// memory_limit dies and hands back a garbled response, which surfaces as an "Internal error"
+	// naming whatever file was in flight — a crash that depends on the machine, not the code.
+	// --no-progress keeps the bar out of a CI log, which has no terminal to redraw.
+	for _, want := range []string{"--memory-limit=-1", "--no-progress"} {
+		if !strings.Contains(phpstan, want) {
+			t.Errorf("phpstan args missing %q: %s", want, phpstan)
+		}
+	}
 
 	// Rector resolves its config relative to the app root, so it must run from there.
 	if wd := toolByName(t, tools, "rector").WorkDir; wd != config.OroRootDir {

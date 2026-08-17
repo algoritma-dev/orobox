@@ -109,7 +109,16 @@ func Tools(sourceRoot, analyzePath string, mode Mode) []Tool {
 		{
 			Name:  "phpstan",
 			Setup: phpstanCacheWarmup(),
-			Args:  []string{oroRoot + "/bin/phpstan", "analyze", analyzePath, "--configuration=" + phpstanConfig, "--autoload-file=" + oroRoot + "/vendor/autoload.php"},
+			// --memory-limit=-1 is not a convenience. PHPStan analyses in parallel worker
+			// processes sized from the core count, and a worker that reaches PHP's memory_limit
+			// dies and returns a garbled response. That surfaces as `Internal error: Call to a
+			// member function set() on int` against whichever file was in flight, so the failure
+			// names an innocent file and reproduces only on machines with enough cores to run
+			// the workers thin — it passes locally and fails in CI, or the reverse.
+			//
+			// --no-progress because a CI log has no terminal to redraw: the bar arrives as
+			// hundreds of block characters wrapped around the real output.
+			Args: []string{oroRoot + "/bin/phpstan", "analyze", analyzePath, "--configuration=" + phpstanConfig, "--autoload-file=" + oroRoot + "/vendor/autoload.php", "--memory-limit=-1", "--no-progress"},
 		},
 		{Name: "rector", Args: rectorArgs, WorkDir: oroRoot},
 		{Name: "php-cs-fixer", Args: phpCSFixerArgs},
