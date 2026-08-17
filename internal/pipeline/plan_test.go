@@ -853,32 +853,40 @@ func TestQaWarmupUpdatesInsteadOfReinstallingWhenStale(t *testing.T) {
 	}
 }
 
-func TestTestStageWarmsTheCacheBeforeTheSuites(t *testing.T) {
-	commands := NewWithOverrides(testConf("6.1", true), functionalStage(), "repo", Overrides{}).Test.Commands
-	script := joined(commands)
+func TestEveryRestoreRungRebuildsTheCaches(t *testing.T) {
+	script := joined(NewWithOverrides(testConf("6.1", true), functionalStage(), "repo", Overrides{
+		CacheScope:     "feature/x",
+		BaseCacheScope: "main",
+	}).Test.Commands)
 
-	warmup := strings.Index(script, "php bin/console cache:warmup --env=test")
-	database := strings.Index(script, "Preparing the test database")
-	suites := strings.Index(script, "simple-phpunit")
-
-	if warmup == -1 {
-		t.Fatalf("the test step never warms the cache: %s", script)
+	// A dump carries the schema and the oro_entity_config rows, but none of the generated extend
+	// classes that make those fields reachable — so a rung that restores one and stops leaves the
+	// kernel blind to every extend field. oro:platform:update regenerates them; a bare
+	// cache:warmup does not, because it boots on top of the empty stubs Oro generates to let the
+	// boot succeed at all.
+	if !strings.Contains(script, "oro:platform:update --force --env=test --timeout=0 --skip-download-translations --skip-translations") {
+		t.Errorf("the rebuild does not run oro:platform:update with the skip flags: %s", script)
 	}
-	// Only the full-install rung leaves a warm cache behind: restoring a dump brings a schema
-	// whose extend fields are recorded in oro_entity_config and generates nothing, so the kernel
-	// boots blind to them and every query against an extend field fails a semantic check. The
-	// warmup therefore has to sit between the database and the suites, on every rung.
-	if !(database < warmup && warmup < suites) {
-		t.Errorf("warmup at %d must fall between the database at %d and the suites at %d: %s",
-			warmup, database, suites, script)
+
+	// Count invocations, not the shell function definitions that precede them.
+	restores := strings.Count(script, "\n  restore_dump ")
+	rebuilds := strings.Count(script, "\n  rebuild\n")
+	if restores == 0 {
+		t.Fatalf("the ladder never restores a dump: %s", script)
+	}
+	if restores != rebuilds {
+		t.Errorf("%d restore(s) but %d rebuild(s): every restored schema must be rebuilt: %s",
+			restores, rebuilds, script)
 	}
 }
 
-func TestUnitOnlyStageDoesNotWarmTheCache(t *testing.T) {
+func TestUnitOnlyStageNeitherInstallsNorRebuilds(t *testing.T) {
 	script := joined(New(testConf("6.1", true), testStage(), "repo").Test.Commands)
 
-	// A unit-only stage installs no database and boots no kernel; warming would be dead time.
-	if strings.Contains(script, "cache:warmup") {
-		t.Errorf("unit-only stage must not warm the cache: %s", script)
+	// A unit-only stage installs no database and boots no kernel; rebuilding would be dead time.
+	for _, forbidden := range []string{"cache:warmup", "oro:platform:update", "restore_dump"} {
+		if strings.Contains(script, forbidden) {
+			t.Errorf("unit-only stage must not run %q: %s", forbidden, script)
+		}
 	}
 }

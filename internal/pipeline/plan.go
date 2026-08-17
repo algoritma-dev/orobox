@@ -627,10 +627,10 @@ const (
 
 	// The base scope's volume, mounted only when --base-cache-scope names a different family.
 	// The ladder reads from here and never writes: Dagger has no read-only cache mount, so the
-	// rule lives in the script instead of in the mount.
-	testDBBaseCacheDir  = "/cache/test-db-base"
-	testDBBaseDumpFile  = testDBBaseCacheDir + "/dump.sql.gz"
-	testDBBaseStampFile = testDBBaseCacheDir + "/.orobox-test-fingerprint"
+	// rule lives in the script instead of in the mount. Its fingerprint is never consulted —
+	// oro:platform:update reconciles whatever the base dump turns out to hold.
+	testDBBaseCacheDir = "/cache/test-db-base"
+	testDBBaseDumpFile = testDBBaseCacheDir + "/dump.sql.gz"
 )
 
 // testCaches mounts the database dump for a stage that installs Oro. A unit-only stage never
@@ -669,6 +669,19 @@ func testCaches(stage config.StageConfig, suffix, baseSuffix string) []Cache {
 // unknown provenance. The result is cached under the branch's own key, so the second pipeline on
 // that branch takes the first rung.
 //
+// Both restoring rungs end with oro:platform:update, and that is not only about migrations. A dump
+// carries the schema and the oro_entity_config rows that describe the extend fields, but none of
+// the generated classes that make those fields reachable — those live in var/cache, which a fresh
+// container does not have. A kernel booting without them comes up blind to every extend field:
+// Oro generates empty stubs so the boot can succeed, and the first query touching an extend field
+// then dies on a semantic error naming a column that is plainly in the database. A bare
+// cache:warmup does not help, because it boots on top of those same stubs. oro:platform:update
+// rebuilds the extend config, regenerates the classes and warms what depends on them — which is
+// what b2b's own pipeline ran before PHPUnit, against this same kind of restored database, for as
+// long as it was green.
+//
+// Only the full-install rung is exempt: oro:install does all of it as part of installing.
+//
 // psql and pg_dump come from the distribution rather than the image, as rsync does in the release
 // step, and the major is pinned to the service's. The unversioned package is whatever the
 // distribution defaults to — Alpine 3.24 ships 18 — and a newer client is not compatible in this
@@ -694,22 +707,24 @@ save_dump() {
   pg_dump -h %[4]s -U %[5]s --no-owner --no-privileges %[7]s | gzip -c > %[1]s
   printf '%%s' "$fingerprint" > %[2]s
 }
+rebuild() {
+  # Applies whatever migrations the restored schema is missing, and — the part that matters even
+  # when there are none — regenerates the extend entity classes the dump does not carry.
+  php bin/console oro:platform:update --force --env=test --timeout=0 --skip-download-translations --skip-translations
+}
 fingerprint=$(cat composer.lock $(find src -path '*Migrations*' -type f 2>/dev/null | sort) 2>/dev/null | md5sum | cut -c1-32)-pg%[8]s
 php bin/console doctrine:database:create --env=test --if-not-exists
 if [ -z "$OROBOX_NO_CACHE" ] && [ "$(cat %[2]s 2>/dev/null)" = "$fingerprint" ] && [ -f %[1]s ]; then
   echo 'Restoring the cached test database.'
   restore_dump %[1]s
+  rebuild
   exit 0
 fi
 if [ -z "$OROBOX_NO_CACHE" ] && [ -f %[9]s ]; then
   echo 'Seeding the test database from the base scope dump.'
   restore_dump %[9]s
-  if [ "$(cat %[10]s 2>/dev/null)" = "$fingerprint" ]; then
-    echo 'The base dump already matches this commit; caching it under this scope.'
-  else
-    echo 'Applying the migrations this scope adds on top of the base dump.'
-    php bin/console oro:platform:update --force --env=test --timeout=0
-  fi
+  echo 'Applying the migrations this scope adds on top of the base dump.'
+  rebuild
   save_dump
   exit 0
 fi
@@ -719,7 +734,7 @@ php bin/console oro:install --no-interaction --env=test --skip-translations
 save_dump`,
 		testDBDumpFile, testDBStampFile, oroWritableDirsCommand(),
 		testDBService, testDBUser, testDBPassword, testDBName, major,
-		testDBBaseDumpFile, testDBBaseStampFile)
+		testDBBaseDumpFile)
 }
 
 // postgresMajor is the major version of a pinned image tag: "16.1-alpine" is 16. It names the
@@ -748,14 +763,9 @@ func testCommands(stage config.StageConfig, postgresVersion string) []string {
 		// Functional tests need a real schema. The install is cached as a dump and restored on
 		// every run, so the suites always start from the same database.
 		//
-		// The warmup is not redundant with the install. Only the full-install rung leaves a warm
-		// cache behind; restoring a dump brings a schema whose extend fields exist solely as rows
-		// in oro_entity_config, and generates none of the classes that make them reachable. The
-		// kernel then boots blind to them and every query touching one dies on a semantic error
-		// naming a field that is plainly in the database — so the failure appears only from the
-		// second run of a cache scope onwards, once a dump exists to restore.
-		commands = append(commands, oroWritableDirsCommand(), testDatabaseCommand(postgresVersion),
-			"php bin/console cache:warmup --env=test")
+		// Rebuilding the caches is the restoring rungs' own job, not a step bolted on here: see
+		// testDatabaseCommand.
+		commands = append(commands, oroWritableDirsCommand(), testDatabaseCommand(postgresVersion))
 	}
 
 	for _, suite := range stage.Suites() {
