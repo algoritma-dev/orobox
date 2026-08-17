@@ -102,6 +102,7 @@ func Run(ctx context.Context, plan *Plan, opts Options) ([]string, error) {
 		r.sshKey = client.SetSecret("orobox-deploy-ssh-key", opts.SSHPrivateKey)
 	}
 
+	cloneURL := plan.Repository
 	gitOpts := dagger.GitOpts{}
 	switch {
 	case r.sshSocket != nil:
@@ -110,7 +111,13 @@ func Run(ctx context.Context, plan *Plan, opts Options) ([]string, error) {
 		// of the git server cannot be verified and git exits 128.
 		gitOpts.SSHKnownHosts = r.knownHosts()
 	case opts.GitHTTPToken != "":
-		// GitLab clones over https with a job token; the username is fixed by GitLab.
+		// GitLab clones over https with a job token; the username is fixed by GitLab. A token
+		// cannot authenticate an SSH URL, so one is converted here — for the clone only, since
+		// Deployer still needs the configured value.
+		if derived, ok := httpsCloneURL(cloneURL); ok {
+			fmt.Printf("No SSH agent available: cloning over https from %s\n", derived)
+			cloneURL = derived
+		}
 		gitOpts.HTTPAuthToken = client.SetSecret("orobox-git-token", opts.GitHTTPToken)
 		if opts.GitHTTPUser != "" {
 			gitOpts.HTTPAuthUsername = opts.GitHTTPUser
@@ -119,7 +126,7 @@ func Run(ctx context.Context, plan *Plan, opts Options) ([]string, error) {
 	// Resolve the checkout on its own, before any container needs it. Dagger is lazy, so
 	// otherwise a bad ref or missing credentials would surface as a failure of whichever
 	// container happened to touch the sources first — reported as a QA or test failure.
-	ref := client.Git(plan.Repository, gitOpts).Ref(plan.Ref)
+	ref := client.Git(cloneURL, gitOpts).Ref(plan.Ref)
 	commit, err := ref.Commit(ctx)
 	if err != nil {
 		return nil, r.cloneError(err)
