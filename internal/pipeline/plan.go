@@ -605,25 +605,50 @@ const (
 	testDBCacheDir  = "/cache/test-db"
 	testDBDumpFile  = testDBCacheDir + "/dump.sql.gz"
 	testDBStampFile = testDBCacheDir + "/.orobox-test-fingerprint"
+
+	// The base scope's volume, mounted only when --base-cache-scope names a different family.
+	// The ladder reads from here and never writes: Dagger has no read-only cache mount, so the
+	// rule lives in the script instead of in the mount.
+	testDBBaseCacheDir  = "/cache/test-db-base"
+	testDBBaseDumpFile  = testDBBaseCacheDir + "/dump.sql.gz"
+	testDBBaseStampFile = testDBBaseCacheDir + "/.orobox-test-fingerprint"
 )
 
 // testCaches mounts the database dump for a stage that installs Oro. A unit-only stage never
-// touches a schema, so it mounts nothing and pays nothing.
-func testCaches(stage config.StageConfig, suffix, _ string) []Cache {
+// touches a schema, so it mounts nothing and pays nothing. When a base scope is given, its dump
+// is mounted alongside so a scope with no dump of its own can start from it instead of from a
+// full install.
+func testCaches(stage config.StageConfig, suffix, baseSuffix string) []Cache {
 	if !stage.RunsFunctionalTests() {
 		return nil
 	}
-	return []Cache{{
+	caches := []Cache{{
 		Path:   testDBCacheDir,
 		Volume: "orobox-test-dbdump-" + suffix,
 	}}
+	if baseSuffix != "" && baseSuffix != suffix {
+		caches = append(caches, Cache{
+			Path:   testDBBaseCacheDir,
+			Volume: "orobox-test-dbdump-" + baseSuffix,
+		})
+	}
+	return caches
 }
 
-// testDatabaseCommand restores the cached Oro install, or performs one and caches it. The
-// fingerprint covers composer.lock and every migration file — what decides the schema — so a
-// normal commit restores and only a dependency or migration change pays for an install. The
-// client's major version is part of it too: a dump is only restorable by the version pair that
+// testDatabaseCommand restores the cached Oro install, seeds one from the base scope, or performs
+// one and caches it — in that order.
+//
+// The fingerprint covers composer.lock and every migration file, which is what decides the schema,
+// so a normal commit restores and only a dependency or migration change pays for anything more.
+// The client's major version is part of it too: a dump is only restorable by the version pair that
 // wrote it, so a changed client must produce a new dump rather than read the old one.
+//
+// The middle rung is what makes a new branch cheap. Its dump volume is empty, but the base scope's
+// is not, so the branch starts from the base branch's schema and applies only the migrations it
+// adds — oro:platform:update does exactly that, and its failure is a real failure of the branch's
+// migrations, because the database it runs against came from a dump and not from a volume of
+// unknown provenance. The result is cached under the branch's own key, so the second pipeline on
+// that branch takes the first rung.
 //
 // psql and pg_dump come from the distribution rather than the image, as rsync does in the release
 // step, and the major is pinned to the service's. The unversioned package is whatever the
@@ -634,30 +659,48 @@ func testCaches(stage config.StageConfig, suffix, _ string) []Cache {
 // no worse than what the unversioned package would have given.
 func testDatabaseCommand(postgresVersion string) string {
 	major := postgresMajor(postgresVersion)
-	return fmt.Sprintf(`# Preparing the test database: restoring the cached Oro install, or installing and caching it
+	return fmt.Sprintf(`# Preparing the test database: restoring a cached Oro install, seeding one, or installing it
 set -e
 apk add --no-cache postgresql%[8]s-client >/dev/null 2>&1 || apk add --no-cache postgresql-client >/dev/null
 export PGPASSWORD=%[6]s
 psql_run() { psql -h %[4]s -U %[5]s -d %[7]s -v ON_ERROR_STOP=1 "$@"; }
-stamp=%[2]s
-fingerprint=$(cat composer.lock $(find src -path '*Migrations*' -type f 2>/dev/null | sort) 2>/dev/null | md5sum | cut -c1-32)-pg%[8]s
-php bin/console doctrine:database:create --env=test --if-not-exists
-if [ -z "$OROBOX_NO_CACHE" ] && [ "$(cat "$stamp" 2>/dev/null)" = "$fingerprint" ] && [ -f %[1]s ]; then
-  echo 'Restoring the cached test database.'
+restore_dump() {
   psql_run -c 'DROP SCHEMA IF EXISTS public CASCADE'
   psql_run -c 'CREATE SCHEMA public'
   psql_run -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"'
   psql_run -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm'
-  gunzip -c %[1]s | psql_run
+  gunzip -c "$1" | psql_run
+}
+save_dump() {
+  pg_dump -h %[4]s -U %[5]s --no-owner --no-privileges %[7]s | gzip -c > %[1]s
+  printf '%%s' "$fingerprint" > %[2]s
+}
+fingerprint=$(cat composer.lock $(find src -path '*Migrations*' -type f 2>/dev/null | sort) 2>/dev/null | md5sum | cut -c1-32)-pg%[8]s
+php bin/console doctrine:database:create --env=test --if-not-exists
+if [ -z "$OROBOX_NO_CACHE" ] && [ "$(cat %[2]s 2>/dev/null)" = "$fingerprint" ] && [ -f %[1]s ]; then
+  echo 'Restoring the cached test database.'
+  restore_dump %[1]s
+  exit 0
+fi
+if [ -z "$OROBOX_NO_CACHE" ] && [ -f %[9]s ]; then
+  echo 'Seeding the test database from the base scope dump.'
+  restore_dump %[9]s
+  if [ "$(cat %[10]s 2>/dev/null)" = "$fingerprint" ]; then
+    echo 'The base dump already matches this commit; caching it under this scope.'
+  else
+    echo 'Applying the migrations this scope adds on top of the base dump.'
+    php bin/console oro:platform:update --force --env=test --timeout=0
+  fi
+  save_dump
   exit 0
 fi
 echo 'Installing Oro for the test suites and caching the result. Later runs restore the dump.'
 %[3]s
 php bin/console oro:install --no-interaction --env=test --skip-translations
-pg_dump -h %[4]s -U %[5]s --no-owner --no-privileges %[7]s | gzip -c > %[1]s
-printf '%%s' "$fingerprint" > "$stamp"`,
+save_dump`,
 		testDBDumpFile, testDBStampFile, oroWritableDirsCommand(),
-		testDBService, testDBUser, testDBPassword, testDBName, major)
+		testDBService, testDBUser, testDBPassword, testDBName, major,
+		testDBBaseDumpFile, testDBBaseStampFile)
 }
 
 // postgresMajor is the major version of a pinned image tag: "16.1-alpine" is 16. It names the

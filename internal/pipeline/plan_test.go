@@ -392,10 +392,17 @@ func TestPlanTestStageSuites(t *testing.T) {
 		}
 	}
 
-	// oro:install accepts neither --skip-assets nor --timeout on any supported version.
-	for _, forbidden := range []string{"--skip-assets", "--timeout"} {
-		if strings.Contains(both, forbidden) {
-			t.Errorf("oro:install must not receive %q: %s", forbidden, both)
+	// oro:install accepts neither --skip-assets nor --timeout on any supported version. Only the
+	// oro:install line is checked: oro:platform:update, which the seeding rung runs, does take
+	// --timeout, so scanning the whole block would forbid a flag that is correct there.
+	for _, line := range strings.Split(both, "\n") {
+		if !strings.Contains(line, "oro:install") {
+			continue
+		}
+		for _, forbidden := range []string{"--skip-assets", "--timeout"} {
+			if strings.Contains(line, forbidden) {
+				t.Errorf("oro:install must not receive %q: %s", forbidden, line)
+			}
 		}
 	}
 }
@@ -751,5 +758,74 @@ func TestPlanBaseCacheScopeEqualToScopeIsDropped(t *testing.T) {
 
 	if p.BaseCacheScope != "" {
 		t.Errorf("BaseCacheScope = %q, want empty when it equals the scope", p.BaseCacheScope)
+	}
+}
+
+func functionalStage() config.StageConfig {
+	stage := testStage()
+	stage.TestSuites = []string{config.TestSuiteUnit, config.TestSuiteFunctional}
+	return stage
+}
+
+func TestTestCachesMountBaseDumpWhenScopesDiffer(t *testing.T) {
+	stage := functionalStage()
+	p := NewWithOverrides(testConf("6.1", true), stage, "repo", Overrides{
+		CacheScope:     "feature/x",
+		BaseCacheScope: "main",
+	})
+
+	if len(p.Test.Caches) != 2 {
+		t.Fatalf("Test.Caches = %d, want 2", len(p.Test.Caches))
+	}
+	if got := p.Test.Caches[0]; got.Path != "/cache/test-db" || got.Volume != "orobox-test-dbdump-6.1-feature-x" {
+		t.Errorf("branch cache = %+v", got)
+	}
+	if got := p.Test.Caches[1]; got.Path != "/cache/test-db-base" || got.Volume != "orobox-test-dbdump-6.1-main" {
+		t.Errorf("base cache = %+v", got)
+	}
+}
+
+func TestTestCachesMountOnlyTheBranchDumpWithoutABase(t *testing.T) {
+	p := NewWithOverrides(testConf("6.1", true), functionalStage(), "repo", Overrides{CacheScope: "main"})
+
+	if len(p.Test.Caches) != 1 {
+		t.Fatalf("Test.Caches = %d, want 1", len(p.Test.Caches))
+	}
+}
+
+func TestUnitOnlyStageMountsNoDatabaseCache(t *testing.T) {
+	p := NewWithOverrides(testConf("6.1", true), testStage(), "repo", Overrides{
+		CacheScope:     "feature/x",
+		BaseCacheScope: "main",
+	})
+
+	if len(p.Test.Caches) != 0 {
+		t.Errorf("Test.Caches = %d, want 0 for a unit-only stage", len(p.Test.Caches))
+	}
+}
+
+func TestTestDatabaseLadderHasThreeRungs(t *testing.T) {
+	script := joined(NewWithOverrides(testConf("6.1", true), functionalStage(), "repo", Overrides{
+		CacheScope:     "feature/x",
+		BaseCacheScope: "main",
+	}).Test.Commands)
+
+	for _, want := range []string{
+		"Restoring the cached test database.",
+		"Seeding the test database from the base scope dump.",
+		"Applying the migrations this scope adds on top of the base dump.",
+		"php bin/console oro:platform:update --force --env=test --timeout=0",
+		"Installing Oro for the test suites and caching the result.",
+		"php bin/console oro:install --no-interaction --env=test --skip-translations",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("test script is missing %q", want)
+		}
+	}
+
+	// Il gradino di base legge dal proprio volume e scrive sempre su quello del ramo:
+	// una scrittura sul volume di base contaminerebbe ogni ramo che ne discende.
+	if strings.Contains(script, "gzip -c > /cache/test-db-base") {
+		t.Error("the ladder writes into the base cache directory")
 	}
 }
