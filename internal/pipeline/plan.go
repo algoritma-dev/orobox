@@ -447,22 +447,41 @@ func qaCaches(suffix string) []Cache {
 // The fingerprint covers composer.lock and every migration file: those are what decide the
 // schema and the compiled container. Anything else can change freely without paying for another
 // install, which is the whole point of keeping the cache.
+//
+// A stamp that merely disagrees means an install is present and only the pending migrations are
+// missing, so it is updated rather than rebuilt. That path falls back to a full install if the
+// update fails, which is not the same judgement the test step makes: there the database was
+// restored from a dump, so a failure is the branch's migrations being wrong, while here it comes
+// from a Postgres data volume that can have drifted from the var/cache volume holding the stamp.
 func qaWarmupCommand() string {
 	return fmt.Sprintf(`# Preparing the QA cache: Oro install and warmed test cache
 set -e
 stamp=%[1]s/.orobox-qa-fingerprint
 fingerprint=$(cat composer.lock $(find src -path '*Migrations*' -type f 2>/dev/null | sort) 2>/dev/null | md5sum | cut -c1-32)
+full_install() {
+  rm -rf %[4]s "$stamp"
+  %[5]s
+  %[6]s
+  php bin/console oro:install --env=test --no-interaction --drop-database --skip-translations
+  php bin/console cache:warmup --env=test
+  printf '%%s' "$fingerprint" > "$stamp"
+}
 if [ -z "$OROBOX_NO_CACHE" ] && [ "$(cat "$stamp" 2>/dev/null)" = "$fingerprint" ] && [ -f %[2]s ] && [ -d %[3]s ]; then
   echo 'Reusing the cached Oro install and warmed test cache.'
   exit 0
 fi
+if [ -z "$OROBOX_NO_CACHE" ] && [ -s "$stamp" ]; then
+  echo 'The cached install is stale: applying the pending migrations instead of reinstalling.'
+  rm -rf %[4]s
+  %[5]s
+  if php bin/console oro:platform:update --force --env=test --timeout=0 && php bin/console cache:warmup --env=test; then
+    printf '%%s' "$fingerprint" > "$stamp"
+    exit 0
+  fi
+  echo 'The incremental update failed; falling back to a full install.'
+fi
 echo 'Rebuilding the QA cache: installing Oro and warming the test cache. Later runs reuse this.'
-rm -rf %[4]s "$stamp"
-%[5]s
-%[6]s
-php bin/console oro:install --env=test --no-interaction --drop-database --skip-translations
-php bin/console cache:warmup --env=test
-printf '%%s' "$fingerprint" > "$stamp"`,
+full_install`,
 		qatools.CacheVolumeDir(), qatools.ContainerXMLPath(), qatools.SymfonyConfigDir(),
 		qatools.CacheDir(), oroWritableDirsCommand(), qaDatabaseResetCommand())
 }

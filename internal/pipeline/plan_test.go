@@ -267,10 +267,17 @@ func TestPlanQAStageReusesTheInstalledCache(t *testing.T) {
 		}
 	}
 
-	// oro:install accepts neither --skip-assets nor --timeout on any supported version.
-	for _, forbidden := range []string{"--skip-assets", "--timeout"} {
-		if strings.Contains(qa, forbidden) {
-			t.Errorf("qa oro:install must not receive %q: %s", forbidden, qa)
+	// oro:install accepts neither --skip-assets nor --timeout on any supported version. Only the
+	// oro:install line is checked: oro:platform:update, which the stale-cache path runs, does take
+	// --timeout, so scanning the whole script would forbid a flag that is correct there.
+	for _, line := range strings.Split(qa, "\n") {
+		if !strings.Contains(line, "oro:install") {
+			continue
+		}
+		for _, forbidden := range []string{"--skip-assets", "--timeout"} {
+			if strings.Contains(line, forbidden) {
+				t.Errorf("qa oro:install must not receive %q: %s", forbidden, line)
+			}
 		}
 	}
 
@@ -827,5 +834,21 @@ func TestTestDatabaseLadderHasThreeRungs(t *testing.T) {
 	// una scrittura sul volume di base contaminerebbe ogni ramo che ne discende.
 	if strings.Contains(script, "gzip -c > /cache/test-db-base") {
 		t.Error("the ladder writes into the base cache directory")
+	}
+}
+
+func TestQaWarmupUpdatesInsteadOfReinstallingWhenStale(t *testing.T) {
+	qa := joined(New(testConf("6.1", true), testStage(), "repo").QA.Commands)
+
+	for _, want := range []string{
+		"Reusing the cached Oro install and warmed test cache.",
+		"The cached install is stale: applying the pending migrations instead of reinstalling.",
+		"php bin/console oro:platform:update --force --env=test --timeout=0",
+		"falling back to a full install",
+		"Rebuilding the QA cache: installing Oro and warming the test cache.",
+	} {
+		if !strings.Contains(qa, want) {
+			t.Errorf("QA script is missing %q", want)
+		}
 	}
 }
