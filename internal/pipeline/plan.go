@@ -747,7 +747,15 @@ func testCommands(stage config.StageConfig, postgresVersion string) []string {
 	if stage.RunsFunctionalTests() {
 		// Functional tests need a real schema. The install is cached as a dump and restored on
 		// every run, so the suites always start from the same database.
-		commands = append(commands, oroWritableDirsCommand(), testDatabaseCommand(postgresVersion))
+		//
+		// The warmup is not redundant with the install. Only the full-install rung leaves a warm
+		// cache behind; restoring a dump brings a schema whose extend fields exist solely as rows
+		// in oro_entity_config, and generates none of the classes that make them reachable. The
+		// kernel then boots blind to them and every query touching one dies on a semantic error
+		// naming a field that is plainly in the database — so the failure appears only from the
+		// second run of a cache scope onwards, once a dump exists to restore.
+		commands = append(commands, oroWritableDirsCommand(), testDatabaseCommand(postgresVersion),
+			"php bin/console cache:warmup --env=test")
 	}
 
 	for _, suite := range stage.Suites() {

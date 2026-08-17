@@ -852,3 +852,33 @@ func TestQaWarmupUpdatesInsteadOfReinstallingWhenStale(t *testing.T) {
 		}
 	}
 }
+
+func TestTestStageWarmsTheCacheBeforeTheSuites(t *testing.T) {
+	commands := NewWithOverrides(testConf("6.1", true), functionalStage(), "repo", Overrides{}).Test.Commands
+	script := joined(commands)
+
+	warmup := strings.Index(script, "php bin/console cache:warmup --env=test")
+	database := strings.Index(script, "Preparing the test database")
+	suites := strings.Index(script, "simple-phpunit")
+
+	if warmup == -1 {
+		t.Fatalf("the test step never warms the cache: %s", script)
+	}
+	// Only the full-install rung leaves a warm cache behind: restoring a dump brings a schema
+	// whose extend fields are recorded in oro_entity_config and generates nothing, so the kernel
+	// boots blind to them and every query against an extend field fails a semantic check. The
+	// warmup therefore has to sit between the database and the suites, on every rung.
+	if !(database < warmup && warmup < suites) {
+		t.Errorf("warmup at %d must fall between the database at %d and the suites at %d: %s",
+			warmup, database, suites, script)
+	}
+}
+
+func TestUnitOnlyStageDoesNotWarmTheCache(t *testing.T) {
+	script := joined(New(testConf("6.1", true), testStage(), "repo").Test.Commands)
+
+	// A unit-only stage installs no database and boots no kernel; warming would be dead time.
+	if strings.Contains(script, "cache:warmup") {
+		t.Errorf("unit-only stage must not warm the cache: %s", script)
+	}
+}
