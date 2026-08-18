@@ -14,6 +14,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/algoritma-dev/orobox/internal/config"
+	"github.com/algoritma-dev/orobox/internal/qatools"
 )
 
 // artifactContainerDir is where every build step writes its tarballs and where the release
@@ -40,6 +41,19 @@ type Options struct {
 	GitHTTPToken string
 	// GitHTTPUser is the username paired with GitHTTPToken. GitLab expects "gitlab-ci-token".
 	GitHTTPUser string
+	// ReportHostDir is the host directory the raw per-tool reports are exported to. Required when
+	// the plan asks for a report, ignored otherwise.
+	ReportHostDir string
+}
+
+// Result is everything a run produced on the host. The report directories hold the raw per-tool
+// files — one JSON per QA tool, one JUnit XML per PHPUnit invocation, plus the status file the
+// steps wrote instead of failing. Merging them into the single document GitLab reads is the
+// caller's job, because that is where --report-path is known.
+type Result struct {
+	Artifacts     []string
+	QAReportDir   string
+	TestReportDir string
 }
 
 // deployKeyPath is where a private key passed as a secret is mounted in the release
@@ -65,7 +79,7 @@ type runner struct {
 // Run executes the whole pipeline: build, QA and tests in Dagger, then the remote release
 // through Deployer. It returns the host paths of the exported artifacts. QA and test failures
 // cancel each other, so nothing reaches the remote host after a violation.
-func Run(ctx context.Context, plan *Plan, opts Options) ([]string, error) {
+func Run(ctx context.Context, plan *Plan, opts Options) (Result, error) {
 	// The engine output is always captured so a failure can quote it; with --debug it is also
 	// streamed live.
 	var tee io.Writer
@@ -82,7 +96,7 @@ func Run(ctx context.Context, plan *Plan, opts Options) ([]string, error) {
 		dagger.WithLogOutput(log),
 		dagger.WithEnvironmentVariable("DAGGER_PROGRESS", "plain"))
 	if err != nil {
-		return nil, fmt.Errorf("could not start the Dagger engine (is the Docker daemon running?): %w", err)
+		return Result{}, fmt.Errorf("could not start the Dagger engine (is the Docker daemon running?): %w", err)
 	}
 	defer client.Close()
 
@@ -102,57 +116,21 @@ func Run(ctx context.Context, plan *Plan, opts Options) ([]string, error) {
 		r.sshKey = client.SetSecret("orobox-deploy-ssh-key", opts.SSHPrivateKey)
 	}
 
-	cloneURL := plan.Repository
-	gitOpts := dagger.GitOpts{}
-	switch {
-	case r.sshSocket != nil:
-		gitOpts.SSHAuthSocket = r.sshSocket
-		// The clone happens inside a container with no ~/.ssh, so without these the host key
-		// of the git server cannot be verified and git exits 128.
-		gitOpts.SSHKnownHosts = r.knownHosts()
-	case opts.GitHTTPToken != "":
-		// GitLab clones over https with a job token; the username is fixed by GitLab. A token
-		// cannot authenticate an SSH URL, so one is converted here — for the clone only, since
-		// Deployer still needs the configured value.
-		if derived, ok := httpsCloneURL(cloneURL); ok {
-			fmt.Printf("No SSH agent available: cloning over https from %s\n", derived)
-			cloneURL = derived
-		}
-		gitOpts.HTTPAuthToken = client.SetSecret("orobox-git-token", opts.GitHTTPToken)
-		if opts.GitHTTPUser != "" {
-			gitOpts.HTTPAuthUsername = opts.GitHTTPUser
-		}
+	if err := r.resolveSource(ctx); err != nil {
+		return Result{}, err
 	}
-	// Resolve the checkout on its own, before any container needs it. Dagger is lazy, so
-	// otherwise a bad ref or missing credentials would surface as a failure of whichever
-	// container happened to touch the sources first — reported as a QA or test failure.
-	ref := client.Git(cloneURL, gitOpts).Ref(plan.Ref)
-	commit, err := ref.Commit(ctx)
-	if err != nil {
-		return nil, r.cloneError(err)
-	}
-	r.source = ref.Tree()
-	if plan.SourceDir != "" {
-		// Monorepo: only the application subdirectory becomes the container's /var/www/oro, so
-		// every step sees a normal Oro checkout and the sibling projects never reach a release.
-		r.source = r.source.Directory(plan.SourceDir)
-	}
-	if _, err := r.source.Sync(ctx); err != nil {
-		return nil, r.cloneError(err)
-	}
-	fmt.Printf("Building %s at %s (%s)\n", plan.Ref, commit, plan.Repository)
 
 	// The dependency layers come first and are the only thing that survives between runs. They
 	// are built from the composer files alone, so a commit that does not change the lock reuses
 	// all three from Dagger's cache.
 	lockSource, err := r.lockSource(ctx)
 	if err != nil {
-		return nil, err
+		return Result{}, err
 	}
 
 	deps, err := r.exec(ctx, r.container(plan.Deps).WithDirectory(config.OroRootDir, lockSource), plan.Deps)
 	if err != nil {
-		return nil, r.describe("installing the dependencies", err)
+		return Result{}, r.describe("installing the dependencies", err)
 	}
 
 	// The dev dependencies and the QA tools are installed only when something still consumes them.
@@ -162,13 +140,13 @@ func Run(ctx context.Context, plan *Plan, opts Options) ([]string, error) {
 	if plan.NeedsDevDependencies() {
 		depsDev, err = r.exec(ctx, deps, plan.DepsDev)
 		if err != nil {
-			return nil, r.describe("installing the development dependencies", err)
+			return Result{}, r.describe("installing the development dependencies", err)
 		}
 	}
 	if plan.RunsQA() {
 		qaTools, err = r.exec(ctx, depsDev, plan.QaTools)
 		if err != nil {
-			return nil, r.describe("installing the QA tools", err)
+			return Result{}, r.describe("installing the QA tools", err)
 		}
 	}
 
@@ -178,7 +156,7 @@ func Run(ctx context.Context, plan *Plan, opts Options) ([]string, error) {
 	if plan.BuildsArtifacts() {
 		vendor, err := r.exec(ctx, r.on(deps, plan.Vendor), plan.Vendor)
 		if err != nil {
-			return nil, r.describe("building the vendor tree", err)
+			return Result{}, r.describe("building the vendor tree", err)
 		}
 		artifacts[config.VendorArtifactName] = vendor.File(artifactContainerDir + "/" + config.VendorArtifactName)
 
@@ -187,7 +165,7 @@ func Run(ctx context.Context, plan *Plan, opts Options) ([]string, error) {
 			// production autoloader the vendor step just dumped.
 			assets, err := r.exec(ctx, r.on(vendor, *plan.Assets), *plan.Assets)
 			if err != nil {
-				return nil, r.describe("building the assets", err)
+				return Result{}, r.describe("building the assets", err)
 			}
 			artifacts[config.AssetsArtifactName] = assets.File(artifactContainerDir + "/" + config.AssetsArtifactName)
 		}
@@ -196,49 +174,161 @@ func Run(ctx context.Context, plan *Plan, opts Options) ([]string, error) {
 	// QA and tests are independent consumers of the development dependencies, so they run
 	// together and the first failure cancels the other. With both skipped the group is empty and
 	// Wait returns at once.
+	//
+	// The finished containers are kept because in report mode the reports are read back out of
+	// them: the steps exit 0 whatever the tools concluded, precisely so this is possible.
+	var qaContainer, testContainer *dagger.Container
 	group, groupCtx := errgroup.WithContext(ctx)
 	if plan.RunsQA() {
 		group.Go(func() error {
-			if _, err := r.exec(groupCtx, r.on(qaTools, plan.QA), plan.QA); err != nil {
+			ctr, err := r.exec(groupCtx, r.on(qaTools, plan.QA), plan.QA)
+			if err != nil {
 				return r.describe("QA checks", err)
 			}
+			qaContainer = ctr
 			return nil
 		})
 	}
 	if plan.RunsTests() {
 		group.Go(func() error {
-			if _, err := r.exec(groupCtx, r.on(depsDev, plan.Test), plan.Test); err != nil {
+			ctr, err := r.exec(groupCtx, r.on(depsDev, plan.Test), plan.Test)
+			if err != nil {
 				return r.describe("tests", err)
 			}
+			testContainer = ctr
 			return nil
 		})
 	}
 	if err := group.Wait(); err != nil {
-		return nil, err
+		return Result{}, err
+	}
+
+	result := Result{}
+	if plan.Report != qatools.ReportNone {
+		if qaContainer != nil {
+			dir, err := r.exportReports(ctx, qaContainer, QAReportDir(), "qa")
+			if err != nil {
+				return result, err
+			}
+			result.QAReportDir = dir
+		}
+		if testContainer != nil {
+			dir, err := r.exportReports(ctx, testContainer, TestReportDir(), "test")
+			if err != nil {
+				return result, err
+			}
+			result.TestReportDir = dir
+		}
 	}
 
 	// Export before releasing: a CI job can then publish the artifacts even if the remote
 	// release fails, and the developer can inspect exactly what was uploaded.
 	exported, err := r.exportArtifacts(ctx, artifacts)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
+	result.Artifacts = exported
 
 	// Everything up to here is local; the release is the only part that reaches the stage host, so
 	// skipping it leaves the exported artifacts as the run's whole result.
 	if !plan.RunsRelease() {
-		return exported, nil
+		return result, nil
 	}
 
 	release, err := r.releaseContainer(artifacts)
 	if err != nil {
-		return exported, err
+		return result, err
 	}
 	if _, err := r.exec(ctx, release, r.plan.Release); err != nil {
-		return exported, r.describe("the remote release", err)
+		return result, r.describe("the remote release", err)
 	}
 
-	return exported, nil
+	return result, nil
+}
+
+// resolveSource puts the application tree on r.source.
+//
+// It resolves eagerly, before any container needs it. Dagger is lazy, so otherwise a bad ref,
+// missing credentials or an unreadable directory would surface as a failure of whichever container
+// happened to touch the sources first — and be reported as a QA or test failure.
+func (r *runner) resolveSource(ctx context.Context) error {
+	switch r.plan.Source.Kind {
+	case SourceHost:
+		dir := r.plan.Source.Dir
+		excludes := HostExcludes(dir)
+		r.source = r.client.Host().Directory(dir, dagger.HostDirectoryOpts{Exclude: excludes})
+		fmt.Printf("Building the working tree in %s (%d excluded paths)\n", dir, len(excludes))
+	case SourceGit:
+		if err := r.resolveGitSource(ctx); err != nil {
+			return err
+		}
+	}
+
+	if r.plan.SourceDir != "" {
+		// Monorepo: only the application subdirectory becomes the container's /var/www/oro, so
+		// every step sees a normal Oro checkout and the sibling projects never reach a release.
+		r.source = r.source.Directory(r.plan.SourceDir)
+	}
+	if _, err := r.source.Sync(ctx); err != nil {
+		if r.plan.Source.Kind == SourceHost {
+			return fmt.Errorf("could not read the project directory %s: %w", r.plan.Source.Dir, err)
+		}
+		return r.cloneError(err)
+	}
+	return nil
+}
+
+// resolveGitSource is the clone path: everything that was inline in Run before the host directory
+// became an option. Unchanged in behaviour.
+func (r *runner) resolveGitSource(ctx context.Context) error {
+	cloneURL := r.plan.Repository
+	gitOpts := dagger.GitOpts{}
+	switch {
+	case r.sshSocket != nil:
+		gitOpts.SSHAuthSocket = r.sshSocket
+		// The clone happens inside a container with no ~/.ssh, so without these the host key
+		// of the git server cannot be verified and git exits 128.
+		gitOpts.SSHKnownHosts = r.knownHosts()
+	case r.opts.GitHTTPToken != "":
+		// GitLab clones over https with a job token; the username is fixed by GitLab. A token
+		// cannot authenticate an SSH URL, so one is converted here — for the clone only, since
+		// Deployer still needs the configured value.
+		if derived, ok := httpsCloneURL(cloneURL); ok {
+			fmt.Printf("No SSH agent available: cloning over https from %s\n", derived)
+			cloneURL = derived
+		}
+		gitOpts.HTTPAuthToken = r.client.SetSecret("orobox-git-token", r.opts.GitHTTPToken)
+		if r.opts.GitHTTPUser != "" {
+			gitOpts.HTTPAuthUsername = r.opts.GitHTTPUser
+		}
+	}
+
+	ref := r.client.Git(cloneURL, gitOpts).Ref(r.plan.Ref)
+	commit, err := ref.Commit(ctx)
+	if err != nil {
+		return r.cloneError(err)
+	}
+	r.source = ref.Tree()
+	fmt.Printf("Building %s at %s (%s)\n", r.plan.Ref, commit, r.plan.Repository)
+	return nil
+}
+
+// exportReports copies a step's report directory out of its container. The files stay raw and
+// per-tool: merging them is the command layer's job, which is where the requested output path is
+// known.
+func (r *runner) exportReports(ctx context.Context, ctr *dagger.Container, containerDir, name string) (string, error) {
+	if r.opts.ReportHostDir == "" {
+		return "", fmt.Errorf("the plan asks for a %s report but no host directory was given to export it to", name)
+	}
+
+	hostDir := filepath.Join(r.opts.ReportHostDir, name)
+	if err := os.MkdirAll(hostDir, 0o755); err != nil {
+		return "", fmt.Errorf("could not create the report directory %s: %w", hostDir, err)
+	}
+	if _, err := ctr.Directory(containerDir).Export(ctx, hostDir); err != nil {
+		return "", r.describe("exporting the "+name+" report", err)
+	}
+	return hostDir, nil
 }
 
 // ExportedArtifacts returns the host paths the tarballs are written to, for reporting.

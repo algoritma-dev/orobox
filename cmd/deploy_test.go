@@ -272,3 +272,52 @@ func TestDeployCommandHasSkipFlags(t *testing.T) {
 		}
 	}
 }
+
+func TestDeploySourceOutsideCIClones(t *testing.T) {
+	t.Setenv("CI", "")
+	deployRef = ""
+
+	spec, ref, err := deploySource("/home/dev/shop")
+	if err != nil {
+		t.Fatalf("deploySource returned %v", err)
+	}
+	if spec.Kind != pipeline.SourceGit {
+		t.Error("a local deploy must clone: the artifacts and the remote checkout have to come from the same committed tree")
+	}
+	if ref != "" {
+		t.Errorf("a cloning deploy must not force a ref, the stage decides: %q", ref)
+	}
+}
+
+func TestDeploySourceInCIUsesTheJobCheckoutAndItsCommit(t *testing.T) {
+	t.Setenv("CI", "true")
+	t.Setenv("CI_COMMIT_SHA", "0f1e2d3c4b5a")
+	deployRef = ""
+
+	spec, ref, err := deploySource("/builds/acme/shop")
+	if err != nil {
+		t.Fatalf("deploySource returned %v", err)
+	}
+	if spec.Kind != pipeline.SourceHost || spec.Dir != "/builds/acme/shop" {
+		t.Errorf("Source = %+v, want the job's checkout", spec)
+	}
+	if ref != "0f1e2d3c4b5a" {
+		t.Errorf("ref = %q, want the commit that was built", ref)
+	}
+}
+
+func TestDeployExplicitRefWinsOverTheBuiltCommit(t *testing.T) {
+	t.Setenv("CI", "true")
+	t.Setenv("CI_COMMIT_SHA", "0f1e2d3c4b5a")
+
+	deployRef = "v2.1.0"
+	defer func() { deployRef = "" }()
+
+	_, ref, err := deploySource("/builds/acme/shop")
+	if err != nil {
+		t.Fatalf("deploySource returned %v", err)
+	}
+	if ref != "" {
+		t.Errorf("an explicit --ref must not be overridden: %q", ref)
+	}
+}

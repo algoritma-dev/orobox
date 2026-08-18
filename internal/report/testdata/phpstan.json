@@ -1,0 +1,14 @@
+[
+    {
+        "description": "Function strlen invoked with 2 parameters, 1 required.",
+        "check_name": "arguments.count",
+        "fingerprint": "3ed65eee5e68e38976e880a4773424993897894dc9d40bbf6424450f68ba1784",
+        "severity": "major",
+        "location": {
+            "path": "var/qa-probe/Bad.php",
+            "lines": {
+                "begin": 6
+            }
+        }
+    }
+]

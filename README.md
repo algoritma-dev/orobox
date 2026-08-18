@@ -247,6 +247,13 @@ Runs PHPUnit tests within the configured environment.
 ```bash
 orobox test
 ```
+Options:
+- `-f, --filter`: Filter tests by name.
+- `-t, --testsuite`: Run a specific test suite.
+- `--engine=compose|dagger`: Where the tests run. See [Running the checks in CI](#running-the-checks-in-ci).
+- `--report=gitlab`: Write a GitLab JUnit report.
+- `--report-path`: Where to write it (default `var/orobox/reports/junit.xml`).
+- `--cache-scope`, `--base-cache-scope`: Dagger engine only; same meaning as on `orobox deploy`.
 
 ### 8. QA Tools Initialization (`qa-init`)
 Configures and installs the necessary QA tools (PHPStan, coding standards, ESLint, Stylelint) in your bundle.
@@ -266,6 +273,10 @@ Options:
 - `--twig-cs-fixer`: Run Twig-CS-Fixer lint.
 - `--eslint`: Run ESLint analysis.
 - `--stylelint`: Run Stylelint analysis.
+- `--engine=compose|dagger`: Where the checks run. See [Running the checks in CI](#running-the-checks-in-ci).
+- `--report=gitlab`: Write a GitLab Code Quality report.
+- `--report-path`: Where to write it (default `var/orobox/reports/code-quality.json`).
+- `--cache-scope`, `--base-cache-scope`: Dagger engine only; same meaning as on `orobox deploy`.
 
 CLI flags always override the configuration. Example:
 ```bash
@@ -275,6 +286,93 @@ orobox qa --phpstan --eslint
 PHPStan reads the dumped `test` debug container, so it needs an installed test database. Run
 `orobox test-init` once before the first PHPStan run; afterwards the warmed `var/cache/test` is
 reused.
+
+### Running the checks in CI
+
+`orobox qa` and `orobox test` can run on either of two engines:
+
+- **compose** — the development stack, through `docker compose exec`. The default on a developer's
+  machine.
+- **dagger** — the deploy pipeline's own engine: the same tool invocations, on the same cache
+  volumes, against the same cached Oro install. The default when the `CI` environment variable is
+  set and the install type is `project`.
+
+`--engine` forces either one. The Dagger engine is available only for `type: project`, because the
+pipeline image (`algoritmadev/orobox:<version>-project-latest`) exists only for projects. It does
+**not** require a `deploy` section in `.orobox.yaml`: a project that never deploys with Orobox can
+still use it in CI.
+
+In CI the sources are taken from the job's own checkout (`CI_PROJECT_DIR`), never cloned again.
+Everything the repository ignores is excluded from the upload — that is not just an optimization: a
+local `vendor/` carrying dev dependencies would otherwise be overlaid on top of the pipeline's own.
+
+The cache volume family defaults to the current branch (`CI_COMMIT_REF_NAME`, or
+`git rev-parse --abbrev-ref HEAD` locally), so a lint job reuses what the deploy of that branch
+built, and two branches with different migrations do not invalidate each other.
+
+#### Reports
+
+`--report=gitlab` makes every tool emit its own GitLab report; Orobox merges them into one
+document. Nothing is converted: each tool speaks the format natively, and the two JS tools do so
+through the `eslint-formatter-gitlab` and `stylelint-formatter-gitlab` packages `orobox qa-init`
+installs.
+
+With `--report`, the QA tools no longer stop at the first failure — a Code Quality report listing
+only PHPStan's findings because Rector never ran would be worse than none. Every tool runs, and the
+command still exits non-zero if any of them found something.
+
+The untouched per-tool files are kept under `var/orobox/reports/raw/`. When a merged report looks
+wrong, they are what says whether the tool or the merge is to blame.
+
+#### GitLab CI
+
+```yaml
+.orobox:
+  image: docker:27
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+
+lint:
+  extends: .orobox
+  script:
+    - orobox qa --report=gitlab
+  artifacts:
+    reports:
+      codequality: var/orobox/reports/code-quality.json
+
+test:
+  extends: .orobox
+  script:
+    - orobox test --report=gitlab
+  artifacts:
+    reports:
+      junit: var/orobox/reports/junit.xml
+
+deploy:production:
+  extends: .orobox
+  script:
+    - orobox deploy production --yes --skip-qa --skip-test
+  needs: [lint, test]
+  artifacts:
+    paths:
+      - var/orobox/deploy/production/
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+```
+
+`--skip-qa --skip-test` on the deploy job is sound here in a way it would not be otherwise: the two
+jobs ran the same code, on the same commit, against the same cache scope.
+
+Note that `orobox deploy` in CI also builds from `CI_PROJECT_DIR` rather than cloning, and the
+release therefore checks out the commit that was built (`CI_COMMIT_SHA`) rather than the stage's
+configured `ref`. An explicit `--ref` still wins. This is what keeps the deployed revision equal to
+the tested one.
+
+All of this depends on the Dagger engine's cache surviving between jobs — see
+[Cache warmth in CI](#cache-warmth-in-ci).
 
 ### 10. Total Cleanup (`clean`)
 Removes all associated containers and volumes to start from scratch.
@@ -427,24 +525,15 @@ Environment variables read by `orobox deploy`:
 
 #### GitLab CI example
 
-```yaml
-deploy:production:
-  image: docker:27
-  services:
-    - docker:27-dind
-  variables:
-    DOCKER_HOST: tcp://docker:2375
-    DOCKER_TLS_CERTDIR: ""
-  script:
-    - orobox deploy production --yes
-  artifacts:
-    paths:
-      - var/orobox/deploy/production/
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main"
-```
+A three-job pipeline — lint, test, deploy — is in [Running the checks in CI](#running-the-checks-in-ci),
+where the lint and test jobs use `orobox qa` and `orobox test` rather than a `deploy` in disguise.
 
-Add the deploy key as a masked CI variable named `OROBOX_DEPLOY_SSH_KEY`. Cloning uses `CI_JOB_TOKEN` when the configured `repository` is an `https` URL.
+Add the deploy key as a masked CI variable named `OROBOX_DEPLOY_SSH_KEY`.
+
+In CI the pipeline builds from the job's checkout, so no clone happens and no git credentials are
+needed for it; the release still checks out the built commit on the remote host. A deploy run
+outside CI clones the configured `repository` instead, using the SSH agent, or `CI_JOB_TOKEN` when
+the URL is `https`.
 
 #### What the pipeline caches
 
@@ -467,7 +556,14 @@ different refs do not invalidate each other.
 
 Both the layer cache and the mounted volumes live inside the Dagger engine, not in the repository.
 A GitLab job that starts a throwaway `docker:dind` service therefore begins with an empty cache
-every time. Two ways to keep it warm:
+every time.
+
+This now governs three jobs, not one: with the Dagger engine, `orobox qa` and `orobox test` depend
+on the same caches. It is also the whole reason to use that engine in CI — against a cold engine,
+`orobox qa` is *slower* than running the tools in a development stack, because it pays for a full
+`composer install` and a full `oro:install` before analysing anything.
+
+Two ways to keep it warm:
 
 - give the dind service a persistent data volume in the runner configuration, so the engine
   container and its caches survive between jobs:

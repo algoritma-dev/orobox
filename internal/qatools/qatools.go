@@ -22,6 +22,32 @@ const (
 	ModeCheck
 )
 
+// Report selects the machine-readable format the tools emit alongside their work. It is separate
+// from Mode because the two are independent: a developer fixing locally can still want a report,
+// and the pipeline's check-only run is useful without one.
+type Report int
+
+const (
+	// ReportNone leaves every tool on its human-readable output.
+	ReportNone Report = iota
+	// ReportGitLab asks each tool for GitLab Code Quality JSON. Every tool in the set speaks it
+	// natively — the two JS tools through formatter packages NewInstallPlan installs — so nothing
+	// is converted anywhere.
+	ReportGitLab
+)
+
+// ToolsOptions is everything Tools needs to render the tool set. SourceRoot is where project-local
+// configs are looked up, AnalyzePath is the tree PHPStan analyses, and ReportDir is the directory
+// inside the container each tool's report is written to — required when Report is not ReportNone,
+// ignored otherwise.
+type ToolsOptions struct {
+	SourceRoot  string
+	AnalyzePath string
+	Mode        Mode
+	Report      Report
+	ReportDir   string
+}
+
 // Tool is a single QA tool invocation.
 type Tool struct {
 	Name    string
@@ -30,6 +56,22 @@ type Tool struct {
 	// Setup is an optional shell line run in the same shell right before Args, for state the
 	// tool needs but does not create itself.
 	Setup string
+	// ReportFile is where this tool's machine-readable output ends up. Empty unless a report was
+	// requested. It is not part of Args because how the file is produced — a stdout redirect or an
+	// environment variable — is a property of the shell line ReportScript builds.
+	ReportFile string
+	// ReportEnv names the environment variable that tells the tool where to write its report, for
+	// the tools that write it themselves rather than to stdout. Empty for the rest.
+	ReportEnv string
+}
+
+// reportEnvByTool lists the tools whose GitLab formatter writes the document itself, to the file
+// named by an environment variable, and keeps the human-readable output on stdout. The four PHP
+// tools write the document to stdout instead, so a redirect is all they need.
+var reportEnvByTool = map[string]string{
+	"eslint":        "ESLINT_CODE_QUALITY_REPORT",
+	"stylelint":     "STYLELINT_CODE_QUALITY_REPORT",
+	"stylelint-css": "STYLELINT_CODE_QUALITY_REPORT",
 }
 
 // BinaryPaths maps tool names to the binaries the tools are installed as.
@@ -59,9 +101,11 @@ func configFallback(sourceRoot, fallbackDir, file string) string {
 }
 
 // Tools returns every known tool invocation for the given source root, in run order.
-// Callers filter by name; sourceRoot is where project-local configs are looked up and
-// analyzePath is the tree PHPStan analyses.
-func Tools(sourceRoot, analyzePath string, mode Mode) []Tool {
+// Callers filter by name.
+func Tools(opts ToolsOptions) []Tool {
+	sourceRoot := opts.SourceRoot
+	analyzePath := opts.AnalyzePath
+	mode := opts.Mode
 	qaDir := config.QaToolsDir
 	oroRoot := config.OroRootDir
 
@@ -105,7 +149,24 @@ func Tools(sourceRoot, analyzePath string, mode Mode) []Tool {
 
 	eslintArgs = append(eslintArgs, jsTarget)
 
-	return []Tool{
+	// Each tool's own GitLab reporter, so nothing needs converting anywhere. The flag names differ
+	// because their CLIs do; the document they produce is the same CodeClimate subset.
+	var phpstanReportArgs []string
+	if opts.Report == ReportGitLab {
+		phpstanReportArgs = []string{"--error-format=gitlab"}
+		rectorArgs = append(rectorArgs, "--output-format=gitlab")
+		phpCSFixerArgs = append(phpCSFixerArgs, "--format=gitlab")
+		twigArgs = append(twigArgs, "--report=gitlab")
+		// The formatter is addressed by absolute path: ESLint 8 resolves a bare --format=gitlab
+		// against lib/cli-engine/formatters inside its own installation and dies with
+		// "Cannot find module".
+		eslintArgs = append(eslintArgs, "--format="+qaDir+"/node_modules/eslint-formatter-gitlab")
+		stylelintFormatter := "--custom-formatter=" + qaDir + "/node_modules/stylelint-formatter-gitlab"
+		stylelintArgs = append(stylelintArgs, stylelintFormatter)
+		stylelintCSSArgs = append(stylelintCSSArgs, stylelintFormatter)
+	}
+
+	tools := []Tool{
 		{
 			Name:  "phpstan",
 			Setup: phpstanCacheWarmup(),
@@ -118,7 +179,7 @@ func Tools(sourceRoot, analyzePath string, mode Mode) []Tool {
 			//
 			// --no-progress because a CI log has no terminal to redraw: the bar arrives as
 			// hundreds of block characters wrapped around the real output.
-			Args: []string{oroRoot + "/bin/phpstan", "analyze", analyzePath, "--configuration=" + phpstanConfig, "--autoload-file=" + oroRoot + "/vendor/autoload.php", "--memory-limit=-1", "--no-progress"},
+			Args: append([]string{oroRoot + "/bin/phpstan", "analyze", analyzePath, "--configuration=" + phpstanConfig, "--autoload-file=" + oroRoot + "/vendor/autoload.php", "--memory-limit=-1", "--no-progress"}, phpstanReportArgs...),
 		},
 		{Name: "rector", Args: rectorArgs, WorkDir: oroRoot},
 		{Name: "php-cs-fixer", Args: phpCSFixerArgs},
@@ -127,6 +188,15 @@ func Tools(sourceRoot, analyzePath string, mode Mode) []Tool {
 		{Name: "stylelint", Args: stylelintArgs},
 		{Name: "stylelint-css", Args: stylelintCSSArgs},
 	}
+
+	if opts.Report != ReportNone {
+		for i := range tools {
+			tools[i].ReportFile = opts.ReportDir + "/" + tools[i].Name + ".json"
+			tools[i].ReportEnv = reportEnvByTool[tools[i].Name]
+		}
+	}
+
+	return tools
 }
 
 // insertAfter splits args at index and inserts extra, keeping a fresh backing array so the
@@ -155,6 +225,63 @@ func Script(tools []Tool) string {
 		}
 		b.WriteString(cmd)
 	}
+	return b.String()
+}
+
+// StatusFile is the file, inside the report directory, that ReportScript writes the aggregate
+// outcome to: "0" when every tool was clean, "1" when at least one reported violations or failed.
+const StatusFile = ".status"
+
+// ReportScript renders a tool list as one shell line that runs every tool, sends each one's report
+// to its own file, and never fails.
+//
+// Two things differ from Script, and both are forced by what a report is for.
+//
+// The tools are not chained with &&: a Code Quality report listing only PHPStan's findings because
+// Rector never ran is worse than no report at all, so every tool runs whatever the previous one
+// concluded. Every tool in the set exits non-zero on findings, so with && the first one with
+// something to say would silence all the others.
+//
+// The script always exits 0. A failed WithExec makes a Dagger container unreadable, and finding
+// violations is precisely the case where the report has to be extracted — so the outcome travels
+// in StatusFile instead of in the exit code, and the caller exports the reports first and decides
+// pass or fail afterwards.
+//
+// Setup lines run undirected because their output is not JSON — PHPStan's cache warmup prints a
+// Symfony console banner that would corrupt the file — and stderr is left alone throughout so
+// warnings still reach the step log.
+func ReportScript(tools []Tool, reportDir string) string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "mkdir -p %s\nstatus=0\n", reportDir)
+
+	for _, t := range tools {
+		fmt.Fprintf(&b, "echo '--- Running %s ---'\n", t.Name)
+
+		cmd := strings.Join(t.Args, " ")
+		if t.WorkDir != "" {
+			cmd = fmt.Sprintf("(cd %s && %s)", t.WorkDir, cmd)
+		}
+
+		// A tool with ReportEnv writes the document itself and prints its usual summary to stdout,
+		// so redirecting would both capture the wrong bytes and hide output worth reading.
+		run := fmt.Sprintf("%s > %s || status=1", cmd, t.ReportFile)
+		if t.ReportEnv != "" {
+			run = fmt.Sprintf("%s=%s %s || status=1", t.ReportEnv, t.ReportFile, cmd)
+		}
+
+		if t.Setup != "" {
+			// A failed setup is a failed tool: PHPStan cannot analyse without its warmed cache, and
+			// running it anyway would write a report full of bootstrap errors.
+			fmt.Fprintf(&b, "if %s; then %s; else status=1; fi\n", t.Setup, run)
+			continue
+		}
+		fmt.Fprintf(&b, "%s\n", run)
+	}
+
+	fmt.Fprintf(&b, "printf '%%s' \"$status\" > %s/%s\n", reportDir, StatusFile)
+	b.WriteString("exit 0")
+
 	return b.String()
 }
 
@@ -202,11 +329,18 @@ func NewInstallPlan(oroVersion string) InstallPlan {
 		plan.JSManager, plan.JSInstallArg, plan.JSSaveDevFlag = "pnpm", "add", "-D"
 	}
 
+	// The GitLab formatters ship separately from the linters and are installed unconditionally:
+	// requiring them only when a report is asked for would make --report=gitlab fail at runtime on
+	// every environment initialised before the flag existed.
+	//
+	// The ^5.1.0 pin is not cosmetic. eslint-formatter-gitlab 6 and later declare a peer dependency
+	// on eslint >= 9 while this list pins eslint to ^8.57.0, so the unpinned package makes the whole
+	// npm install fail with ERESOLVE — taking the other JS tools down with it.
 	if needsEslint {
-		plan.JSPackages = append(plan.JSPackages, "eslint@^8.57.0", "eslint-plugin-no-jquery", "eslint-plugin-import")
+		plan.JSPackages = append(plan.JSPackages, "eslint@^8.57.0", "eslint-plugin-no-jquery", "eslint-plugin-import", "eslint-formatter-gitlab@^5.1.0")
 	}
 	if needsStylelint {
-		plan.JSPackages = append(plan.JSPackages, "stylelint@^15.11.0", "@oroinc/oro-stylelint-config")
+		plan.JSPackages = append(plan.JSPackages, "stylelint@^15.11.0", "@oroinc/oro-stylelint-config", "stylelint-formatter-gitlab")
 	}
 
 	return plan

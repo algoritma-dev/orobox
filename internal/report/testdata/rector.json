@@ -1,0 +1,21 @@
+[
+    {
+        "fingerprint": "d4fe709c6adfd142183e43d5f979bbe1",
+        "type": "issue",
+        "categories": [
+            "Style"
+        ],
+        "severity": "minor",
+        "description": "RemoveUnusedVariableAssignRector / RemoveExtraParametersRector / ReturnTypeFromStrictTypedCallRector",
+        "content": {
+            "body": "--- Original\n+++ New\n@@ -1,8 +1,7 @@\n <?php\n class Bad {\n-    public function run( $x ) {\n-        $unused = 1;\n+    public function run( $x ): string|int {\n         if ($x == null) { return \"nope\"; }\n-        return strlen($x, \"extra\");\n+        return strlen($x);\n     }\n }\n"
+        },
+        "check_name": "RemoveUnusedVariableAssignRector / RemoveExtraParametersRector / ReturnTypeFromStrictTypedCallRector",
+        "location": {
+            "path": "var/qa-probe/Bad.php",
+            "lines": {
+                "begin": 1
+            }
+        }
+    }
+]

@@ -1,0 +1,62 @@
+[
+  {
+    "type": "issue",
+    "categories": [
+      "Style"
+    ],
+    "check_name": "semi",
+    "description": "Missing semicolon.",
+    "severity": "major",
+    "fingerprint": "aae21014f3f69cf60174e7af5567357e",
+    "location": {
+      "path": "var/qa-probe/bad.js",
+      "lines": {
+        "begin": 1,
+        "end": 2
+      }
+    },
+    "content": {
+      "body": "Require or disallow semicolons instead of ASI\n\n[semi](https://eslint.org/docs/latest/rules/semi)"
+    }
+  },
+  {
+    "type": "issue",
+    "categories": [
+      "Style"
+    ],
+    "check_name": "eqeqeq",
+    "description": "Expected '===' and instead saw '=='.",
+    "severity": "major",
+    "fingerprint": "db559ad2b3fb07e60267c6a547538116",
+    "location": {
+      "path": "var/qa-probe/bad.js",
+      "lines": {
+        "begin": 2,
+        "end": 2
+      }
+    },
+    "content": {
+      "body": "Require the use of `===` and `!==`\n\n[eqeqeq](https://eslint.org/docs/latest/rules/eqeqeq)"
+    }
+  },
+  {
+    "type": "issue",
+    "categories": [
+      "Style"
+    ],
+    "check_name": "semi",
+    "description": "Missing semicolon.",
+    "severity": "major",
+    "fingerprint": "ecc37b5e24ab034f196106f97e3a4281",
+    "location": {
+      "path": "var/qa-probe/bad.js",
+      "lines": {
+        "begin": 2,
+        "end": 2
+      }
+    },
+    "content": {
+      "body": "Require or disallow semicolons instead of ASI\n\n[semi](https://eslint.org/docs/latest/rules/semi)"
+    }
+  }
+]

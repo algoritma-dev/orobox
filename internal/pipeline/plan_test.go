@@ -902,3 +902,121 @@ func TestUnitOnlyStageNeitherInstallsNorRebuilds(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanCarriesTheStageSuitesAndDatabaseDecision(t *testing.T) {
+	stage := testStage()
+	stage.TestSuites = []string{"unit", "functional"}
+
+	p := New(testConf("6.1", false), stage, "repo")
+
+	if !reflect.DeepEqual(p.Suites, []string{"unit", "functional"}) {
+		t.Errorf("Suites = %v, want the stage's list", p.Suites)
+	}
+	if !p.PreparesTestDatabase {
+		t.Error("a stage running functional tests must prepare the database")
+	}
+
+	unitOnly := New(testConf("6.1", false), testStage(), "repo")
+	if unitOnly.PreparesTestDatabase {
+		t.Error("a unit-only stage must not pay for a database install")
+	}
+}
+
+func TestNewChecksBuildsACheckOnlyPlan(t *testing.T) {
+	p := NewChecks(testConf("6.1", false), ChecksOptions{
+		ProjectDir: "/home/dev/shop",
+		CacheScope: "feature-x",
+		RunTest:    true,
+	})
+
+	if !p.SkipRelease {
+		t.Error("a checks plan must never release")
+	}
+	if !p.SkipQA || p.SkipTest {
+		t.Error("RunTest alone must run the test step and skip QA")
+	}
+	if p.BuildsArtifacts() {
+		t.Error("a checks plan must not build the tarballs: nothing consumes them")
+	}
+	if p.Source.Kind != SourceHost || p.Source.Dir != "/home/dev/shop" {
+		t.Errorf("Source = %+v, want the host project directory", p.Source)
+	}
+	if !p.PreparesTestDatabase {
+		t.Error("orobox test always prepares the database, like the compose engine does")
+	}
+	if p.CacheScope != "feature-x" {
+		t.Errorf("CacheScope = %q", p.CacheScope)
+	}
+	if p.Stage.Name != "" {
+		t.Error("a checks plan must not invent a stage")
+	}
+}
+
+func TestNewChecksTestCommandsHonourSuitesAndFilter(t *testing.T) {
+	all := NewChecks(testConf("6.1", false), ChecksOptions{ProjectDir: "/p", RunTest: true})
+	if got := joined(all.Test.Commands); !strings.Contains(got, "php bin/simple-phpunit") {
+		t.Errorf("no PHPUnit invocation:\n%s", got)
+	}
+	if got := joined(all.Test.Commands); strings.Contains(got, "--testsuite") {
+		t.Errorf("without suites PHPUnit must run everything in phpunit.xml:\n%s", got)
+	}
+
+	filtered := NewChecks(testConf("6.1", false), ChecksOptions{
+		ProjectDir: "/p", RunTest: true, Suites: []string{"unit"}, Filter: "CalculatorTest",
+	})
+	got := joined(filtered.Test.Commands)
+	if !strings.Contains(got, "--testsuite unit") {
+		t.Errorf("missing --testsuite unit:\n%s", got)
+	}
+	if !strings.Contains(got, "--filter CalculatorTest") {
+		t.Errorf("missing --filter:\n%s", got)
+	}
+}
+
+func TestChecksPlanInReportModeWritesReportsAndSwallowsFailures(t *testing.T) {
+	qa := NewChecks(testConf("6.1", false), ChecksOptions{ProjectDir: "/p", RunQA: true, Report: qatools.ReportGitLab})
+	qaCommands := joined(qa.QA.Commands)
+	if !strings.Contains(qaCommands, QAReportDir()+"/"+qatools.StatusFile) {
+		t.Errorf("the QA step does not record its status:\n%s", qaCommands)
+	}
+	if !strings.Contains(qaCommands, "exit 0") {
+		t.Errorf("the QA step must not fail, or its reports cannot be exported:\n%s", qaCommands)
+	}
+
+	test := NewChecks(testConf("6.1", false), ChecksOptions{ProjectDir: "/p", RunTest: true, Report: qatools.ReportGitLab})
+	testCommands := joined(test.Test.Commands)
+	if !strings.Contains(testCommands, "--log-junit "+TestReportDir()) {
+		t.Errorf("PHPUnit does not write a JUnit log:\n%s", testCommands)
+	}
+	if !strings.Contains(testCommands, TestReportDir()+"/"+qatools.StatusFile) {
+		t.Errorf("the test step does not record its status:\n%s", testCommands)
+	}
+}
+
+func TestDeployPlanWithoutReportIsUnchanged(t *testing.T) {
+	p := New(testConf("6.1", false), testStage(), "repo")
+
+	if strings.Contains(joined(p.QA.Commands), "status=") {
+		t.Errorf("a deploy plan without --report must keep the fail-fast QA script:\n%s", joined(p.QA.Commands))
+	}
+	if strings.Contains(joined(p.Test.Commands), "--log-junit") {
+		t.Errorf("a deploy plan without --report must not log JUnit:\n%s", joined(p.Test.Commands))
+	}
+	if p.Source.Kind != SourceGit {
+		t.Error("deploy defaults to cloning")
+	}
+}
+
+func TestNewChecksWithoutADeploySection(t *testing.T) {
+	conf := testConf("6.1", false)
+	conf.Deploy = nil
+
+	p := NewChecks(conf, ChecksOptions{ProjectDir: "/p", RunQA: true})
+
+	if p == nil || len(p.QA.Commands) == 0 {
+		t.Fatal("a project with no deploy section must still be checkable")
+	}
+	if !p.BuildsAssets() {
+		t.Error("with no configuration saying otherwise, assets are built in the pipeline")
+	}
+}

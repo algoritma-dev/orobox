@@ -47,6 +47,38 @@ type Step struct {
 	Caches   []Cache
 }
 
+// SourceKind selects where the pipeline takes the application sources from.
+type SourceKind int
+
+const (
+	// SourceGit clones the repository at the plan's ref inside the engine. This is what a local
+	// deploy does: the artifacts and the remote checkout then come from the same committed tree,
+	// whatever the developer happens to have uncommitted.
+	SourceGit SourceKind = iota
+	// SourceHost uploads a directory from the host. It is what `orobox qa` and `orobox test` always
+	// use — analysing the last pushed commit instead of the tree being edited would be useless —
+	// and what a CI deploy uses, where the job already holds the checkout.
+	SourceHost
+)
+
+// SourceSpec is the resolved answer to "where do the sources come from". Dir is meaningful only
+// for SourceHost.
+type SourceSpec struct {
+	Kind SourceKind
+	Dir  string
+}
+
+// ContainerReportDir is the directory inside a container that the report files are written to. It
+// mirrors artifactContainerDir: a fixed path the steps write to and the runner reads back.
+const ContainerReportDir = "/reports"
+
+// QAReportDir is where the QA step writes its per-tool reports and its status file. It is kept
+// apart from the test step's directory so exporting one never overwrites the other's status.
+func QAReportDir() string { return ContainerReportDir + "/qa" }
+
+// TestReportDir is where the test step writes its JUnit logs and its status file.
+func TestReportDir() string { return ContainerReportDir + "/test" }
+
 // Plan is the fully resolved pipeline for one stage. The DAG shape is fixed — vendor feeds
 // assets, qa and test; release consumes the artifacts — so the plan only carries the
 // contents of each step.
@@ -78,6 +110,25 @@ type Plan struct {
 	SkipQA      bool
 	SkipTest    bool
 	SkipRelease bool
+
+	// Source decides whether the sources are cloned or uploaded from the host. Like the skip flags
+	// it never changes what a step does — only where the tree it works on came from.
+	Source SourceSpec
+
+	// Suites are the PHPUnit suites to run, empty meaning everything phpunit.xml defines. Filter
+	// narrows by test name. Both live on the plan rather than being read from Stage because a plan
+	// built for `orobox test` has no stage: what a stage gates its release on and what the
+	// developer asked to run are different questions.
+	Suites []string
+	Filter string
+
+	// PreparesTestDatabase makes the test step install or restore an Oro database before PHPUnit.
+	// A deploy sets it from the stage's suites; `orobox test` always sets it, matching what the
+	// compose engine requires of `orobox test-init`.
+	PreparesTestDatabase bool
+
+	// Report makes the QA and test steps emit machine-readable output into ContainerReportDir.
+	Report qatools.Report
 
 	// Deps, DepsDev and QaTools are built from composer.json and composer.lock alone, before the
 	// application sources are overlaid. Dagger keys each exec on the container state before it, so
@@ -231,6 +282,10 @@ func NewWithOverrides(conf *config.OroConfig, stage config.StageConfig, reposito
 		ArtifactDir:    filepath.Join(config.DeployArtifactsDir, stage.Name),
 		SourceDir:      conf.Deploy.Source(),
 		ComposerAuth:   docker.ComposerAuthJSON(conf.Composer.Auth),
+
+		Source:               SourceSpec{Kind: SourceGit},
+		Suites:               stage.Suites(),
+		PreparesTestDatabase: stage.RunsFunctionalTests(),
 	}
 
 	// --no-autoloader is not an optimization: the root package's classmap is built from src/,
@@ -276,7 +331,7 @@ func NewWithOverrides(conf *config.OroConfig, stage config.StageConfig, reposito
 		},
 	}
 
-	if !conf.Deploy.PreBuiltAssetsEnabled {
+	if !preBuiltAssets(conf) {
 		// Assets are built here only when the repository does not already carry them. Either
 		// way the remote never rebuilds them, so it always runs a plain assets:install.
 		p.Assets = &Step{
@@ -296,7 +351,7 @@ func NewWithOverrides(conf *config.OroConfig, stage config.StageConfig, reposito
 		// PHPStan's Oro bootstrap boots the kernel in test with debug on and reads the dumped
 		// test container, the same environment the functional tests install.
 		Env:      qaEnv(versions.Postgres),
-		Commands: qaCommands(conf.OroVersion),
+		Commands: p.qaCommands(conf.OroVersion),
 		Services: qaServices(suffix, versions.Postgres),
 		Caches:   qaCaches(suffix),
 	}
@@ -305,9 +360,9 @@ func NewWithOverrides(conf *config.OroConfig, stage config.StageConfig, reposito
 		Name:     "test",
 		Workdir:  oroRoot,
 		Env:      testEnv(versions.Postgres),
-		Commands: testCommands(stage, versions.Postgres),
+		Commands: p.testCommands(versions.Postgres),
 		Services: testServices(conf, versions),
-		Caches:   testCaches(stage, suffix, baseSuffix),
+		Caches:   testCaches(p.PreparesTestDatabase, suffix, baseSuffix),
 	}
 
 	p.Release = Step{
@@ -324,6 +379,75 @@ func NewWithOverrides(conf *config.OroConfig, stage config.StageConfig, reposito
 	}
 
 	return p
+}
+
+// ChecksOptions describes a run that checks the code and stops there: no release, no artifacts,
+// no stage.
+type ChecksOptions struct {
+	// ProjectDir is the host directory the sources are uploaded from.
+	ProjectDir string
+	// CacheScope names the cache volume family; the caller resolves it from the branch.
+	// BaseCacheScope seeds a missing test database dump, exactly as it does for a deploy.
+	CacheScope     string
+	BaseCacheScope string
+	// RunQA and RunTest select the step. The commands set exactly one, but both are honoured.
+	RunQA   bool
+	RunTest bool
+	// Suites and Filter narrow the PHPUnit run; empty Suites means everything in phpunit.xml.
+	Suites []string
+	Filter string
+	Report qatools.Report
+}
+
+// NewChecks builds a plan for `orobox qa` or `orobox test` on the Dagger engine: the same steps a
+// deploy would run, minus everything only a release needs.
+//
+// The plan carries a zero StageConfig, which is safe because after the suites and the database
+// decision moved onto the Plan, the release step is the only reader of Stage — and SkipRelease is
+// always set here.
+func NewChecks(conf *config.OroConfig, o ChecksOptions) *Plan {
+	p := NewWithOverrides(conf, config.StageConfig{}, "", Overrides{
+		Ref:            o.CacheScope,
+		CacheScope:     o.CacheScope,
+		BaseCacheScope: o.BaseCacheScope,
+	})
+
+	p.Source = SourceSpec{Kind: SourceHost, Dir: o.ProjectDir}
+	p.SkipQA = !o.RunQA
+	p.SkipTest = !o.RunTest
+	p.SkipRelease = true
+	p.Suites = o.Suites
+	p.Filter = o.Filter
+	p.Report = o.Report
+	// `orobox test` prepares the database whatever the suites are: the command's contract on the
+	// compose engine is that `orobox test-init` has run, and the two engines must not disagree
+	// about what the command does.
+	p.PreparesTestDatabase = o.RunTest
+
+	// NewWithOverrides rendered the steps from the deploy defaults, so the two that read the fields
+	// set above are rebuilt here.
+	versions := config.GetVersionsForOro(conf.OroVersion)
+	p.QA.Commands = p.qaCommands(conf.OroVersion)
+	p.Test.Commands = p.testCommands(versions.Postgres)
+	p.Test.Caches = testCaches(p.PreparesTestDatabase,
+		volumeSuffix(conf.OroVersion, p.CacheScope), baseVolumeSuffix(conf.OroVersion, p.BaseCacheScope))
+
+	return p
+}
+
+// baseVolumeSuffix is volumeSuffix for an optional base scope: an empty scope has no volume.
+func baseVolumeSuffix(oroVersion, baseScope string) string {
+	if baseScope == "" {
+		return ""
+	}
+	return volumeSuffix(oroVersion, baseScope)
+}
+
+// preBuiltAssets reports whether the repository already ships the built assets. It tolerates a
+// missing deploy section, which a project that only uses `orobox qa` and `orobox test` has no
+// reason to write.
+func preBuiltAssets(conf *config.OroConfig) bool {
+	return conf.Deploy != nil && conf.Deploy.PreBuiltAssetsEnabled
 }
 
 // autoloadPlaceholderCommand creates empty stand-ins for the root package's classmap and files
@@ -581,7 +705,7 @@ func qaToolCommands(oroVersion string) []string {
 // the qa-tools layer, and runs every enabled tool in check-only mode. The configuration scripts
 // are here rather than in the layer because they must not overwrite a configuration committed in
 // the repository, and the overlay is what puts that configuration in place.
-func qaCommands(oroVersion string) []string {
+func (p *Plan) qaCommands(oroVersion string) []string {
 	plan := qatools.NewInstallPlan(oroVersion)
 	oroRoot := config.OroRootDir
 
@@ -600,13 +724,23 @@ func qaCommands(oroVersion string) []string {
 	}
 
 	var enabled []qatools.Tool
-	for _, tool := range qatools.Tools(oroRoot, config.QaAnalyzePathFor(config.InstallTypeProject), qatools.ModeCheck) {
+	for _, tool := range qatools.Tools(qatools.ToolsOptions{
+		SourceRoot:  oroRoot,
+		AnalyzePath: config.QaAnalyzePathFor(config.InstallTypeProject),
+		Mode:        qatools.ModeCheck,
+		Report:      p.Report,
+		ReportDir:   QAReportDir(),
+	}) {
 		if config.IsQaToolEnabled(tool.Name) {
 			enabled = append(enabled, tool)
 		}
 	}
 	if len(enabled) > 0 {
-		commands = append(commands, qatools.Script(enabled))
+		if p.Report == qatools.ReportNone {
+			commands = append(commands, qatools.Script(enabled))
+		} else {
+			commands = append(commands, qatools.ReportScript(enabled, QAReportDir()))
+		}
 	}
 
 	return commands
@@ -655,12 +789,11 @@ const (
 	testDBBaseDumpFile = testDBBaseCacheDir + "/dump.sql.gz"
 )
 
-// testCaches mounts the database dump for a stage that installs Oro. A unit-only stage never
-// touches a schema, so it mounts nothing and pays nothing. When a base scope is given, its dump
-// is mounted alongside so a scope with no dump of its own can start from it instead of from a
-// full install.
-func testCaches(stage config.StageConfig, suffix, baseSuffix string) []Cache {
-	if !stage.RunsFunctionalTests() {
+// testCaches mounts the database dump for a plan that installs Oro. A run that never touches a
+// schema mounts nothing and pays nothing. When a base scope is given, its dump is mounted
+// alongside so a scope with no dump of its own can start from it instead of from a full install.
+func testCaches(preparesDatabase bool, suffix, baseSuffix string) []Cache {
+	if !preparesDatabase {
 		return nil
 	}
 	caches := []Cache{{
@@ -775,13 +908,13 @@ func dsn(service, database, postgresVersion string) string {
 		testDBUser, testDBPassword, service, database, postgresVersion)
 }
 
-func testCommands(stage config.StageConfig, postgresVersion string) []string {
+func (p *Plan) testCommands(postgresVersion string) []string {
 	// The dev dependencies — PHPUnit reaches the container through symfony/phpunit-bridge, a
 	// require-dev package — come from the deps-dev layer. All that is left here is an autoloader
 	// that knows the project's own classes.
 	commands := []string{"composer dump-autoload --optimize --no-scripts"}
 
-	if stage.RunsFunctionalTests() {
+	if p.PreparesTestDatabase {
 		// Functional tests need a real schema. The install is cached as a dump and restored on
 		// every run, so the suites always start from the same database.
 		//
@@ -790,11 +923,63 @@ func testCommands(stage config.StageConfig, postgresVersion string) []string {
 		commands = append(commands, oroWritableDirsCommand(), testDatabaseCommand(postgresVersion))
 	}
 
-	for _, suite := range stage.Suites() {
-		commands = append(commands, "php bin/simple-phpunit --testsuite "+suite)
+	runs := p.phpunitRuns()
+	if p.Report == qatools.ReportNone {
+		return append(commands, runs...)
+	}
+	return append(commands, phpunitReportScript(runs, TestReportDir()))
+}
+
+// phpunitRuns renders one PHPUnit invocation per configured suite, or a single invocation of
+// everything phpunit.xml defines when no suite is named — which is what `orobox test` without
+// arguments means, on either engine.
+func (p *Plan) phpunitRuns() []string {
+	render := func(suite string) string {
+		command := "php bin/simple-phpunit"
+		if suite != "" {
+			command += " --testsuite " + suite
+		}
+		if p.Filter != "" {
+			command += " --filter " + p.Filter
+		}
+		if p.Report != qatools.ReportNone {
+			// One log per invocation: PHPUnit truncates the file it is given, so a shared path
+			// would leave only the last suite's results. The runner merges them.
+			name := "junit.xml"
+			if suite != "" {
+				name = "junit-" + suite + ".xml"
+			}
+			command += " --log-junit " + TestReportDir() + "/" + name
+		}
+		return command
 	}
 
-	return commands
+	if len(p.Suites) == 0 {
+		return []string{render("")}
+	}
+
+	runs := make([]string, 0, len(p.Suites))
+	for _, suite := range p.Suites {
+		runs = append(runs, render(suite))
+	}
+	return runs
+}
+
+// phpunitReportScript runs the PHPUnit invocations without letting a failure end the step, for the
+// same reason qatools.ReportScript does: a failed exec makes the Dagger container unreadable, and
+// a failing suite is exactly when the JUnit report is wanted. The outcome travels in the status
+// file and the caller turns it back into an exit code.
+func phpunitReportScript(runs []string, reportDir string) string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "mkdir -p %s\nstatus=0\n", reportDir)
+	for _, run := range runs {
+		fmt.Fprintf(&b, "%s || status=1\n", run)
+	}
+	fmt.Fprintf(&b, "printf '%%s' \"$status\" > %s/%s\n", reportDir, qatools.StatusFile)
+	b.WriteString("exit 0")
+
+	return b.String()
 }
 
 // testServices binds the databases and search services the test run needs. Only what the

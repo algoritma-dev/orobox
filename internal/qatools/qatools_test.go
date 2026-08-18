@@ -20,7 +20,7 @@ func toolByName(t *testing.T, tools []Tool, name string) Tool {
 }
 
 func TestToolsFixMode(t *testing.T) {
-	tools := Tools(config.OroRootDir, config.OroRootDir+"/src", ModeFix)
+	tools := Tools(ToolsOptions{SourceRoot: config.OroRootDir, AnalyzePath: config.OroRootDir + "/src", Mode: ModeFix})
 
 	for _, name := range []string{"rector", "php-cs-fixer", "twig-cs-fixer", "eslint", "stylelint", "stylelint-css"} {
 		args := strings.Join(toolByName(t, tools, name).Args, " ")
@@ -38,7 +38,7 @@ func TestToolsFixMode(t *testing.T) {
 }
 
 func TestToolsCheckMode(t *testing.T) {
-	tools := Tools(config.OroRootDir, config.OroRootDir+"/src", ModeCheck)
+	tools := Tools(ToolsOptions{SourceRoot: config.OroRootDir, AnalyzePath: config.OroRootDir + "/src", Mode: ModeCheck})
 
 	for _, tool := range tools {
 		args := strings.Join(tool.Args, " ")
@@ -60,7 +60,7 @@ func TestToolsCheckMode(t *testing.T) {
 }
 
 func TestToolsAreOrderedAndSelfContained(t *testing.T) {
-	tools := Tools("/src/root", "/src/root/src", ModeCheck)
+	tools := Tools(ToolsOptions{SourceRoot: "/src/root", AnalyzePath: "/src/root/src", Mode: ModeCheck})
 
 	want := []string{"phpstan", "rector", "php-cs-fixer", "twig-cs-fixer", "eslint", "stylelint", "stylelint-css"}
 	if len(tools) != len(want) {
@@ -97,7 +97,7 @@ func TestToolsAreOrderedAndSelfContained(t *testing.T) {
 }
 
 func TestPhpstanWarmsTheTestDebugCache(t *testing.T) {
-	setup := toolByName(t, Tools("/src/root", "/src/root/src", ModeCheck), "phpstan").Setup
+	setup := toolByName(t, Tools(ToolsOptions{SourceRoot: "/src/root", AnalyzePath: "/src/root/src", Mode: ModeCheck}), "phpstan").Setup
 
 	for _, want := range []string{
 		ContainerXMLPath(),
@@ -195,5 +195,191 @@ func TestComposerInstallCommand(t *testing.T) {
 	require := strings.Index(cmd, "composer bin qa require")
 	if install < 0 || require < 0 || install > require {
 		t.Errorf("install must be the then-branch, require the fallback: %s", cmd)
+	}
+}
+
+func TestToolsReportModeAddsTheGitLabFlag(t *testing.T) {
+	tools := Tools(ToolsOptions{
+		SourceRoot:  config.OroRootDir,
+		AnalyzePath: config.OroRootDir + "/src",
+		Mode:        ModeCheck,
+		Report:      ReportGitLab,
+		ReportDir:   "/reports/qa",
+	})
+
+	want := map[string]string{
+		"phpstan":       "--error-format=gitlab",
+		"rector":        "--output-format=gitlab",
+		"php-cs-fixer":  "--format=gitlab",
+		"twig-cs-fixer": "--report=gitlab",
+		// ESLint 8 resolves a bare --format=gitlab against its own installation and fails, so the
+		// formatter is addressed by absolute path.
+		"eslint":        "--format=" + config.QaToolsDir + "/node_modules/eslint-formatter-gitlab",
+		"stylelint":     "--custom-formatter=" + config.QaToolsDir + "/node_modules/stylelint-formatter-gitlab",
+		"stylelint-css": "--custom-formatter=" + config.QaToolsDir + "/node_modules/stylelint-formatter-gitlab",
+	}
+
+	for name, flag := range want {
+		args := strings.Join(toolByName(t, tools, name).Args, " ")
+		if !strings.Contains(args, flag) {
+			t.Errorf("%s in report mode is missing %s: %s", name, flag, args)
+		}
+	}
+}
+
+func TestToolsReportModeUsesAnEnvVarForTheJSTools(t *testing.T) {
+	tools := Tools(ToolsOptions{
+		SourceRoot:  config.OroRootDir,
+		AnalyzePath: config.OroRootDir + "/src",
+		Mode:        ModeCheck,
+		Report:      ReportGitLab,
+		ReportDir:   "/reports/qa",
+	})
+
+	want := map[string]string{
+		"eslint":        "ESLINT_CODE_QUALITY_REPORT",
+		"stylelint":     "STYLELINT_CODE_QUALITY_REPORT",
+		"stylelint-css": "STYLELINT_CODE_QUALITY_REPORT",
+	}
+	for name, variable := range want {
+		if got := toolByName(t, tools, name).ReportEnv; got != variable {
+			t.Errorf("%s ReportEnv = %q, want %q: the formatter writes the file itself", name, got, variable)
+		}
+	}
+
+	for _, name := range []string{"phpstan", "rector", "php-cs-fixer", "twig-cs-fixer"} {
+		if got := toolByName(t, tools, name).ReportEnv; got != "" {
+			t.Errorf("%s ReportEnv = %q, want empty: it writes to stdout", name, got)
+		}
+	}
+}
+
+func TestToolsReportModeAssignsOneFilePerTool(t *testing.T) {
+	tools := Tools(ToolsOptions{
+		SourceRoot:  config.OroRootDir,
+		AnalyzePath: config.OroRootDir + "/src",
+		Mode:        ModeCheck,
+		Report:      ReportGitLab,
+		ReportDir:   "/reports/qa",
+	})
+
+	seen := map[string]bool{}
+	for _, tool := range tools {
+		if tool.ReportFile == "" {
+			t.Errorf("%s has no ReportFile in report mode", tool.Name)
+			continue
+		}
+		if !strings.HasPrefix(tool.ReportFile, "/reports/qa/") {
+			t.Errorf("%s writes outside the report directory: %s", tool.Name, tool.ReportFile)
+		}
+		if seen[tool.ReportFile] {
+			t.Errorf("%s reuses the report file %s; one tool would overwrite the other", tool.Name, tool.ReportFile)
+		}
+		seen[tool.ReportFile] = true
+	}
+}
+
+func TestToolsWithoutReportAreUnchanged(t *testing.T) {
+	tools := Tools(ToolsOptions{
+		SourceRoot:  config.OroRootDir,
+		AnalyzePath: config.OroRootDir + "/src",
+		Mode:        ModeFix,
+	})
+
+	for _, tool := range tools {
+		args := strings.Join(tool.Args, " ")
+		if strings.Contains(args, "gitlab") {
+			t.Errorf("%s asks for a report without one being requested: %s", tool.Name, args)
+		}
+		if tool.ReportFile != "" {
+			t.Errorf("%s has ReportFile %q without a report being requested", tool.Name, tool.ReportFile)
+		}
+	}
+}
+
+func TestInstallPlanAlwaysCarriesTheGitLabFormatters(t *testing.T) {
+	viper.Set("test.qa.eslint", true)
+	viper.Set("test.qa.stylelint", true)
+	defer func() {
+		viper.Set("test.qa.eslint", nil)
+		viper.Set("test.qa.stylelint", nil)
+	}()
+
+	plan := NewInstallPlan("6.1")
+	packages := strings.Join(plan.JSPackages, " ")
+
+	for _, pkg := range []string{"eslint-formatter-gitlab@^5.1.0", "stylelint-formatter-gitlab"} {
+		if !strings.Contains(packages, pkg) {
+			t.Errorf("%s is missing from the JS packages: %s", pkg, packages)
+		}
+	}
+}
+
+func TestReportScriptRunsEveryToolAndRecordsTheStatus(t *testing.T) {
+	tools := []Tool{
+		{Name: "phpstan", Args: []string{"phpstan", "analyze"}, Setup: "warmup", ReportFile: "/reports/qa/phpstan.json"},
+		{Name: "rector", Args: []string{"rector", "process"}, WorkDir: "/var/www/oro", ReportFile: "/reports/qa/rector.json"},
+	}
+
+	script := ReportScript(tools, "/reports/qa")
+
+	// No line may invoke two tools: chaining them is what lets one tool's findings silence the
+	// next one's. The && inside rector's `cd` subshell is not a chain and must not trip this.
+	for _, line := range strings.Split(script, "\n") {
+		if strings.Contains(line, "phpstan analyze") && strings.Contains(line, "rector process") {
+			t.Errorf("two tools share one line, so the first failure hides the second:\n%s", line)
+		}
+	}
+	for _, want := range []string{
+		"mkdir -p /reports/qa",
+		"> /reports/qa/phpstan.json",
+		"> /reports/qa/rector.json",
+		"(cd /var/www/oro && rector process)",
+		"status=1",
+		"/reports/qa/" + StatusFile,
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("script is missing %q:\n%s", want, script)
+		}
+	}
+	if strings.Contains(script, "warmup > /reports/qa/phpstan.json") {
+		t.Error("the setup line must not be redirected into the report file: its output is not JSON")
+	}
+}
+
+func TestReportScriptPassesTheReportFileAsAnEnvVarWhenTheToolWritesItItself(t *testing.T) {
+	script := ReportScript([]Tool{
+		{Name: "eslint", Args: []string{"npx", "eslint", "src"}, ReportFile: "/reports/qa/eslint.json", ReportEnv: "ESLINT_CODE_QUALITY_REPORT"},
+	}, "/reports/qa")
+
+	if !strings.Contains(script, "ESLINT_CODE_QUALITY_REPORT=/reports/qa/eslint.json npx eslint src") {
+		t.Errorf("the formatter's output file must be passed in the environment:\n%s", script)
+	}
+	if strings.Contains(script, "> /reports/qa/eslint.json") {
+		t.Errorf("stdout must not be redirected for a tool that writes the report itself; that would capture its human output:\n%s", script)
+	}
+}
+
+func TestReportScriptNeverFails(t *testing.T) {
+	script := ReportScript([]Tool{
+		{Name: "phpstan", Args: []string{"phpstan", "analyze"}, ReportFile: "/reports/qa/phpstan.json"},
+	}, "/reports/qa")
+
+	if !strings.HasSuffix(strings.TrimSpace(script), "exit 0") {
+		t.Errorf("the script must end on exit 0 so the container stays readable when tools find violations:\n%s", script)
+	}
+}
+
+func TestScriptIsUnchangedWithoutAReport(t *testing.T) {
+	script := Script([]Tool{
+		{Name: "phpstan", Args: []string{"phpstan", "analyze"}},
+		{Name: "rector", Args: []string{"rector", "process"}},
+	})
+
+	if !strings.Contains(script, "&&") {
+		t.Errorf("Script must keep chaining with && so a failure still stops the run:\n%s", script)
+	}
+	if strings.Contains(script, "status=") {
+		t.Errorf("Script must not grow the report mode's status handling:\n%s", script)
 	}
 }

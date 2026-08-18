@@ -6,7 +6,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/pipeline"
@@ -98,6 +100,21 @@ func runDeployCommand(stageName string) {
 	plan.SkipQA = deploySkipQA
 	plan.SkipTest = deploySkipTest
 	plan.SkipRelease = deploySkipRelease
+
+	source, forcedRef, err := deploySource(projectDir)
+	if err != nil {
+		utils.PrintError(err.Error())
+		os.Exit(1)
+	}
+	plan.Source = source
+	if forcedRef != "" {
+		// Both the build and the remote checkout now name the same commit, which is the whole point
+		// of building from the job's own tree.
+		plan.Ref = forcedRef
+		plan.Release.Env["OROBOX_DEPLOY_REF"] = forcedRef
+		utils.PrintInfo("Building the job's checkout; the release will check out " + forcedRef + ".")
+	}
+
 	printDeploySummary(plan)
 
 	// The prompt exists because a release is irreversible. With --skip-release nothing reaches the
@@ -112,8 +129,8 @@ func runDeployCommand(stageName string) {
 
 	utils.PrintInfo("Running the deploy pipeline. The first run has no caches and takes a while.")
 
-	artifacts, runErr := pipeline.Run(context.Background(), plan, opts)
-	for _, artifact := range artifacts {
+	result, runErr := pipeline.Run(context.Background(), plan, opts)
+	for _, artifact := range result.Artifacts {
 		utils.PrintInfo("Artifact: " + artifact)
 	}
 	if runErr != nil {
@@ -133,6 +150,52 @@ func runDeployCommand(stageName string) {
 	}
 
 	utils.PrintSuccess(fmt.Sprintf("Deployed %s to %s (%s).", plan.Ref, stage.Name, stage.Host))
+}
+
+// deploySource decides where a deploy takes its sources from, and which ref the release must check
+// out on the remote host.
+//
+// A CI job already holds the checkout, so cloning it again would only add a credential requirement
+// for a tree that is already on disk. Locally the opposite is true: the developer's working tree
+// carries uncommitted work, and the remote checks out a committed ref — building from the clone is
+// what keeps the artifacts and the deployed code the same revision.
+//
+// That is also why building from a host directory forces the ref. The release step hands
+// OROBOX_DEPLOY_REF to Deployer, which runs git archive for it on the remote: building the job's
+// tree while releasing the stage's configured branch would deploy code that was never checked, and
+// nothing in the output would say so. An explicit --ref is left alone — the user has said which
+// revision they mean.
+func deploySource(projectDir string) (pipeline.SourceSpec, string, error) {
+	if os.Getenv("CI") == "" {
+		return pipeline.SourceSpec{Kind: pipeline.SourceGit}, "", nil
+	}
+
+	spec := pipeline.SourceSpec{Kind: pipeline.SourceHost, Dir: projectDir}
+	if deployRef != "" {
+		return spec, "", nil
+	}
+
+	if sha := os.Getenv("CI_COMMIT_SHA"); sha != "" {
+		return spec, sha, nil
+	}
+
+	head, err := currentGitHead(projectDir)
+	if err != nil {
+		return spec, "", fmt.Errorf("building from %s but the commit it holds could not be resolved (%w): pass --ref explicitly so the release checks out the revision that was built", projectDir, err)
+	}
+	return spec, head, nil
+}
+
+// currentGitHead resolves the commit a working tree is on, for the ref the release must use.
+func currentGitHead(projectDir string) (string, error) {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = projectDir
+
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
 }
 
 // loadDeployConfig reads the configuration and rejects install types that cannot be deployed.
