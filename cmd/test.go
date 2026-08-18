@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
@@ -20,8 +21,10 @@ import (
 )
 
 var (
-	filter    string
-	testsuite string
+	filter string
+	// testsuites is repeatable: a CI job that gates on unit and functional but not on a browser
+	// suite has to name both, and one run of the two beats two runs that each restore the database.
+	testsuites []string
 
 	testEngine         string
 	testReport         string
@@ -43,7 +46,7 @@ var testCmd = &cobra.Command{
 
 func init() {
 	testCmd.Flags().StringVarP(&filter, "filter", "f", "", "Filter tests by name")
-	testCmd.Flags().StringVarP(&testsuite, "testsuite", "t", "", "Run specific test suite")
+	testCmd.Flags().StringArrayVarP(&testsuites, "testsuite", "t", nil, "Run a specific test suite; repeat the flag for several")
 
 	testCmd.Flags().StringVar(&testEngine, "engine", "", "Where the tests run: compose or dagger (default: dagger in CI, compose otherwise)")
 	testCmd.Flags().StringVar(&testReport, "report", "", "Emit a machine-readable report: gitlab")
@@ -121,8 +124,10 @@ func runTestOnCompose(format qatools.Report) {
 	if filter != "" {
 		args = append(args, "--filter", filter)
 	}
-	if testsuite != "" {
-		args = append(args, "--testsuite", testsuite)
+	if len(testsuites) > 0 {
+		// PHPUnit takes the suites as one comma-separated value. The Dagger engine runs one
+		// invocation per suite instead, because each one writes its own JUnit log.
+		args = append(args, "--testsuite", strings.Join(testsuites, ","))
 	}
 
 	if format != qatools.ReportNone {
@@ -162,18 +167,13 @@ func runTestOnDagger(format qatools.Report) {
 		os.Exit(1)
 	}
 
-	var suites []string
-	if testsuite != "" {
-		suites = []string{testsuite}
-	}
-
 	projectDir := config.GetHostBundlePath()
 	plan := pipeline.NewChecks(&conf, pipeline.ChecksOptions{
 		ProjectDir:     projectDir,
 		CacheScope:     resolveCacheScope(testCacheScope),
 		BaseCacheScope: testBaseCacheScope,
 		RunTest:        true,
-		Suites:         suites,
+		Suites:         testsuites,
 		Filter:         filter,
 		Report:         format,
 	})

@@ -264,10 +264,10 @@ func (r *runner) resolveSource(ctx context.Context) error {
 		}
 	}
 
-	if r.plan.SourceDir != "" {
+	if subdir := r.plan.sourceSubdir(); subdir != "" {
 		// Monorepo: only the application subdirectory becomes the container's /var/www/oro, so
 		// every step sees a normal Oro checkout and the sibling projects never reach a release.
-		r.source = r.source.Directory(r.plan.SourceDir)
+		r.source = r.source.Directory(subdir)
 	}
 	if _, err := r.source.Sync(ctx); err != nil {
 		if r.plan.Source.Kind == SourceHost {

@@ -145,6 +145,19 @@ type Plan struct {
 	Release Step
 }
 
+// sourceSubdir is the directory to descend into after the sources are resolved, so the container's
+// application root holds a plain Oro checkout.
+//
+// It is SourceDir for a clone, which starts at the repository root, and empty for a host directory,
+// which is already the application root: .orobox.yaml lives beside the application, so the path the
+// commands upload is the subdirectory itself. Applying it twice would look for b2b/b2b.
+func (p *Plan) sourceSubdir() string {
+	if p.Source.Kind == SourceHost {
+		return ""
+	}
+	return p.SourceDir
+}
+
 // BuildsAssets reports whether the pipeline builds and ships the webpack assets.
 func (p *Plan) BuildsAssets() bool {
 	return p.Assets != nil

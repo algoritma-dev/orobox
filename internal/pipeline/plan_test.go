@@ -1020,3 +1020,34 @@ func TestNewChecksWithoutADeploySection(t *testing.T) {
 		t.Error("with no configuration saying otherwise, assets are built in the pipeline")
 	}
 }
+
+func TestSourceSubdirIsOnlyAppliedToAClone(t *testing.T) {
+	conf := testConf("6.1", false)
+	conf.Deploy.SourceDir = "b2b"
+
+	cloned := New(conf, testStage(), "repo")
+	if cloned.sourceSubdir() != "b2b" {
+		t.Errorf("a clone starts at the repository root, so the application subdirectory must be selected: %q", cloned.sourceSubdir())
+	}
+
+	checks := NewChecks(conf, ChecksOptions{ProjectDir: "/repo/b2b", RunQA: true})
+	if got := checks.sourceSubdir(); got != "" {
+		t.Errorf("a host directory is already the application root, so selecting %q inside it would look for b2b/b2b", got)
+	}
+}
+
+func TestChecksPlanRunsOneInvocationPerSuite(t *testing.T) {
+	p := NewChecks(testConf("6.1", false), ChecksOptions{
+		ProjectDir: "/p", RunTest: true, Suites: []string{"unit", "functional"}, Report: qatools.ReportGitLab,
+	})
+
+	commands := joined(p.Test.Commands)
+	for _, want := range []string{
+		"--testsuite unit --log-junit " + TestReportDir() + "/junit-unit.xml",
+		"--testsuite functional --log-junit " + TestReportDir() + "/junit-functional.xml",
+	} {
+		if !strings.Contains(commands, want) {
+			t.Errorf("missing %q:\n%s", want, commands)
+		}
+	}
+}

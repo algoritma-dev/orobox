@@ -249,7 +249,7 @@ orobox test
 ```
 Options:
 - `-f, --filter`: Filter tests by name.
-- `-t, --testsuite`: Run a specific test suite.
+- `-t, --testsuite`: Run a specific test suite; repeat the flag for several.
 - `--engine=compose|dagger`: Where the tests run. See [Running the checks in CI](#running-the-checks-in-ci).
 - `--report=gitlab`: Write a GitLab JUnit report.
 - `--report-path`: Where to write it (default `var/orobox/reports/junit.xml`).
