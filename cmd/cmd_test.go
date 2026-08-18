@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -23,6 +24,20 @@ func init() {
 		"templates/docker/docker-compose.setup.yml": &fstest.MapFile{Data: []byte("version: '3'")},
 		"templates/docker/docker-compose.test.yml":  &fstest.MapFile{Data: []byte("version: '3'")},
 	}
+}
+
+// TestMain clears CI for the whole package.
+//
+// `orobox qa` and `orobox test` pick their engine from the environment: with CI set they run the
+// Dagger pipeline instead of the compose stack. Every test here mocks the compose layer, so on a CI
+// runner — where CI is always set — they would otherwise start a real pipeline against the cmd
+// package directory and fail on a composer.json that is not there. Tests that care about the
+// engine set CI themselves with t.Setenv.
+func TestMain(m *testing.M) {
+	if err := os.Unsetenv("CI"); err != nil {
+		panic(err)
+	}
+	os.Exit(m.Run())
 }
 
 func TestUpCommand(t *testing.T) {

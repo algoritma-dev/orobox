@@ -313,6 +313,16 @@ func (r *runner) resolveGitSource(ctx context.Context) error {
 	return nil
 }
 
+// sourceDescription names where the sources came from, for an error message. A host directory has
+// neither a repository nor a ref, and naming an empty repository "at HEAD" sends the reader looking
+// for a clone that never happened.
+func (r *runner) sourceDescription() string {
+	if r.plan.Source.Kind == SourceHost {
+		return r.plan.Source.Dir
+	}
+	return fmt.Sprintf("%s at %s", r.plan.Repository, r.plan.Ref)
+}
+
 // exportReports copies a step's report directory out of its container. The files stay raw and
 // per-tool: merging them is the command layer's job, which is where the requested output path is
 // known.
@@ -384,7 +394,7 @@ func (r *runner) knownHosts() string {
 func (r *runner) lockSource(ctx context.Context) (*dagger.Directory, error) {
 	manifest, err := r.source.File("composer.json").Contents(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("could not read composer.json from %s at %s: %w", r.plan.Repository, r.plan.Ref, err)
+		return nil, fmt.Errorf("could not read composer.json from %s: %w", r.sourceDescription(), err)
 	}
 
 	entries, err := r.source.Entries(ctx)
@@ -396,8 +406,8 @@ func (r *runner) lockSource(ctx context.Context) (*dagger.Directory, error) {
 		present[strings.TrimSuffix(entry, "/")] = true
 	}
 	if !present["composer.lock"] {
-		return nil, fmt.Errorf("composer.lock is missing from %s at %s: the pipeline installs dependencies from the lock file and will not resolve them itself",
-			r.plan.Repository, r.plan.Ref)
+		return nil, fmt.Errorf("composer.lock is missing from %s: the pipeline installs dependencies from the lock file and will not resolve them itself",
+			r.sourceDescription())
 	}
 
 	dir := r.client.Directory()
