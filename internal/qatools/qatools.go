@@ -381,28 +381,44 @@ func NewInstallPlan(oroVersion string) InstallPlan {
 // ComposerInstallCommand returns the shell line that populates the QA tools directory.
 //
 // A project that commits vendor-bin/qa/composer.json (and its lock) has pinned the tool
-// versions on purpose, so re-requiring the packages there would silently undo the pin:
-// `require pkg:*` rewrites the constraint to the newest release. That directory is
-// installed as-is instead, which is also what reproduces the developer's versions in the
-// pipeline. Only a directory Orobox itself has just scaffolded — no require section — gets
-// the packages required into it.
+// versions on purpose, so re-requiring a package already declared there would silently undo
+// the pin: `require pkg:*` rewrites the constraint to the newest release. Declared packages
+// are therefore installed as-is, which is also what reproduces the developer's versions in
+// the pipeline.
+//
+// Only the packages the manifest does not declare yet are required into it. Branching on
+// "the manifest has any requirement at all" instead would strand every tool enabled after
+// the first initialization: the manifest scaffolded for PHPStan already has a require-dev
+// section, so a later `twig_cs_fixer: true` would take the install branch, install nothing
+// new, and leave `orobox qa` warning that the binary is missing on every run.
 //
 // The check is `php -r` rather than a grep because the QA composer.json is committed and can
 // legitimately carry a `config` or `extra` section without any requirement.
 func ComposerInstallCommand(packages []string) string {
 	manifest := config.QaToolsDir + "/composer.json"
-	hasRequirements := fmt.Sprintf(
-		`php -r '$m = json_decode(@file_get_contents(%q), true) ?: []; exit(($m["require"] ?? []) || ($m["require-dev"] ?? []) ? 0 : 1);'`,
-		manifest)
+
+	// Package names are compared lowercased, the way composer normalizes them, and stripped of
+	// their ":constraint" suffix so a manifest pinning "^3.0" still counts as declaring it.
+	missing := fmt.Sprintf(
+		`php -r '$m = json_decode(@file_get_contents(%q), true) ?: []; `+
+			`$have = array_change_key_case(($m["require"] ?? []) + ($m["require-dev"] ?? [])); `+
+			`$out = []; foreach (array_filter(explode(" ", %q)) as $p) { `+
+			`if (!isset($have[strtolower(explode(":", $p)[0])])) { $out[] = $p; } } `+
+			`echo implode(" ", $out);'`,
+		manifest, strings.Join(packages, " "))
 
 	// `yes` is wrapped in `|| true` because the steps run under `bash -o pipefail`: as soon as
 	// composer stops reading, `yes` dies of SIGPIPE with 141 and the whole command would be
 	// reported as failed even though the install succeeded. -W lets the Symfony pins downgrade
 	// transitively-locked packages on re-runs.
-	require := "(yes y || true) | composer bin qa require --dev -W --no-interaction " + strings.Join(packages, " ")
-
-	return fmt.Sprintf("if %s; then composer bin qa install --no-interaction --no-progress; else %s; fi",
-		hasRequirements, require)
+	//
+	// $MISSING is deliberately unquoted: it is a space-separated package list composer must see
+	// as separate arguments. `require` installs the manifest's other packages along the way, so
+	// the install branch is only for the case where nothing is missing.
+	return fmt.Sprintf(
+		`MISSING="$(%s)"; if [ -n "$MISSING" ]; then (yes y || true) | composer bin qa require --dev -W --no-interaction $MISSING; `+
+			`else composer bin qa install --no-interaction --no-progress; fi`,
+		missing)
 }
 
 // oroKernelClass is the OroCommerce application kernel. The Symfony container is dumped to

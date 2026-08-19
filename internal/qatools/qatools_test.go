@@ -1,6 +1,9 @@
 package qatools
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -204,18 +207,51 @@ func TestComposerInstallCommand(t *testing.T) {
 	for _, want := range []string{
 		config.QaToolsDir + "/composer.json",
 		"composer bin qa install --no-interaction --no-progress",
-		"composer bin qa require --dev -W --no-interaction algoritma/php-coding-standards:* symfony/console:^6.4",
+		"composer bin qa require --dev -W --no-interaction $MISSING",
+		`explode(" ", "algoritma/php-coding-standards:* symfony/console:^6.4")`,
 	} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("command missing %q: %s", want, cmd)
 		}
 	}
 
-	// A committed manifest must win, otherwise `require pkg:*` rewrites the pinned versions.
-	install := strings.Index(cmd, "composer bin qa install")
+	// Requiring is what the undeclared packages branch does, so it must be the then-branch:
+	// installing a manifest that does not declare them yet leaves their binaries missing.
 	require := strings.Index(cmd, "composer bin qa require")
-	if install < 0 || require < 0 || install > require {
-		t.Errorf("install must be the then-branch, require the fallback: %s", cmd)
+	install := strings.Index(cmd, "composer bin qa install")
+	if install < 0 || require < 0 || require > install {
+		t.Errorf("require must be the then-branch, install the fallback: %s", cmd)
+	}
+}
+
+// TestComposerInstallCommandDetectsUndeclaredPackages runs the generated detection snippet
+// through php against a manifest that declares only some of the packages: a tool enabled after
+// the QA directory was first scaffolded must still be required into it, while the packages the
+// manifest pins are left alone.
+func TestComposerInstallCommandDetectsUndeclaredPackages(t *testing.T) {
+	php, err := exec.LookPath("php")
+	if err != nil {
+		t.Skip("php not available")
+	}
+
+	dir := t.TempDir()
+	manifest := filepath.Join(dir, "composer.json")
+	if err := os.WriteFile(manifest, []byte(`{"name":"orobox/qa-tools","require-dev":{"algoritma/php-coding-standards":"^3.0","symfony/console":"^6.4"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := ComposerInstallCommand([]string{"algoritma/php-coding-standards:*", "symfony/console:^6.4", "vincentlanglet/twig-cs-fixer:*"})
+	cmd = strings.Replace(cmd, config.QaToolsDir+"/composer.json", manifest, 1)
+	// Only the detection snippet is executed: composer is not available here, and the shell
+	// branch it feeds is covered above.
+	snippet := cmd[strings.Index(cmd, "php -r "):strings.Index(cmd, `)"; if`)]
+
+	out, err := exec.Command("sh", "-c", snippet).Output()
+	if err != nil {
+		t.Fatalf("running detection snippet with %s: %v", php, err)
+	}
+	if got := strings.TrimSpace(string(out)); got != "vincentlanglet/twig-cs-fixer:*" {
+		t.Errorf("missing packages = %q, want only the undeclared twig-cs-fixer", got)
 	}
 }
 
