@@ -89,6 +89,7 @@ RUN apk add --no-cache \
     git \
     openssh-client \
     unzip \
+    patch \
     libstdc++ \
     libgcc \
     ca-certificates \
