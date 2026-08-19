@@ -30,6 +30,14 @@ else
     fi
 fi
 
+# Symfony's runtime takes --env verbatim, so an empty ORO_ENV would abort every console
+# command with "the environment cannot be empty". When it is unset, omit the option and
+# let the application's .env files decide.
+ORO_ENV_OPT=()
+if [ -n "$ORO_ENV" ]; then
+    ORO_ENV_OPT=( "--env=$ORO_ENV" )
+fi
+
 # Case statements for commands
 case "$1" in
     nginx)
@@ -39,14 +47,14 @@ case "$1" in
         exec php-fpm
         ;;
     websocket)
-        exec php bin/console gos:websocket:server --env=$ORO_ENV
+        exec php bin/console gos:websocket:server "${ORO_ENV_OPT[@]}"
         ;;
     consumer)
-        exec php bin/console oro:message-queue:consume --env=$ORO_ENV
+        exec php bin/console oro:message-queue:consume "${ORO_ENV_OPT[@]}"
         ;;
     cron)
         while true; do
-            php bin/console oro:cron --env=$ORO_ENV
+            php bin/console oro:cron "${ORO_ENV_OPT[@]}"
             sleep 60
         done
         ;;

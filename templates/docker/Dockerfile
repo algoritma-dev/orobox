@@ -38,12 +38,12 @@ ADD https://github.com/mlocati/docker-php-extension-installer/releases/latest/do
 RUN chmod +x /usr/local/bin/install-php-extensions && install-php-extensions imap opcache \
     && docker-php-source extract \
     && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
-    && docker-php-ext-install -j$(nproc) gd pdo_pgsql intl zip bcmath soap xml pcntl tidy \
+    && docker-php-ext-install -j$(nproc) gd pdo_pgsql intl zip bcmath soap xml pcntl tidy sysvsem \
     && docker-php-source delete
 {{- else -}}
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
     && docker-php-ext-configure imap --with-kerberos --with-imap-ssl \
-    && docker-php-ext-install -j$(nproc) gd pdo_pgsql intl zip opcache bcmath soap xml pcntl tidy imap
+    && docker-php-ext-install -j$(nproc) gd pdo_pgsql intl zip opcache bcmath soap xml pcntl tidy sysvsem imap
 {{- end }}
 
 # Install Xdebug and PCOV

@@ -6,6 +6,15 @@ x-templates:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  # Websocket wiring belongs to Orobox, not to the project's own dotenv: the server runs as
+  # the "ws" service on the compose network, and the browser reaches it through the nginx
+  # port published on the host. Injected as environment (not env_file) so it also overrides
+  # the addresses a project checkout carries in its own dotenv files.
+  websocket-env: &websocket-env
+    ORO_WEBSOCKET_SERVER_DSN: "//0.0.0.0:{{.WebsocketBackendPort}}"
+    ORO_WEBSOCKET_BACKEND_DSN: "tcp://{{.WebsocketBackendHost}}:{{.WebsocketBackendPort}}"
+    ORO_WEBSOCKET_FRONTEND_DSN: "//*:{{.WebsocketFrontendPort}}/ws"
+
   volumes-oro: &volumes-oro
     {{if .BindWholeRepo -}}
     - "{{.BundlePath}}:{{.OroRootDir}}:cached"
@@ -146,6 +155,8 @@ services:
     command: php-fpm
     restart: unless-stopped
     user: ${ORO_USER_RUNTIME:-www-data}
+    environment:
+      <<: *websocket-env
     healthcheck:
       test: ["CMD", "php-fpm", "-t"]
       interval: 5s
@@ -180,6 +191,20 @@ services:
     restart: unless-stopped
     user: ${ORO_USER_RUNTIME:-www-data}
     init: true
+    # The websocket server is a long-running console command: without .env it gets an
+    # empty ORO_ENV and dies on "the environment cannot be empty" in a restart loop.
+    env_file:
+      - .env
+    environment:
+      <<: *websocket-env
+      ORO_XDEBUG_ENABLED: ${ORO_WS_XDEBUG_ENABLED:-false}
+    expose:
+      - "{{.WebsocketBackendPort}}"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 {{.WebsocketBackendPort}}"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
     depends_on:
       "php-fpm-app":
         condition: service_healthy
@@ -194,6 +219,7 @@ services:
     env_file:
       - .env
     environment:
+      <<: *websocket-env
       ORO_XDEBUG_ENABLED: ${ORO_CONSUMER_XDEBUG_ENABLED:-false}
     depends_on:
       "php-fpm-app":
@@ -212,6 +238,7 @@ services:
     env_file:
       - .env
     environment:
+      <<: *websocket-env
       ORO_XDEBUG_ENABLED: ${ORO_CRON_XDEBUG_ENABLED:-false}
     volumes: *volumes-oro
     depends_on:

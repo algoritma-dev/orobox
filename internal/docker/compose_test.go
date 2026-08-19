@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -170,6 +171,9 @@ func bundleComposeData() map[string]any {
 		"Adminer":                 false,
 		"Kibana":                  false,
 		"Domains":                 []config.DomainConfig{{Host: "oro.demo"}},
+		"WebsocketBackendHost":    "ws",
+		"WebsocketBackendPort":    "8080",
+		"WebsocketFrontendPort":   "8080",
 	}
 }
 
@@ -248,6 +252,56 @@ func TestComposeRuntimeGolden(t *testing.T) {
 		mustContain(t, out, ".env-app.test")
 	})
 
+	// The websocket server is a console command: without .env its ORO_ENV is empty and
+	// Symfony aborts with "the environment cannot be empty" on every restart.
+	t.Run("ws service gets the env file and a healthcheck", func(t *testing.T) {
+		data := bundleComposeData()
+		data["WebsocketFrontendPort"] = "8443"
+		out := renderRealTemplate(t, path, data)
+
+		var compose struct {
+			Services map[string]struct {
+				EnvFile     []string          `yaml:"env_file"`
+				Environment map[string]string `yaml:"environment"`
+				Healthcheck struct {
+					// Compose accepts both a shell string and a command list here.
+					Test any `yaml:"test"`
+				} `yaml:"healthcheck"`
+			} `yaml:"services"`
+		}
+		if err := yamlv3.Unmarshal([]byte(out), &compose); err != nil {
+			t.Fatalf("runtime compose is not valid YAML: %v", err)
+		}
+
+		ws, ok := compose.Services["ws"]
+		if !ok {
+			t.Fatalf("ws service missing from runtime compose")
+		}
+		if len(ws.EnvFile) != 1 || ws.EnvFile[0] != ".env" {
+			t.Errorf("ws env_file = %v, want [.env]", ws.EnvFile)
+		}
+		if probe := fmt.Sprint(ws.Healthcheck.Test); !strings.Contains(probe, "8080") {
+			t.Errorf("ws healthcheck = %q, want a probe on port 8080", probe)
+		}
+
+		// A project checkout keeps its own .env-app.local, which points the websocket
+		// somewhere else: every service talking to the server needs Orobox's addresses.
+		// Not the application service: it runs the CLI and the test suite, which keep the
+		// project's own (empty in test) websocket configuration.
+		for _, name := range []string{"php-fpm-app", "ws", "consumer", "cron"} {
+			env := compose.Services[name].Environment
+			if got := env["ORO_WEBSOCKET_BACKEND_DSN"]; got != "tcp://ws:8080" {
+				t.Errorf("%s ORO_WEBSOCKET_BACKEND_DSN = %q, want tcp://ws:8080", name, got)
+			}
+			if got := env["ORO_WEBSOCKET_FRONTEND_DSN"]; got != "//*:8443/ws" {
+				t.Errorf("%s ORO_WEBSOCKET_FRONTEND_DSN = %q, want //*:8443/ws", name, got)
+			}
+			if got := env["ORO_WEBSOCKET_SERVER_DSN"]; got != "//0.0.0.0:8080" {
+				t.Errorf("%s ORO_WEBSOCKET_SERVER_DSN = %q, want //0.0.0.0:8080", name, got)
+			}
+		}
+	})
+
 	t.Run("project", func(t *testing.T) {
 		out := renderRealTemplate(t, path, projectComposeData())
 		assertValidYAML(t, "runtime/project", out)
@@ -282,6 +336,82 @@ func TestEnvTemplateOroEnvPerType(t *testing.T) {
 
 	out = renderRealTemplate(t, path, demoComposeData())
 	mustContain(t, out, "ORO_ENV=prod")
+}
+
+func TestReloadWebServer(t *testing.T) {
+	oldRun := RunComposeCommandSilently
+	defer func() { RunComposeCommandSilently = oldRun }()
+
+	var captured []string
+	RunComposeCommandSilently = func(_ string, args ...string) error {
+		captured = args
+		return nil
+	}
+
+	if err := ReloadWebServer(); err != nil {
+		t.Fatalf("ReloadWebServer: %v", err)
+	}
+
+	want := []string{"exec", "-T", "web", "nginx", "-s", "reload"}
+	if strings.Join(captured, " ") != strings.Join(want, " ") {
+		t.Errorf("got %v, want %v", captured, want)
+	}
+}
+
+func TestNginxProxiesWebsocket(t *testing.T) {
+	const path = "../../templates/docker/nginx.conf"
+
+	t.Run("configured domains", func(t *testing.T) {
+		data := bundleComposeData()
+		data["Domains"] = []config.DomainConfig{{Host: "oro.demo", Root: "public", Ssl: true}}
+		data["HasSsl"] = true
+
+		out := renderRealTemplate(t, path, data)
+
+		// One /ws location per server block: plain HTTP and TLS.
+		if got := strings.Count(out, "location ^~ /ws {"); got != 2 {
+			t.Errorf("got %d /ws locations, want 2 (http + https)\n---\n%s", got, out)
+		}
+		mustContain(t, out, "proxy_pass http://$oro_ws_backend;")
+		mustContain(t, out, "set $oro_ws_backend ws:8080;")
+		mustContain(t, out, "proxy_set_header Upgrade $http_upgrade;")
+		mustContain(t, out, `proxy_set_header Connection "Upgrade";`)
+	})
+
+	t.Run("no domains configured", func(t *testing.T) {
+		data := bundleComposeData()
+		data["Domains"] = []config.DomainConfig{}
+
+		out := renderRealTemplate(t, path, data)
+
+		mustContain(t, out, "location ^~ /ws {")
+		mustContain(t, out, "set $oro_ws_backend ws:8080;")
+	})
+}
+
+func TestEnvTemplateWebsocketDsns(t *testing.T) {
+	const path = "../../templates/docker/.env"
+
+	data := bundleComposeData()
+	data["WebsocketFrontendPort"] = "8443"
+
+	out := renderRealTemplate(t, path, data)
+
+	mustContain(t, out, "ORO_WEBSOCKET_BACKEND_HOST=ws")
+	mustContain(t, out, "ORO_WEBSOCKET_BACKEND_PORT=8080")
+	mustContain(t, out, "ORO_WEBSOCKET_FRONTEND_PORT=8443")
+	mustContain(t, out, `ORO_WEBSOCKET_FRONTEND_DSN="//*:${ORO_WEBSOCKET_FRONTEND_PORT}/${ORO_WEBSOCKET_FRONTEND_PATH}"`)
+	mustContain(t, out, `ORO_WEBSOCKET_BACKEND_DSN="tcp://${ORO_WEBSOCKET_BACKEND_HOST}:${ORO_WEBSOCKET_BACKEND_PORT}"`)
+}
+
+func TestWebsocketFrontendPort(t *testing.T) {
+	if got := websocketFrontendPort(false, "8080", "8443"); got != "8080" {
+		t.Errorf("without ssl got %q, want 8080", got)
+	}
+	// The browser gets a single port, and a TLS page cannot open a plain ws:// socket.
+	if got := websocketFrontendPort(true, "8080", "8443"); got != "8443" {
+		t.Errorf("with ssl got %q, want 8443", got)
+	}
 }
 
 func mustContain(t *testing.T, haystack, needle string) {

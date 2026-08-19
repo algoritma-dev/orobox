@@ -71,6 +71,15 @@ func GetComposeCommand() []string {
 	return memoizedComposeCmd
 }
 
+// The websocket server listens inside the compose network only: nginx proxies the
+// browser-facing "/ws" location to it, and PHP talks to it directly over the same
+// address. Both the compose file and the generated .env render from these values so
+// the service name and the port cannot drift apart.
+const (
+	websocketBackendHost = "ws"
+	websocketBackendPort = "8080"
+)
+
 // GetNginxPorts returns the configured HTTP and HTTPS ports for Nginx.
 func GetNginxPorts() (httpPort string, httpsPort string) {
 	httpPort = viper.GetString("nginx_http_port")
@@ -89,6 +98,17 @@ func GetNginxPorts() (httpPort string, httpsPort string) {
 		httpsPort = "8443"
 	}
 	return
+}
+
+// websocketFrontendPort returns the port the browser must use to reach the websocket
+// server. The connection goes through nginx, so it is the published nginx port and not
+// the internal websocketBackendPort. Only one port can be advertised, so a setup mixing
+// SSL and plain domains advertises the HTTPS one.
+func websocketFrontendPort(hasSsl bool, httpPort, httpsPort string) string {
+	if hasSsl {
+		return httpsPort
+	}
+	return httpPort
 }
 
 // GetApplicationURLs returns the list of URLs where the application is reachable.
@@ -225,6 +245,9 @@ func EnsureDockerCompose() bool {
 		RunsComposerInstall     bool
 		SyncsVendorToHost       bool
 		MountsEnvFiles          bool
+		WebsocketBackendHost    string
+		WebsocketBackendPort    string
+		WebsocketFrontendPort   string
 	}{
 		Type:                    viper.GetString("type"),
 		InternalDir:             internalDir,
@@ -237,6 +260,8 @@ func EnsureDockerCompose() bool {
 		UseTmpfs:                viper.GetBool("test.use_tmpfs"),
 		TmpfsSize:               viper.GetString("test.tmpfs_size"),
 		BundleRootContainerPath: config.GetBundleRootContainerPath(),
+		WebsocketBackendHost:    websocketBackendHost,
+		WebsocketBackendPort:    websocketBackendPort,
 	}
 
 	// Resolve the install-type strategy and derive every behavioral flag from it.
@@ -272,6 +297,8 @@ func EnsureDockerCompose() bool {
 			break
 		}
 	}
+
+	data.WebsocketFrontendPort = websocketFrontendPort(data.HasSsl, data.NginxHTTPPort, data.NginxHTTPSPort)
 
 	if data.HasSsl {
 		absCertsPath, err := filepath.Abs(filepath.Join(config.GetInternalDir(), "certs"))
@@ -906,6 +933,14 @@ func getRemoteImageDigest(imageName, arch, osName string) (string, error) {
 	}
 
 	return "", fmt.Errorf("no matching platform found")
+}
+
+// ReloadWebServer asks nginx to re-read its configuration. The generated nginx.conf is
+// bind-mounted, so a template change reaches a running web container as a file change
+// only: without this reload the container keeps serving the previous configuration until
+// it is recreated.
+func ReloadWebServer() error {
+	return RunComposeCommandSilently("Reloading web server configuration...", "exec", "-T", "web", "nginx", "-s", "reload")
 }
 
 // RunComposeCommandWithOutput runs docker compose and returns its combined output.

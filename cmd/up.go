@@ -19,7 +19,7 @@ var upCmd = &cobra.Command{
 	Short: "Start the development environment",
 	Run: func(_ *cobra.Command, _ []string) {
 		certificates.InstallSslCertificates()
-		docker.EnsureDockerCompose()
+		configChanged := docker.EnsureDockerCompose()
 
 		if cleanBeforeUp {
 			if err := docker.RunComposeCommandSilently("Cleaning up environment...", "down", "-v", "--remove-orphans"); err != nil {
@@ -30,6 +30,14 @@ var upCmd = &cobra.Command{
 		if err := docker.RunComposeCommandSilently("Starting containers...", "up", "-d"); err != nil {
 			utils.PrintError(fmt.Sprintf("Startup failed: %v", err))
 			return
+		}
+
+		// A container that was already running keeps its bind-mounted nginx.conf, so a
+		// regenerated configuration (new domain, websocket proxy, ...) needs a reload.
+		if configChanged {
+			if err := docker.ReloadWebServer(); err != nil {
+				utils.PrintWarning(fmt.Sprintf("Could not reload the web server configuration: %v", err))
+			}
 		}
 
 		fmt.Println()
