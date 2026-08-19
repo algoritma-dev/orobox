@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/algoritma-dev/orobox/internal/config"
 )
 
 var sshRepos = []map[string]interface{}{
@@ -75,7 +77,7 @@ func TestEnsureSSHAgent_LoadsKeyIntoExistingEmptyAgent(t *testing.T) {
 	sock := startTestAgent(t)
 	t.Setenv("SSH_AUTH_SOCK", sock)
 
-	cleanup, err := EnsureSSHAgent(sshRepos)
+	cleanup, err := EnsureSSHAgent(config.ComposerConfig{Repositories: sshRepos})
 	if err != nil {
 		t.Fatalf("EnsureSSHAgent: %v", err)
 	}
@@ -96,7 +98,7 @@ func TestEnsureSSHAgent_ReplacesUnreachableAgent(t *testing.T) {
 	deadSock := filepath.Join(t.TempDir(), "dead.sock")
 	t.Setenv("SSH_AUTH_SOCK", deadSock)
 
-	cleanup, err := EnsureSSHAgent(sshRepos)
+	cleanup, err := EnsureSSHAgent(config.ComposerConfig{Repositories: sshRepos})
 	if err != nil {
 		t.Fatalf("EnsureSSHAgent: %v", err)
 	}
@@ -125,7 +127,7 @@ func TestEnsureSSHAgent_KeepsAgentWithIdentities(t *testing.T) {
 	}
 	t.Setenv("SSH_AUTH_SOCK", sock)
 
-	cleanup, err := EnsureSSHAgent(sshRepos)
+	cleanup, err := EnsureSSHAgent(config.ComposerConfig{Repositories: sshRepos})
 	if err != nil {
 		t.Fatalf("EnsureSSHAgent: %v", err)
 	}

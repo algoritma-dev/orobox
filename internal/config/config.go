@@ -64,6 +64,12 @@ type ComposerConfig struct {
 	// COMPOSER_AUTH env var only into the containers that run composer, so tokens
 	// for private repositories never get committed or baked into long-running services.
 	Auth map[string]interface{} `yaml:"auth" mapstructure:"auth"`
+	// SSHAgent overrides the auto-detection of SSH agent forwarding. Nil means auto-detect
+	// (any SSH-transport repository URL, here or in the project's own composer.json); a
+	// non-nil value forces forwarding on or off. It is a pointer because "unset" and
+	// "explicitly false" must mean different things, and so an unset value is never written
+	// into a generated config file.
+	SSHAgent *bool `yaml:"ssh_agent,omitempty" mapstructure:"ssh_agent"`
 }
 
 // OroVersions defines the versions of components for a specific OroCommerce version.

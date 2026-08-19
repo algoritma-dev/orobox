@@ -323,6 +323,54 @@ func TestComposeRuntimeGolden(t *testing.T) {
 		mustNotContain(t, out, "oro_app:/var/www/oro")
 		mustNotContain(t, out, "vendor-oro:/vendor-host")
 	})
+
+	t.Run("ssh agent socket is mounted into the oro services", func(t *testing.T) {
+		data := projectComposeData()
+		data["SSHAgentSocket"] = "/tmp/agent.sock"
+		out := renderRealTemplate(t, path, data)
+		assertValidYAML(t, "runtime/ssh-agent", out)
+
+		var compose struct {
+			Services map[string]struct {
+				Environment map[string]string `yaml:"environment"`
+				Volumes     []string          `yaml:"volumes"`
+			} `yaml:"services"`
+		}
+		if err := yamlv3.Unmarshal([]byte(out), &compose); err != nil {
+			t.Fatalf("runtime compose is not valid YAML: %v", err)
+		}
+
+		// The mount lives in the shared volumes anchor, so every service that aliases it
+		// gets the socket. Only `application` gets the environment that uses it: it is the
+		// service orobox shell / run / console exec into.
+		const mount = "/tmp/agent.sock:/ssh-agent"
+		for _, name := range []string{"application", "php-fpm-app", "ws", "consumer", "cron"} {
+			found := false
+			for _, v := range compose.Services[name].Volumes {
+				if v == mount {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("%s is missing the agent socket mount, volumes = %v", name, compose.Services[name].Volumes)
+			}
+		}
+
+		app := compose.Services["application"].Environment
+		if got := app["SSH_AUTH_SOCK"]; got != containerSSHAgentSocket {
+			t.Errorf("application SSH_AUTH_SOCK = %q, want %q", got, containerSSHAgentSocket)
+		}
+		if got := app["GIT_SSH_COMMAND"]; !strings.Contains(got, "StrictHostKeyChecking=accept-new") {
+			t.Errorf("application GIT_SSH_COMMAND = %q, want StrictHostKeyChecking=accept-new", got)
+		}
+	})
+
+	t.Run("no ssh agent socket without forwarding", func(t *testing.T) {
+		out := renderRealTemplate(t, path, projectComposeData())
+		assertValidYAML(t, "runtime/no-ssh-agent", out)
+		mustNotContain(t, out, "/ssh-agent")
+		mustNotContain(t, out, "SSH_AUTH_SOCK")
+	})
 }
 
 func TestEnvTemplateOroEnvPerType(t *testing.T) {

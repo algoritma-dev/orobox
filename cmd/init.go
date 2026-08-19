@@ -120,7 +120,7 @@ func performInstallation() bool {
 	// Ensure an SSH agent with a loaded key is available before any composer/git
 	// run that clones a private SSH repository, so credentials forward into the
 	// containers. No-op when no SSH repo is configured or an agent already exists.
-	sshCleanup, err := docker.EnsureSSHAgent(conf.Composer.Repositories, oroRepo)
+	sshCleanup, err := docker.EnsureSSHAgent(conf.Composer, oroRepo)
 	if err != nil {
 		utils.PrintError(err.Error())
 		return false
@@ -180,7 +180,7 @@ func performInstallation() bool {
 		// single-file bind mounts at OroRoot, and cp cannot replace a mount point
 		// ("can't create ... File exists"). The mounted versions are authoritative.
 		cloneCmd := []string{"run", "--rm", "-T"}
-		cloneCmd = append(cloneCmd, docker.CredentialRunArgs(conf.Composer.Auth, conf.Composer.Repositories, oroRepo)...)
+		cloneCmd = append(cloneCmd, docker.CredentialRunArgs(conf.Composer, oroRepo)...)
 		cloneCmd = append(cloneCmd, "application", "bash", "-c",
 			fmt.Sprintf("git clone -b %s --depth 1 %s /tmp/oro-app && rm -f /tmp/oro-app/.env-app.local /tmp/oro-app/.env-app.test && cp -rf /tmp/oro-app/. . && rm -rf /tmp/oro-app && composer install", resolvedVersion, oroRepo))
 		if err := docker.RunComposeCommandSilently(scaffoldMsg, cloneCmd...); err != nil {
@@ -205,7 +205,7 @@ func performInstallation() bool {
 		utils.StopLoader()
 		if errVendor != nil {
 			installCmd := []string{"run", "--rm", "-T"}
-			installCmd = append(installCmd, docker.CredentialRunArgs(conf.Composer.Auth, conf.Composer.Repositories)...)
+			installCmd = append(installCmd, docker.CredentialRunArgs(conf.Composer)...)
 			installCmd = append(installCmd, "application", "composer", "install")
 			if err := docker.RunComposeCommandSilently("Installing dependencies...", installCmd...); err != nil {
 				utils.PrintError(fmt.Sprintf("Composer install failed: %v", err))
@@ -239,7 +239,7 @@ func performInstallation() bool {
 			bundlePackageName,
 		)
 		requireCmd := []string{"run", "--rm", "-T"}
-		requireCmd = append(requireCmd, docker.CredentialRunArgs(conf.Composer.Auth, conf.Composer.Repositories)...)
+		requireCmd = append(requireCmd, docker.CredentialRunArgs(conf.Composer)...)
 		requireCmd = append(requireCmd, "application", "bash", "-c", bashCmd)
 		if err := docker.RunComposeCommandSilently("Installing bundle into vendor...", requireCmd...); err != nil {
 			utils.PrintWarning(fmt.Sprintf("Bundle installation failed: %v", err))
@@ -258,7 +258,7 @@ func performInstallation() bool {
 	}
 
 	volumeSetupCmd := []string{"run", "--rm", "-T"}
-	volumeSetupCmd = append(volumeSetupCmd, docker.CredentialRunArgs(conf.Composer.Auth, conf.Composer.Repositories)...)
+	volumeSetupCmd = append(volumeSetupCmd, docker.CredentialRunArgs(conf.Composer)...)
 	volumeSetupCmd = append(volumeSetupCmd, "volume-setup")
 	if err := docker.RunSetupComposeCommandSilently("Setting up volumes for installation...", volumeSetupCmd...); err != nil {
 		utils.PrintWarning(fmt.Sprintf("volume-setup failed: %v", err))

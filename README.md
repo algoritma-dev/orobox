@@ -76,13 +76,17 @@ composer:
       repo.packagist.com:
         username: token
         password: yourtokenhere
+  # Forward the host SSH agent into the containers. Omit to auto-detect (any SSH-transport
+  # URL in the repositories below, or in the project's own composer.json); true forwards
+  # unconditionally, false never forwards.
+  ssh_agent: true
   repositories:
     - type: vcs
       url: https://github.com/my-org/private-repo.git
     - type: composer
       url: https://repo.packagist.com/my-org/
     # SSH-format URLs are supported too; orobox forwards your host SSH agent into
-    # the container automatically (start ssh-agent and `ssh-add` your key first).
+    # the containers automatically (start ssh-agent and `ssh-add` your key first).
     - type: vcs
       url: git@github.com:my-org/ssh-repo.git
 ```
@@ -95,6 +99,8 @@ Orobox supports three installation types, selected via the `type` field (or the 
 - **`project`**: your repository **is** the whole OroCommerce application. Orobox bind-mounts the checkout directly onto `/var/www/oro`, runs `composer install` (resolving dependencies from your repo's own `composer.lock`), then runs the Oro installer. No bundle `namespace`/`class` is needed, and no vendor is synced back to the host.
 
   > The project repository must contain a `composer.json` (and ideally a `composer.lock`). If the lock file is absent, Composer resolves from `composer.json`.
+
+  > Private dependencies: declare the repositories in the application's own `composer.json` as usual. Orobox reads that file to decide whether to forward your SSH agent, and `composer.ssh_agent: true` in `.orobox.yaml` forces forwarding when the SSH access is not visible there. Tokens still go in `composer.auth`.
 
 - **`demo`**: identical to `project` in how sources and vendors are wired, but the stack runs production-tuned — `ORO_ENV=prod`, OPcache enabled with `opcache.validate_timestamps=0`, and no Xdebug compiled into the image. Intended for demo and staging instances, not for development: PHP will not pick up source edits until the container restarts.
 
@@ -156,10 +162,11 @@ domains:
     - `command`: (string) The actual command to execute (e.g., `php bin/console oro:test:run`).
     - `description`: (string) Description of the command (displayed in help).
     - `service`: (string, optional) Default service to run the command in (e.g., `application`).
-- `composer`: (map) Composer-specific settings for the bundle.
-    - `repositories`: (list) Additional Composer repositories to register in the OroCommerce project during installation. Accepts the same format as Composer's [`repositories`](https://getcomposer.org/doc/05-repositories.md) field (VCS, Composer, path, package, etc.). These are merged with any existing repositories in the project's `composer.json`. Required when the bundle depends on packages hosted in private repositories.
+- `composer`: (map) Composer-specific settings.
+    - `repositories`: (list, `bundle` type only) Additional Composer repositories to register in the OroCommerce project during installation. Accepts the same format as Composer's [`repositories`](https://getcomposer.org/doc/05-repositories.md) field (VCS, Composer, path, package, etc.). These are merged with any existing repositories in the project's `composer.json`. Required when the bundle depends on packages hosted in private repositories. `project` and `demo` installs declare their repositories in the application's own `composer.json` and ignore this key.
     - `auth`: (map) Credentials for private repositories, using Composer's [`COMPOSER_AUTH`](https://getcomposer.org/doc/03-cli.md#composer-auth) schema (`github-oauth`, `gitlab-token`, `http-basic`, `bearer`, ...). Serialized to JSON and injected as the `COMPOSER_AUTH` environment variable only into the containers that run composer, so tokens are never committed or baked into long-running services.
-    - **SSH repositories**: when any `repositories[].url` uses an SSH transport (`git@host:org/repo.git` or `ssh://...`), orobox forwards your host SSH agent into the composer container (`SSH_AUTH_SOCK` is bind-mounted; on Docker Desktop the built-in agent socket is used, on Linux your live `$SSH_AUTH_SOCK`). Ensure an agent is running with your key loaded (`eval "$(ssh-agent)" && ssh-add`).
+    - `ssh_agent`: (bool, optional) Forces SSH agent forwarding on or off. When omitted, Orobox auto-detects it: forwarding is on when an SSH-transport URL appears in `repositories` above **or** in the checkout's own `composer.json`. Set it to `true` for a `project` whose private dependencies reach SSH through something Composer never sees (a git submodule, a `path` repository that is itself a checkout), and to `false` to opt out entirely.
+    - **SSH repositories**: when forwarding is on — see `ssh_agent` above — Orobox bind-mounts your host SSH agent socket into the containers and sets `SSH_AUTH_SOCK` (on Docker Desktop the built-in agent socket is used, on Linux your live `$SSH_AUTH_SOCK`). This covers both the one-shot composer/git commands `orobox init` runs and the running `application` container, so `orobox shell` followed by `composer update` or `git fetch` authenticates too. `orobox init` will start an agent and load your default key if none is running; every other command uses only an agent that is already running, so start one first with `eval "$(ssh-agent)" && ssh-add`.
 - `deploy`: (map, `project` type only) Deployment configuration, generated by [`deploy-init`](#12-deployment-initialization-deploy-init). This is the single source of truth: `deploy.php` reads host, user, port, path, repository and ref from the `OROBOX_DEPLOY_*` variables Orobox injects, so the two files cannot drift.
     - `pre_built_assets_enabled`: (bool) `true` when the repository already ships built assets — the pipeline then has no assets stage. `false` makes the pipeline run `oro:assets:install --env=prod` and upload the result as `assets.tar.gz`. Either way the remote never rebuilds them.
     - `repository`: (string, optional) URL Deployer clones on the remote host. Defaults to `git remote get-url origin`.

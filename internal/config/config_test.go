@@ -457,3 +457,66 @@ func TestGetInternalDir(t *testing.T) {
 		}
 	})
 }
+
+func TestParseConfigComposerSSHAgent(t *testing.T) {
+	const base = `
+type: project
+oro_version: "6.1"
+domains:
+  - host: example.com
+`
+
+	t.Run("unset means auto-detect", func(t *testing.T) {
+		conf, err := ParseConfig([]byte(base))
+		if err != nil {
+			t.Fatalf("ParseConfig failed: %v", err)
+		}
+		if conf.Composer.SSHAgent != nil {
+			t.Errorf("expected ssh_agent to be nil when absent, got %v", *conf.Composer.SSHAgent)
+		}
+	})
+
+	t.Run("true", func(t *testing.T) {
+		conf, err := ParseConfig([]byte(base + "composer:\n  ssh_agent: true\n"))
+		if err != nil {
+			t.Fatalf("ParseConfig failed: %v", err)
+		}
+		if conf.Composer.SSHAgent == nil || !*conf.Composer.SSHAgent {
+			t.Errorf("expected ssh_agent true, got %v", conf.Composer.SSHAgent)
+		}
+	})
+
+	t.Run("false", func(t *testing.T) {
+		conf, err := ParseConfig([]byte(base + "composer:\n  ssh_agent: false\n"))
+		if err != nil {
+			t.Fatalf("ParseConfig failed: %v", err)
+		}
+		if conf.Composer.SSHAgent == nil || *conf.Composer.SSHAgent {
+			t.Errorf("expected ssh_agent false, got %v", conf.Composer.SSHAgent)
+		}
+	})
+}
+
+// An unset ssh_agent must not appear in a generated config file: a written `ssh_agent: false`
+// would silently pin forwarding off for every future checkout of that repository.
+func TestSaveConfigOmitsUnsetSSHAgent(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, ".orobox.yaml")
+
+	conf := &OroConfig{
+		Type:       InstallTypeProject,
+		OroVersion: "6.1",
+		Domains:    []DomainConfig{{Host: "example.com"}},
+	}
+	if err := SaveConfig(configPath, conf); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("Read saved config failed: %v", err)
+	}
+	if strings.Contains(string(data), "ssh_agent") {
+		t.Errorf("expected ssh_agent to be omitted when unset, got:\n%s", data)
+	}
+}

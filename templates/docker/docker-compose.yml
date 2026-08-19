@@ -30,11 +30,25 @@ x-templates:
     - "{{.InternalDir}}/.env:{{.OroRootDir}}/.env-app.local:cached"
     - "{{.InternalDir}}/.env.test:{{.OroRootDir}}/.env-app.test:cached"
     {{- end}}
+    {{if .SSHAgentSocket -}}
+    # Forwarded host SSH agent, so composer/git over SSH work inside the running stack.
+    # A YAML merge key cannot extend a sequence, so the mount goes in the shared anchor:
+    # the services that never run git simply carry an unused socket.
+    - "{{.SSHAgentSocket}}:/ssh-agent"
+    {{- end}}
 
 services:
   application:
     <<: *oro-app
     user: ${ORO_USER_RUNTIME:-www-data}
+    {{if .SSHAgentSocket -}}
+    # accept-new avoids an interactive host-key prompt on first connect, and the known-hosts
+    # file lives in /tmp so the write never needs a writable $HOME. HOME itself is left alone:
+    # a long-running service keeps the home directory its image gives it.
+    environment:
+      SSH_AUTH_SOCK: /ssh-agent
+      GIT_SSH_COMMAND: ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known_hosts
+    {{- end}}
     command:
       - bash
       - -c

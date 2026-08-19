@@ -248,6 +248,7 @@ func EnsureDockerCompose() bool {
 		WebsocketBackendHost    string
 		WebsocketBackendPort    string
 		WebsocketFrontendPort   string
+		SSHAgentSocket          string
 	}{
 		Type:                    viper.GetString("type"),
 		InternalDir:             internalDir,
@@ -277,6 +278,23 @@ func EnsureDockerCompose() bool {
 	data.RunsComposerInstall = installType.RunsComposerInstall()
 	data.SyncsVendorToHost = installType.SyncsVendorToHost()
 	data.MountsEnvFiles = installType.MountsInternalEnvFiles()
+
+	// SSH agent forwarding for the long-running stack. Unlike init's one-shot runs, this
+	// path never starts an agent: EnsureSSHAgent kills any agent it spawns when the command
+	// returns, and a socket mounted into a container that outlives the command would be dead
+	// for the rest of that container's life. So only an agent the user already runs is used.
+	var composerConf config.ComposerConfig
+	if err := viper.UnmarshalKey("composer", &composerConf); err != nil {
+		utils.PrintWarning(fmt.Sprintf("Could not read the composer configuration: %v", err))
+	}
+	if needsSSHForwarding(composerConf) {
+		if sock, ok := hostSSHAgentSocket(); ok {
+			data.SSHAgentSocket = sock
+		} else {
+			utils.PrintWarning("SSH agent forwarding is enabled but no agent was found ($SSH_AUTH_SOCK is empty). " +
+				"Start one with `eval \"$(ssh-agent)\" && ssh-add`, then re-run the command.")
+		}
+	}
 
 	if data.TmpfsSize == "" {
 		data.TmpfsSize = "1g"
