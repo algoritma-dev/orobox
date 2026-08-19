@@ -74,13 +74,22 @@ func TestUpCommand(t *testing.T) {
 		calls = calls[1:]
 	}
 
-	if len(calls) != 1 {
-		t.Errorf("Expected 1 more call to RunComposeCommand (up), got %d: %v", len(calls), calls)
+	if len(calls) == 0 {
+		t.Errorf("Expected a call to RunComposeCommand (up), got none")
 		return
 	}
 
 	if len(calls[0]) < 2 || calls[0][0] != "up" || !contains(calls[0], "-d") {
 		t.Errorf("Expected call to be up -d, got %v", calls[0])
+	}
+
+	// EnsureDockerCompose reports a configuration change whenever it writes the internal files,
+	// which on a clean checkout (CI) it always does, so up follows with an nginx reload. Accept
+	// that call, reject anything else.
+	for _, call := range calls[1:] {
+		if call[0] != "exec" || !contains(call, "nginx") {
+			t.Errorf("Unexpected extra call after up: %v", call)
+		}
 	}
 }
 
