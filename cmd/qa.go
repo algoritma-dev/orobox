@@ -134,6 +134,7 @@ func runQaCommand() {
 
 func runQaOnCompose(format qatools.Report) {
 	workingDir := config.GetSourceRootContainerPath()
+	env := resolveQaEnv()
 
 	reportPath := ""
 	containerReportDir := ""
@@ -154,6 +155,7 @@ func runQaOnCompose(format qatools.Report) {
 	allTools := qatools.Tools(qatools.ToolsOptions{
 		SourceRoot:  workingDir,
 		AnalyzePath: config.GetQaAnalyzePath(),
+		Env:         env,
 		Mode:        qatools.ModeFix,
 		Report:      format,
 		ReportDir:   containerReportDir,
@@ -167,7 +169,7 @@ func runQaOnCompose(format qatools.Report) {
 		}
 	}
 
-	utils.PrintInfo("Running QA tools in " + workingDir + "...")
+	utils.PrintInfo(fmt.Sprintf("Running QA tools in %s (%s environment)...", workingDir, env))
 
 	var enabledTools []qatools.Tool
 	for _, t := range allTools {
@@ -197,8 +199,9 @@ func runQaOnCompose(format qatools.Report) {
 		args = append(args, "-T")
 	}
 
-	// Always set ORO_ENV to test for QA tools
-	args = append(args, "-e", "ORO_ENV=test")
+	// The tools run in the environment whose cache PHPStan reads: dev on a developer's stack,
+	// test in CI. See resolveQaEnv.
+	args = append(args, "-e", "ORO_ENV="+string(env))
 
 	script := qatools.Script(enabledTools)
 	if format != qatools.ReportNone {

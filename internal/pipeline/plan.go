@@ -641,8 +641,8 @@ if [ -z "$OROBOX_NO_CACHE" ] && [ -s "$stamp" ]; then
 fi
 echo 'Rebuilding the QA cache: installing Oro and warming the test cache. Later runs reuse this.'
 full_install`,
-		qatools.CacheVolumeDir(), qatools.ContainerXMLPath(), qatools.SymfonyConfigDir(),
-		qatools.CacheDir(), oroWritableDirsCommand(), qaDatabaseResetCommand())
+		qatools.CacheVolumeDir(), qatools.ContainerXMLPath(qatools.EnvTest), qatools.SymfonyConfigDir(qatools.EnvTest),
+		qatools.CacheDir(qatools.EnvTest), oroWritableDirsCommand(), qaDatabaseResetCommand())
 }
 
 // qaDatabaseResetCommand empties the persistent QA database before oro:install runs against it.
@@ -727,7 +727,7 @@ func (p *Plan) qaCommands(oroVersion string) []string {
 	commands := []string{"composer dump-autoload --optimize --no-scripts"}
 
 	if plan.NeedsComposerTools && plan.NeedsPhpstan {
-		commands = append(commands, qatools.PhpstanConfigScript())
+		commands = append(commands, qatools.PhpstanConfigScript(qatools.EnvTest))
 	}
 	if plan.NeedsComposerTools && plan.NeedsTwigCS {
 		commands = append(commands, qatools.TwigConfigScript())
@@ -740,6 +740,7 @@ func (p *Plan) qaCommands(oroVersion string) []string {
 	for _, tool := range qatools.Tools(qatools.ToolsOptions{
 		SourceRoot:  oroRoot,
 		AnalyzePath: config.QaAnalyzePathFor(config.InstallTypeProject),
+		Env:         qatools.EnvTest,
 		Mode:        qatools.ModeCheck,
 		Report:      p.Report,
 		ReportDir:   QAReportDir(),

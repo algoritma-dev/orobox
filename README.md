@@ -283,9 +283,11 @@ CLI flags always override the configuration. Example:
 orobox qa --phpstan --eslint
 ```
 
-PHPStan reads the dumped `test` debug container, so it needs an installed test database. Run
-`orobox test-init` once before the first PHPStan run; afterwards the warmed `var/cache/test` is
-reused.
+PHPStan reads a dumped debug container, so it needs the matching environment installed. On a
+developer's machine the tools run in `dev`, the environment `orobox install` already set up, and
+warm `var/cache/dev`. In CI (the `CI` environment variable set) they run in `test` instead, matching
+the install the pipeline performs, and warm `var/cache/test`. The warmed cache is reused by later
+runs.
 
 ### Running the checks in CI
 

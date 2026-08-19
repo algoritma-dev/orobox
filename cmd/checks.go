@@ -65,6 +65,23 @@ func resolveEngine(flag string) (string, error) {
 	}
 }
 
+// resolveQaEnv picks the Symfony environment the QA tools boot on the compose engine.
+//
+// CI gets test: a job installs Oro in test, the same install the pipeline's own test step uses, so
+// PHPStan reads a cache that is there and no second install is paid for. A developer's machine
+// gets dev, because that is what `orobox install` leaves running; asking for test there would warm
+// a cache against a database that only exists after `orobox test-init` and would compete with the
+// functional tests for it.
+//
+// The Dagger engine is not routed through here: it installs its own test database whether or not
+// it was started from CI, so pipeline.NewChecks stays on qatools.EnvTest.
+func resolveQaEnv() qatools.Env {
+	if os.Getenv("CI") != "" {
+		return qatools.EnvTest
+	}
+	return qatools.EnvDev
+}
+
 // resolveReport parses the --report value. Only GitLab's format is implemented; the flag exists as
 // an enum so another one can be added without changing the command's surface.
 func resolveReport(flag string) (qatools.Report, error) {

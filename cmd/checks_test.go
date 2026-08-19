@@ -10,6 +10,28 @@ import (
 	"github.com/spf13/viper"
 )
 
+func TestResolveQaEnv(t *testing.T) {
+	// A developer's stack has dev installed and the test database only after `orobox test-init`,
+	// so only CI — which installs test itself — analyses against test.
+	for _, tc := range []struct {
+		name string
+		ci   string
+		want qatools.Env
+	}{
+		{name: "outside CI the tools run in dev", want: qatools.EnvDev},
+		{name: "in CI they run in test", ci: "true", want: qatools.EnvTest},
+		{name: "an empty CI variable is not CI", ci: "", want: qatools.EnvDev},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CI", tc.ci)
+
+			if got := resolveQaEnv(); got != tc.want {
+				t.Errorf("resolveQaEnv() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestResolveEngine(t *testing.T) {
 	tests := []struct {
 		name        string

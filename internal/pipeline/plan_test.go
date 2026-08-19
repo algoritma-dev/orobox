@@ -249,7 +249,7 @@ func TestPlanQAStageReusesTheInstalledCache(t *testing.T) {
 	if len(p.QA.Caches) != 1 || p.QA.Caches[0].Path != qatools.CacheVolumeDir() {
 		t.Fatalf("qa stage does not persist the test cache: %+v", p.QA.Caches)
 	}
-	if p.QA.Caches[0].Path == qatools.CacheDir() {
+	if p.QA.Caches[0].Path == qatools.CacheDir(qatools.EnvTest) {
 		t.Errorf("qa cache is mounted on the test cache itself: cache:clear cannot remove a mount point")
 	}
 	if len(p.QA.Services) != 1 || p.QA.Services[0].DataCache == "" {

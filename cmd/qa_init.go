@@ -119,7 +119,9 @@ func runQaInitCommand(conf config.OroConfig) {
 		// The generated phpstan.neon and the missing twig-cs-fixer config both need fixing up
 		// for the Oro layout; the deploy pipeline runs the very same scripts.
 		if plan.NeedsPhpstan {
-			runQaScript("Adapting PHPStan config for Oro layout...", "PHPStan config adapted for Oro layout.", qatools.PhpstanConfigScript())
+			// The generated config carries the cache paths of one environment, so it is written
+			// for the same one `orobox qa` will run in.
+			runQaScript("Adapting PHPStan config for Oro layout...", "PHPStan config adapted for Oro layout.", qatools.PhpstanConfigScript(resolveQaEnv()))
 		}
 		if plan.NeedsTwigCS {
 			runQaScript("Writing default Twig-CS-Fixer config...", "Twig-CS-Fixer config written.", qatools.TwigConfigScript())

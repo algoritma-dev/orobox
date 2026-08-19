@@ -96,17 +96,38 @@ func TestToolsAreOrderedAndSelfContained(t *testing.T) {
 	}
 }
 
-func TestPhpstanWarmsTheTestDebugCache(t *testing.T) {
-	setup := toolByName(t, Tools(ToolsOptions{SourceRoot: "/src/root", AnalyzePath: "/src/root/src", Mode: ModeCheck}), "phpstan").Setup
-
-	for _, want := range []string{
-		ContainerXMLPath(),
-		SymfonyConfigDir(),
-		"ORO_DEBUG=1 php " + config.OroRootDir + "/bin/console cache:warmup --env=test",
+func TestPhpstanWarmsTheDebugCacheOfItsEnv(t *testing.T) {
+	// The pipeline analyses the test install; a developer's stack has dev installed instead, and
+	// the dumped container's filename carries the environment, so both halves move together.
+	for _, tc := range []struct {
+		env     Env
+		warmup  string
+		xmlFile string
+	}{
+		{EnvTest, "cache:warmup --env=test", "/var/cache/test/AppKernelTestDebugContainer.xml"},
+		{EnvDev, "cache:warmup --env=dev", "/var/cache/dev/AppKernelDevDebugContainer.xml"},
 	} {
-		if !strings.Contains(setup, want) {
-			t.Errorf("phpstan setup missing %q: %s", want, setup)
+		setup := toolByName(t, Tools(ToolsOptions{SourceRoot: "/src/root", AnalyzePath: "/src/root/src", Env: tc.env, Mode: ModeCheck}), "phpstan").Setup
+
+		for _, want := range []string{
+			ContainerXMLPath(tc.env),
+			SymfonyConfigDir(tc.env),
+			"ORO_DEBUG=1 php " + config.OroRootDir + "/bin/console " + tc.warmup,
+		} {
+			if !strings.Contains(setup, want) {
+				t.Errorf("%s: phpstan setup missing %q: %s", tc.env, want, setup)
+			}
 		}
+
+		if got := ContainerXMLPath(tc.env); got != config.OroRootDir+tc.xmlFile {
+			t.Errorf("%s: ContainerXMLPath = %q, want %q", tc.env, got, config.OroRootDir+tc.xmlFile)
+		}
+	}
+
+	// An unset environment is the pipeline's test one: that is what every caller meant before
+	// the environment became selectable.
+	if CacheDir("") != CacheDir(EnvTest) {
+		t.Errorf("the zero Env must fall back to test, got %q", CacheDir(""))
 	}
 }
 
@@ -160,7 +181,7 @@ func TestNewInstallPlan(t *testing.T) {
 }
 
 func TestConfigScripts(t *testing.T) {
-	phpstan := PhpstanConfigScript()
+	phpstan := PhpstanConfigScript(EnvDev)
 	for _, want := range []string{
 		config.QaToolsDir + "/phpstan.neon",
 		"consoleApplicationLoader: " + config.QaToolsDir + "/tests/console-application.php",

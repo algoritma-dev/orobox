@@ -22,6 +22,36 @@ const (
 	ModeCheck
 )
 
+// Env is the Symfony environment the QA tools boot under. It decides which cache directory
+// PHPStan reads, which dumped container has to be warmed there and which database the warmup
+// queries, so it has to name an environment that is actually installed.
+type Env string
+
+const (
+	// EnvTest is what the deploy pipeline uses: it installs Oro in test, the same install the
+	// functional tests run against, so a single database serves both steps.
+	EnvTest Env = "test"
+	// EnvDev is what a developer's stack has: dev exists from the first `orobox install`, while
+	// the test database only appears after `orobox test-init`.
+	EnvDev Env = "dev"
+)
+
+// orDefault keeps the zero value usable: an unset Env means the pipeline's test environment,
+// which is what every caller wanted before the environment became selectable.
+func (e Env) orDefault() Env {
+	if e == "" {
+		return EnvTest
+	}
+	return e
+}
+
+// title is the environment as Symfony spells it inside the dumped container's filename
+// (<KernelClass><Env>DebugContainer.xml).
+func (e Env) title() string {
+	name := string(e.orDefault())
+	return strings.ToUpper(name[:1]) + name[1:]
+}
+
 // Report selects the machine-readable format the tools emit alongside their work. It is separate
 // from Mode because the two are independent: a developer fixing locally can still want a report,
 // and the pipeline's check-only run is useful without one.
@@ -37,12 +67,14 @@ const (
 )
 
 // ToolsOptions is everything Tools needs to render the tool set. SourceRoot is where project-local
-// configs are looked up, AnalyzePath is the tree PHPStan analyses, and ReportDir is the directory
-// inside the container each tool's report is written to — required when Report is not ReportNone,
-// ignored otherwise.
+// configs are looked up, AnalyzePath is the tree PHPStan analyses, Env is the Symfony environment
+// PHPStan's cache is warmed in (test when unset), and ReportDir is the directory inside the
+// container each tool's report is written to — required when Report is not ReportNone, ignored
+// otherwise.
 type ToolsOptions struct {
 	SourceRoot  string
 	AnalyzePath string
+	Env         Env
 	Mode        Mode
 	Report      Report
 	ReportDir   string
@@ -169,7 +201,7 @@ func Tools(opts ToolsOptions) []Tool {
 	tools := []Tool{
 		{
 			Name:  "phpstan",
-			Setup: phpstanCacheWarmup(),
+			Setup: phpstanCacheWarmup(opts.Env),
 			// --memory-limit=-1 is not a convenience. PHPStan analyses in parallel worker
 			// processes sized from the core count, and a worker that reaches PHP's memory_limit
 			// dies and returns a garbled response. That surfaces as `Internal error: Call to a
@@ -378,12 +410,13 @@ func ComposerInstallCommand(packages []string) string {
 // PHPStan expects.
 const oroKernelClass = "AppKernel"
 
-// CacheDir is the application cache directory PHPStan's Oro bootstrap reads from. It is the
-// test environment's cache, which is the same environment the functional tests install, so a
-// single installed database serves both. The deploy pipeline persists it between runs, so it
-// is exported rather than inlined.
-func CacheDir() string {
-	return CacheVolumeDir() + "/test"
+// CacheDir is the application cache directory PHPStan's Oro bootstrap reads from, for the given
+// environment. The pipeline analyses against test — the environment the functional tests install,
+// so a single installed database serves both steps — while a developer's stack analyses against
+// dev, which is the environment their `orobox install` left behind. The deploy pipeline persists
+// the directory between runs, so it is exported rather than inlined.
+func CacheDir(env Env) string {
+	return CacheVolumeDir() + "/" + string(env.orDefault())
 }
 
 // CacheVolumeDir is the directory a pipeline mounts the persistent QA cache volume on. It is
@@ -397,35 +430,35 @@ func CacheVolumeDir() string {
 
 // ContainerXMLPath and SymfonyConfigDir are the two debug cache artifacts PHPStan's Oro
 // bootstrap requires; the same values are written into phpstan.neon by PhpstanConfigScript.
-func ContainerXMLPath() string {
-	return fmt.Sprintf("%s/%sTestDebugContainer.xml", CacheDir(), oroKernelClass)
+func ContainerXMLPath(env Env) string {
+	return fmt.Sprintf("%s/%s%sDebugContainer.xml", CacheDir(env), oroKernelClass, env.title())
 }
 
 // SymfonyConfigDir is the dumped Symfony config directory PHPStan's Oro bootstrap requires.
-func SymfonyConfigDir() string {
-	return CacheDir() + "/Symfony/Config"
+func SymfonyConfigDir(env Env) string {
+	return CacheDir(env) + "/Symfony/Config"
 }
 
-// phpstanCacheWarmup warms the test debug cache before PHPStan runs. The bootstrap shipped by
+// phpstanCacheWarmup warms env's debug cache before PHPStan runs. The bootstrap shipped by
 // algoritma/php-coding-standards aborts when the dumped container is missing, which is always
 // the case on a clean pipeline checkout and after `orobox clean` locally. Warming is skipped
 // when both artifacts are already there, so a normal local run pays nothing.
 //
-// The env is forced to test/debug regardless of the ORO_ENV the QA step runs under, because
-// that is the cache PHPStan reads. Warming queries Oro's config tables, so it needs the test
-// database installed: locally that is `orobox test-init`, in the pipeline the QA step's own
-// oro:install --env=test.
-func phpstanCacheWarmup() string {
-	return fmt.Sprintf("{ [ -f %s ] && [ -d %s ]; } || ORO_DEBUG=1 php %s/bin/console cache:warmup --env=test",
-		ContainerXMLPath(), SymfonyConfigDir(), config.OroRootDir)
+// Debug is forced on regardless of the ORO_DEBUG the QA step runs under, because the dumped
+// container PHPStan reads only exists in a debug cache. Warming queries Oro's config tables, so
+// it needs env's database installed: in the pipeline that is the QA step's own oro:install
+// --env=test, locally it is the dev install `orobox install` already performed.
+func phpstanCacheWarmup(env Env) string {
+	return fmt.Sprintf("{ [ -f %s ] && [ -d %s ]; } || ORO_DEBUG=1 php %s/bin/console cache:warmup --env=%s",
+		ContainerXMLPath(env), SymfonyConfigDir(env), config.OroRootDir, env.orDefault())
 }
 
 // consoleApplicationLoaderPHP boots the real Oro kernel so phpstan-symfony can enumerate
 // console commands. It uses OroRoot's autoloader (not the isolated QA one, which lacks the
-// application classes). It boots the 'test' env to match the containerXmlPath below: that is
-// the cache the QA step warms, and reusing the environment the functional tests install keeps
-// PHPStan and PHPUnit on one database.
-const consoleApplicationLoaderPHP = `<?php
+// application classes). It boots env to match the containerXmlPath below: that is the cache the
+// QA step warms, so the loader and the dumped container have to agree.
+func consoleApplicationLoaderPHP(env Env) string {
+	return `<?php
 
 declare(strict_types=1);
 
@@ -434,26 +467,29 @@ use Symfony\Bundle\FrameworkBundle\Console\Application;
 require '` + config.OroRootDir + `/vendor/autoload.php';
 require_once '` + config.OroRootDir + `/src/` + oroKernelClass + `.php';
 
-$kernel = new ` + oroKernelClass + `('test', true);
+$kernel = new ` + oroKernelClass + `('` + string(env.orDefault()) + `', true);
 
 return new Application($kernel);
 `
+}
 
 // objectManagerLoaderPHP returns Oro's Doctrine ObjectManager for phpstan-doctrine,
-// replacing the throwing stub the plugin generates. Boots 'test' for the same reason as the
+// replacing the throwing stub the plugin generates. Boots env for the same reason as the
 // console loader above.
-const objectManagerLoaderPHP = `<?php
+func objectManagerLoaderPHP(env Env) string {
+	return `<?php
 
 declare(strict_types=1);
 
 require '` + config.OroRootDir + `/vendor/autoload.php';
 require_once '` + config.OroRootDir + `/src/` + oroKernelClass + `.php';
 
-$kernel = new ` + oroKernelClass + `('test', true);
+$kernel = new ` + oroKernelClass + `('` + string(env.orDefault()) + `', true);
 $kernel->boot();
 
 return $kernel->getContainer()->get('doctrine')->getManager();
 `
+}
 
 // twigCsFixerConfigPHP is the default config for vincentlanglet/twig-cs-fixer. new Config()
 // already applies the bundled TwigCsFixer standard ruleset, so this is a minimal,
@@ -492,30 +528,34 @@ func TwigConfigScript() string {
 // application root, writing paths relative to it (and hardcoding Symfony's App_Kernel
 // container filename). Because bamarni places the config in the isolated QA directory,
 // PHPStan resolves those paths against it and fails ("Scanned file ... does not exist").
-func PhpstanConfigScript() string {
+func PhpstanConfigScript(env Env) string {
 	oro := config.OroRootDir
 	qa := config.QaToolsDir
 	neon := qa + "/phpstan.neon"
 
 	consoleAbs := qa + "/tests/console-application.php"
 	objAbs := qa + "/tests/object-manager.php"
-	xmlAbs := ContainerXMLPath()
-	scanDirAbs := SymfonyConfigDir()
+	xmlAbs := ContainerXMLPath(env)
+	scanDirAbs := SymfonyConfigDir(env)
 	scanFileAbs := oro + "/vendor/symfony/dependency-injection/Loader/Configurator/ContainerConfigurator.php"
 
-	b64Console := base64.StdEncoding.EncodeToString([]byte(consoleApplicationLoaderPHP))
-	b64Obj := base64.StdEncoding.EncodeToString([]byte(objectManagerLoaderPHP))
+	b64Console := base64.StdEncoding.EncodeToString([]byte(consoleApplicationLoaderPHP(env)))
+	b64Obj := base64.StdEncoding.EncodeToString([]byte(objectManagerLoaderPHP(env)))
 
 	// Anchoring each replacement to its key/list-marker keeps this idempotent: once a value
 	// is absolute it no longer matches the relative pattern on a re-run.
+	//
+	// The two cache paths match whatever value is there rather than the generated one, because
+	// they carry the environment: a config written by a local run (dev) that is then re-run in
+	// CI (test) has to be corrected, and an exact pattern would leave the stale path in place.
 	return fmt.Sprintf(`set -e
 [ -f %[1]s ] || exit 0
 mkdir -p %[2]s/tests
 sed -i \
  -e 's#consoleApplicationLoader: tests/console-application.php#consoleApplicationLoader: %[3]s#' \
  -e 's#objectManagerLoader: tests/object-manager.php#objectManagerLoader: %[4]s#' \
- -e 's#containerXmlPath: var/cache/test/App_KernelDevDebugContainer.xml#containerXmlPath: %[5]s#' \
- -e 's#- var/cache/test/Symfony/Config#- %[6]s#' \
+ -e 's#containerXmlPath: .*#containerXmlPath: %[5]s#' \
+ -e 's#- .*var/cache/[^ ]*/Symfony/Config#- %[6]s#' \
  -e 's#- vendor/symfony/dependency-injection/Loader/Configurator/ContainerConfigurator.php#- %[7]s#' \
  %[1]s
 printf '%%s' '%[8]s' | base64 -d > %[3]s
