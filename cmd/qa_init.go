@@ -101,6 +101,13 @@ func runQaInitCommand(conf config.OroConfig) {
 			return
 		}
 
+		// 1bis. Hand the packages the application already ships over to its tree: one copy of a
+		//       shared package is the difference between PHPStan running and PHPStan fatally
+		//       redeclaring a Symfony interface. It runs after the application's own tree is
+		//       final — the bamarni install and the php-cs-fixer removal both touch it — because
+		//       the patch records the versions actually installed there.
+		runQaScript("Sharing the application's vendor tree with the QA tools...", "QA tools pointed at the shared vendor tree.", qatools.SharedVendorScript())
+
 		// 1c. Populate the isolated 'qa' bin namespace: install a committed manifest as-is,
 		//     otherwise require the packages with ':*', which forces the latest version and
 		//     bypasses OroCommerce's locked constraints.
