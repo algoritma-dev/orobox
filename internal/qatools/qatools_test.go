@@ -1,6 +1,7 @@
 package qatools
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -113,13 +114,18 @@ func TestPhpstanWarmsTheDebugCacheOfItsEnv(t *testing.T) {
 		setup := toolByName(t, Tools(ToolsOptions{SourceRoot: "/src/root", AnalyzePath: "/src/root/src", Env: tc.env, Mode: ModeCheck}), "phpstan").Setup
 
 		for _, want := range []string{
-			ContainerXMLPath(tc.env),
-			SymfonyConfigDir(tc.env),
+			"[ -f " + ContainerXMLPath(tc.env) + " ] ||",
 			"ORO_DEBUG=1 php " + config.OroRootDir + "/bin/console " + tc.warmup,
 		} {
 			if !strings.Contains(setup, want) {
 				t.Errorf("%s: phpstan setup missing %q: %s", tc.env, want, setup)
 			}
+		}
+
+		// The dumped Symfony config directory is not part of the gate: an install can end with
+		// a container and no Symfony/Config, and checking it there warms on every run.
+		if strings.Contains(setup, SymfonyConfigDir(tc.env)) {
+			t.Errorf("%s: phpstan warmup gated on the Symfony config dir: %s", tc.env, setup)
 		}
 
 		if got := ContainerXMLPath(tc.env); got != config.OroRootDir+tc.xmlFile {
@@ -236,11 +242,14 @@ func TestComposerInstallCommandDetectsUndeclaredPackages(t *testing.T) {
 
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "composer.json")
-	if err := os.WriteFile(manifest, []byte(`{"name":"orobox/qa-tools","require-dev":{"algoritma/php-coding-standards":"^3.0","symfony/console":"^6.4"}}`), 0o644); err != nil {
+	// symfony/service-contracts sits in `replace`, the way SharedVendorScript leaves it: requiring
+	// it back would reinstall the duplicate copy that fatals PHPStan.
+	if err := os.WriteFile(manifest, []byte(`{"name":"orobox/qa-tools","require-dev":{"algoritma/php-coding-standards":"^3.0","symfony/console":"^6.4"},`+
+		`"replace":{"symfony/service-contracts":"3.7.1"}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	cmd := ComposerInstallCommand([]string{"algoritma/php-coding-standards:*", "symfony/console:^6.4", "vincentlanglet/twig-cs-fixer:*"})
+	cmd := ComposerInstallCommand([]string{"algoritma/php-coding-standards:*", "symfony/console:^6.4", "symfony/service-contracts:^3.0", "vincentlanglet/twig-cs-fixer:*"})
 	cmd = strings.Replace(cmd, config.QaToolsDir+"/composer.json", manifest, 1)
 	// Only the detection snippet is executed: composer is not available here, and the shell
 	// branch it feeds is covered above.
@@ -438,5 +447,234 @@ func TestScriptIsUnchangedWithoutAReport(t *testing.T) {
 	}
 	if strings.Contains(script, "status=") {
 		t.Errorf("Script must not grow the report mode's status handling:\n%s", script)
+	}
+}
+
+func TestSharedVendorScriptPreparesTheNamespaceBeforePatchingIt(t *testing.T) {
+	script := SharedVendorScript()
+
+	// The manifest has to exist before the patch reads it, and the bootstrap before Composer
+	// dumps an autoloader that includes it.
+	steps := []string{
+		config.QaToolsDir + "/composer.json",
+		config.QaToolsDir + "/" + SharedAutoloadRelPath,
+		"php /tmp/orobox-qa-manifest.php",
+	}
+	at := -1
+	for _, step := range steps {
+		next := strings.Index(script, step)
+		if next < 0 {
+			t.Fatalf("script missing %q: %s", step, script)
+		}
+		if next < at {
+			t.Errorf("script step %q is out of order: %s", step, script)
+		}
+		at = next
+	}
+
+	// A namespace that already carries a committed manifest keeps it: the manifest pins the tool
+	// versions on purpose, and the patch only edits what it has to.
+	if !strings.Contains(script, `[ -f `+config.QaToolsDir+`/composer.json ] || printf '{"name":"orobox/qa-tools"}'`) {
+		t.Errorf("script overwrites an existing manifest: %s", script)
+	}
+}
+
+// TestSharedAutoloadBootstrapTakesBackTheLoaderOrder guards the two lines the whole shared tree
+// rests on: Composer prepends its loader, and which end it really belongs at depends on the tool.
+func TestSharedAutoloadBootstrapTakesBackTheLoaderOrder(t *testing.T) {
+	for _, want := range []string{
+		config.OroRootDir + "/vendor/autoload.php",
+		"if (!is_file($autoload)) {",
+		"spl_autoload_unregister([$loader, 'loadClass']);",
+		"$loader->register(getenv('" + SharedAutoloadPrependEnv + "') === '1');",
+	} {
+		if !strings.Contains(sharedAutoloadPHP, want) {
+			t.Errorf("bootstrap missing %q: %s", want, sharedAutoloadPHP)
+		}
+	}
+}
+
+// TestOnlyPhpstanPutsTheApplicationTreeFirst pins the asymmetry down. PHPStan boots the kernel, so
+// it needs the application's copy of every class the dumped container inline-requires; the other
+// tools never load that container and would lose their newer dependencies to it.
+func TestOnlyPhpstanPutsTheApplicationTreeFirst(t *testing.T) {
+	for _, tool := range Tools(ToolsOptions{SourceRoot: "/src/root", AnalyzePath: "/src/root/src", Mode: ModeCheck}) {
+		args := strings.Join(tool.Args, " ")
+		prepends := strings.Contains(args, SharedAutoloadPrependEnv+"=1")
+
+		if tool.Name == "phpstan" {
+			if !prepends {
+				t.Errorf("phpstan does not put the application tree first: %s", args)
+			}
+			// The variable has to lead the command line, or the shell reads it as the binary.
+			if tool.Args[0] != SharedAutoloadPrependEnv+"=1" {
+				t.Errorf("the environment variable must be the first word: %s", args)
+			}
+			continue
+		}
+		if prepends {
+			t.Errorf("%s must keep the QA tree first: %s", tool.Name, args)
+		}
+	}
+}
+
+func TestComposerInstallCommandReResolvesOnceAfterTheManifestChanged(t *testing.T) {
+	cmd := ComposerInstallCommand([]string{"algoritma/php-coding-standards:*"})
+	marker := config.QaToolsDir + "/" + ManifestDirtyFile
+
+	for _, want := range []string{
+		"elif [ -f " + marker + " ]; then composer bin qa update -W --no-interaction --no-progress",
+		"rm -f " + marker,
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("command missing %q: %s", want, cmd)
+		}
+	}
+
+	// A stale lock is only a reason to re-resolve, never a reason to skip the plain install: the
+	// marker branch has to sit between the require branch and the install fallback.
+	update := strings.Index(cmd, "composer bin qa update")
+	install := strings.Index(cmd, "composer bin qa install")
+	if update < 0 || install < 0 || update > install {
+		t.Errorf("update must precede the install fallback: %s", cmd)
+	}
+}
+
+// TestManifestPatchHandsSharedPackagesToTheApplicationTree runs the generated patch through php
+// against a manifest shaped like the ones already committed in projects: the shared packages are
+// pinned in require-dev, which is what installs the duplicate copy PHPStan then fatals on.
+func TestManifestPatchHandsSharedPackagesToTheApplicationTree(t *testing.T) {
+	if _, err := exec.LookPath("php"); err != nil {
+		t.Skip("php not available")
+	}
+
+	dir := t.TempDir()
+	qaDir := filepath.Join(dir, "vendor-bin", "qa")
+	installedPath := filepath.Join(dir, "vendor", "composer", "installed.json")
+	for _, d := range []string{qaDir, filepath.Dir(installedPath)} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	manifestPath := filepath.Join(qaDir, "composer.json")
+	manifest := `{"name":"orobox/qa-tools","require-dev":{"algoritma/php-coding-standards":"*",` +
+		`"symfony/console":"^6.4","symfony/service-contracts":"^3.0","psr/log":"^2"}}`
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// psr/log is deliberately absent: a package the application does not ship has to keep its
+	// pinned requirement, because the QA namespace is then the only place it can come from.
+	installed := `{"packages":[{"name":"symfony/console","version":"v6.4.43"},` +
+		`{"name":"symfony/service-contracts","version":"v3.7.1"}]}`
+	if err := os.WriteFile(installedPath, []byte(installed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// QaToolsDir is replaced first: it has OroRootDir as its prefix.
+	patch := strings.ReplaceAll(manifestPatchPHP(), config.QaToolsDir, qaDir)
+	patch = strings.ReplaceAll(patch, config.OroRootDir, dir)
+	patchPath := filepath.Join(dir, "patch.php")
+	if err := os.WriteFile(patchPath, []byte(patch), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	run := func() {
+		out, err := exec.Command("php", patchPath).CombinedOutput()
+		if err != nil {
+			t.Fatalf("running the manifest patch: %v: %s", err, out)
+		}
+	}
+	run()
+
+	var patched struct {
+		Replace    map[string]string `json:"replace"`
+		RequireDev map[string]string `json:"require-dev"`
+		Autoload   struct {
+			Files []string `json:"files"`
+		} `json:"autoload"`
+	}
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &patched); err != nil {
+		t.Fatalf("patched manifest is not valid JSON: %v: %s", err, raw)
+	}
+
+	// The version is the one actually installed, not the pinned range: that is the copy the
+	// tools will load through the bootstrap.
+	for name, want := range map[string]string{"symfony/console": "6.4.43", "symfony/service-contracts": "3.7.1"} {
+		if got := patched.Replace[name]; got != want {
+			t.Errorf("replace[%s] = %q, want %q", name, got, want)
+		}
+		if _, still := patched.RequireDev[name]; still {
+			t.Errorf("%s is still required: a replaced package must not be installed twice", name)
+		}
+	}
+	if _, ok := patched.Replace["psr/log"]; ok {
+		t.Error("psr/log is not installed in the application tree, so it must keep its requirement")
+	}
+	if got := patched.RequireDev["psr/log"]; got != "^2" {
+		t.Errorf("require-dev[psr/log] = %q, want the pin to survive", got)
+	}
+	if got := patched.RequireDev["algoritma/php-coding-standards"]; got != "*" {
+		t.Errorf("require-dev[algoritma/php-coding-standards] = %q, want the tool requirement untouched", got)
+	}
+	if len(patched.Autoload.Files) != 1 || patched.Autoload.Files[0] != SharedAutoloadRelPath {
+		t.Errorf("autoload.files = %v, want only %q", patched.Autoload.Files, SharedAutoloadRelPath)
+	}
+
+	marker := filepath.Join(qaDir, ManifestDirtyFile)
+	if _, err := os.Stat(marker); err != nil {
+		t.Errorf("the patch changed the manifest but wrote no marker, so the stale lock would fail the install: %v", err)
+	}
+
+	// Idempotence: a second run has nothing to change, so it must not ask for another
+	// re-resolution — that is what keeps every later `orobox qa-init` lock-driven.
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
+	run()
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("a no-op patch still marked the manifest dirty")
+	}
+}
+
+// TestKernelLoadersBootTheEnvironmentBeforeTheKernel guards the reason PHPStan could reach the
+// wrong database: `bin/console` boots the dotenv files through symfony/runtime, and a loader that
+// instantiates the kernel itself has to do the same or every %env(...)% falls back to its default.
+func TestKernelLoadersBootTheEnvironmentBeforeTheKernel(t *testing.T) {
+	loaders := map[string]string{
+		"console-application.php": consoleApplicationLoaderPHP(EnvDev),
+		"object-manager.php":      objectManagerLoaderPHP(EnvTest),
+	}
+
+	for name, php := range loaders {
+		for _, want := range []string{
+			// The file to read is the project's, not Symfony's default: Oro renames it.
+			`$composer['extra']['runtime'] ?? []`,
+			`$runtime['dotenv_path'] ?? '.env'`,
+			`$runtime['env_var_name'] ?? 'APP_ENV'`,
+			`$runtime['debug_var_name'] ?? 'APP_DEBUG'`,
+			`->bootEnv($dotenvPath)`,
+			// A project without symfony/dotenv, or without the file, must still analyse.
+			`is_file($dotenvPath) && class_exists(\Symfony\Component\Dotenv\Dotenv::class)`,
+		} {
+			if !strings.Contains(php, want) {
+				t.Errorf("%s missing %q: %s", name, want, php)
+			}
+		}
+
+		boot := strings.Index(php, "bootEnv(")
+		kernel := strings.Index(php, "new "+oroKernelClass+"(")
+		if boot < 0 || kernel < 0 || boot > kernel {
+			t.Errorf("%s instantiates the kernel before the environment is booted: %s", name, php)
+		}
+	}
+
+	// The environment the kernel boots still has to match the warmed cache PHPStan reads.
+	if !strings.Contains(loaders["object-manager.php"], `new `+oroKernelClass+`('test', true)`) {
+		t.Error("object-manager.php does not boot the environment it was generated for")
 	}
 }

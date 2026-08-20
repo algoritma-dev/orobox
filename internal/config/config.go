@@ -294,44 +294,70 @@ func QaAnalyzePathFor(typeName string) string {
 	return installType.QaAnalyzePath()
 }
 
+// qaSharedPackages are the packages the QA tool set and OroCommerce both need. They are the
+// reason the QA namespace needs any dependency bookkeeping at all: the tools live in the
+// isolated vendor-bin/qa tree, the application lives in vendor/, and a class present in both
+// trees can end up compiled twice in one PHP process. See qatools.SharedVendorScript.
+//
+// The order is stable so the generated manifest patch and the pinned requirements do not
+// reshuffle between runs.
+var qaSharedPackages = []string{
+	"symfony/console", "symfony/event-dispatcher", "symfony/string", "symfony/finder",
+	"symfony/filesystem", "symfony/process", "symfony/options-resolver", "symfony/stopwatch",
+	"symfony/service-contracts", "symfony/event-dispatcher-contracts",
+	"psr/container", "psr/log",
+}
+
+// QaSharedPackages returns the names of the packages both trees need, for the manifest patch
+// that hands them over to the application's tree. A copy is returned so a caller cannot
+// reorder the list the constraints are built from.
+func QaSharedPackages() []string {
+	out := make([]string, len(qaSharedPackages))
+	copy(out, qaSharedPackages)
+	return out
+}
+
 // GetQaSymfonyConstraints returns Composer constraints that pin the QA tools'
 // Symfony components (and the ABI-critical PSR packages) to the same line Oro
 // ships. Without them, bamarni resolves the tools against the latest Symfony,
 // and PHPStan then fatals when it co-loads Oro's older Symfony classes with the
 // tools' newer copies (mismatched method signatures on ServiceLocator,
 // Command::execute, TraceableEventDispatcher, ...).
+//
+// They are the fallback, not the fix: a package the application's own tree ships is removed
+// from the QA requirements entirely by the manifest patch (see qatools.SharedVendorScript),
+// because two identical copies still fatal — the dumped Symfony container inline-requires
+// vendor files by path, and include_once cannot dedupe a second copy under another path.
+// The constraints still matter for the packages the application does not ship, and for the
+// resolution that happens before the patch has anything installed to read.
 func GetQaSymfonyConstraints(oroVersion string) []string {
 	sf := GetVersionsForOro(oroVersion).Symfony
 	if sf == "" {
 		sf = "6.4"
 	}
 
-	components := []string{
-		"console", "event-dispatcher", "string", "finder",
-		"filesystem", "process", "options-resolver", "stopwatch",
-	}
-	constraints := make([]string, 0, len(components)+4)
-	for _, c := range components {
-		constraints = append(constraints, "symfony/"+c+":^"+sf)
+	// Symfony 6.4 pairs with service-contracts v3 / psr-container v2; 5.4 with v2 / v1. psr/log
+	// is only capped on 5.4, where symfony/console conflicts with psr/log >=3, which
+	// algoritma/php-coding-standards otherwise drags in via composer/composer.
+	contracts, container, log := "^3.0", "^2.0", ""
+	if sf == "5.4" {
+		contracts, container, log = "^2.5", "^1.1", "^2"
 	}
 
-	if sf == "5.4" {
-		// Symfony 5.4 pairs with service-contracts v2 / psr-container v1. psr/log is
-		// capped at ^2 because symfony/console 5.4 conflicts with psr/log >=3, which
-		// algoritma/php-coding-standards otherwise drags in via composer/composer.
-		constraints = append(constraints,
-			"symfony/service-contracts:^2.5",
-			"symfony/event-dispatcher-contracts:^2.5",
-			"psr/container:^1.1",
-			"psr/log:^2",
-		)
-	} else {
-		// Symfony 6.4 pairs with service-contracts v3 / psr-container v2.
-		constraints = append(constraints,
-			"symfony/service-contracts:^3.0",
-			"symfony/event-dispatcher-contracts:^3.0",
-			"psr/container:^2.0",
-		)
+	constraints := make([]string, 0, len(qaSharedPackages))
+	for _, name := range qaSharedPackages {
+		switch name {
+		case "symfony/service-contracts", "symfony/event-dispatcher-contracts":
+			constraints = append(constraints, name+":"+contracts)
+		case "psr/container":
+			constraints = append(constraints, name+":"+container)
+		case "psr/log":
+			if log != "" {
+				constraints = append(constraints, name+":"+log)
+			}
+		default:
+			constraints = append(constraints, name+":^"+sf)
+		}
 	}
 	return constraints
 }

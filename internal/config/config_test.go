@@ -520,3 +520,28 @@ func TestSaveConfigOmitsUnsetSSHAgent(t *testing.T) {
 		t.Errorf("expected ssh_agent to be omitted when unset, got:\n%s", data)
 	}
 }
+
+func TestQaSharedPackagesIsACopy(t *testing.T) {
+	first := QaSharedPackages()
+	if len(first) == 0 {
+		t.Fatal("no shared packages")
+	}
+	first[0] = "mutated"
+
+	if second := QaSharedPackages(); second[0] == "mutated" {
+		t.Error("QaSharedPackages hands out the list the constraints are built from")
+	}
+
+	// Every shared package needs a constraint for the case where the application does not ship
+	// it: without one, bamarni resolves that package against the newest Symfony line.
+	constraints := strings.Join(GetQaSymfonyConstraints("6.1"), " ")
+	for _, name := range QaSharedPackages() {
+		if name == "psr/log" {
+			// Only capped on Symfony 5.4; see GetQaSymfonyConstraints.
+			continue
+		}
+		if !strings.Contains(constraints, name+":") {
+			t.Errorf("%s is shared but unconstrained: %s", name, constraints)
+		}
+	}
+}

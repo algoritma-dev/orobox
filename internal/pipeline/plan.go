@@ -699,6 +699,9 @@ func qaToolCommands(oroVersion string) []string {
 			"composer config --no-plugins allow-plugins.bamarni/composer-bin-plugin true",
 			"composer require --dev --no-scripts --no-interaction bamarni/composer-bin-plugin",
 			"composer remove --dev --no-scripts --no-interaction friendsofphp/php-cs-fixer || true",
+			// After the application's tree is final: the patch writes the versions actually
+			// installed there into the QA manifest's `replace`.
+			qatools.SharedVendorScript(),
 			qatools.ComposerInstallCommand(plan.ComposerPackages),
 		)
 	}

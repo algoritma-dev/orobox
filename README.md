@@ -312,11 +312,84 @@ CLI flags always override the configuration. Example:
 orobox qa --phpstan --eslint
 ```
 
+PHPStan boots the real application kernel — phpstan-symfony enumerates the console commands,
+phpstan-doctrine asks Doctrine for the entity manager — so the loaders Orobox generates in
+`vendor-bin/qa/tests/` boot the dotenv files first, the way `bin/console` does through
+symfony/runtime. The file they read is the one `composer.json` names in
+`extra.runtime.dotenv_path` (Oro renames it to `.env-app`), so `%env(...)%` placeholders resolve to
+the same values a console command would see. Without that, Doctrine falls back to its default host
+and the analysis dies with `connection to server at "127.0.0.1" ... refused`.
+
 PHPStan reads a dumped debug container, so it needs the matching environment installed. On a
 developer's machine the tools run in `dev`, the environment `orobox install` already set up, and
 warm `var/cache/dev`. In CI (the `CI` environment variable set) they run in `test` instead, matching
 the install the pipeline performs, and warm `var/cache/test`. The warmed cache is reused by later
 runs.
+
+#### The shared vendor tree
+
+The QA tools live in their own Composer tree, `vendor-bin/qa`, so their versions never touch the
+application's. Every package both trees need — `symfony/console`, the Symfony contracts, `psr/log`
+and the rest — is installed **once**, in the application's tree, and reached from the QA tree
+through the bootstrap Orobox writes to `vendor-bin/qa/orobox/oro-autoload.php`.
+
+That is not a size optimization. A dumped Symfony debug container inline-requires vendor files by
+absolute path, and `include_once` dedupes on the path, not on the class name. With two copies
+installed, PHPStan boots the kernel, the container requires the application's copy of a class the
+QA copy already declared, and the run dies with:
+
+```
+Fatal error: Cannot redeclare interface Symfony\Contracts\Service\ResetInterface
+```
+
+Identical versions in both trees do not help — the paths still differ. So `orobox qa-init` (and the
+deploy pipeline's QA stage) patches `vendor-bin/qa/composer.json` before Composer populates it:
+each shared package the application ships is written into `replace` at the version actually
+installed there and removed from the QA requirements. A package the application does **not** ship
+keeps its pinned requirement and is installed in the QA tree as before.
+
+Replacing the shared packages is not the whole fix, because the two trees always overlap somewhere
+Orobox cannot predict — `twig/twig` arrives in the QA tree through Twig-CS-Fixer, `sebastian/diff`
+through PHP-CS-Fixer, and both live in the application's tree too. What decides the outcome is
+which tree the process resolves a duplicated class from, and that differs per tool:
+
+- **PHPStan** boots the application kernel, so every class the dumped container inline-requires
+  has to come from the application's tree. It runs with the application's autoloader **first**.
+- **Every other tool** never loads that container, so the QA tree stays first and the tools keep
+  dependency versions the application does not have — PHP-CS-Fixer's `sebastian/diff` is five
+  majors ahead of Oro's copy.
+
+The bootstrap reads which order to use from an environment variable Orobox sets on the PHPStan
+command line only, and it is loaded through `autoload.files` — the earliest hook Composer has, so
+no tool code can pin the process to the wrong copy first.
+
+The patch edits your committed manifest, so commit the result together with the refreshed
+`vendor-bin/qa/composer.lock`. The run that first applies it re-resolves the QA tree once; later
+runs are lock-driven again.
+
+#### Project configuration files
+
+Every tool runs against a base configuration Orobox owns: the ruleset
+`algoritma/php-coding-standards` generates in `vendor-bin/qa` for the PHP tools, the one OroCommerce
+ships at the application root for the JS ones. A configuration file of the same name in your source
+root is **merged on top of that base** rather than replacing it, so adding one exclude no longer
+drops the whole shared standard. Your file wins wherever the two disagree.
+
+| File | How it merges |
+| --- | --- |
+| `phpstan.neon` | NEON `includes`: base first, yours last. Relative paths in either file keep resolving against that file. |
+| `rector.php` | Both configs are applied to the same `RectorConfig`, base first. Either shape works — a `static function (RectorConfig $c)` or a `RectorConfig::configure()` builder. |
+| `.php-cs-fixer.dist.php` | Rules merge key by key, yours winning. Risky rules are allowed when either side allows them. Finder, cache file and indentation come from your config. |
+| `.twig-cs-fixer.php` | Rulesets merge rule by rule (keyed by rule class), yours winning. Finder and the remaining `Config` settings come from your config. |
+| `.eslintrc.yml`, `.stylelintrc.yml`, `.stylelintrc-css.yml` | `extends`: base first, yours last. |
+| `.eslintignore`, `.stylelintignore`, `.stylelintignore-css` | **Not merged** — yours replaces the base one. Ignore patterns resolve against the directory of the file holding them, so a merged copy would re-anchor every inherited pattern. |
+
+The merged file is generated into `vendor-bin/qa/merged/` on every run; nothing is written to your
+checkout. When you ship no config of your own, the base one is used directly.
+
+A config Orobox cannot merge — a `rector.php` returning neither a closure nor a builder, a
+`.php-cs-fixer.dist.php` returning something that is not a `PhpCsFixer\ConfigInterface` — fails the
+tool with a message naming the file and what it actually returned. It is never silently ignored.
 
 ### Running the checks in CI
 

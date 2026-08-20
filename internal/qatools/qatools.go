@@ -6,6 +6,7 @@ package qatools
 import (
 	"encoding/base64"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/algoritma-dev/orobox/internal/config"
@@ -126,12 +127,6 @@ const (
 	cssTarget  = "'src/**/Resources/public/**/*.css'"
 )
 
-// configFallback builds a shell expression that prefers the project's own config file and
-// falls back to the one generated in the isolated tools directory.
-func configFallback(sourceRoot, fallbackDir, file string) string {
-	return fmt.Sprintf("$([ -f %s/%s ] && echo %s/%s || echo %s/%s)", sourceRoot, file, sourceRoot, file, fallbackDir, file)
-}
-
 // Tools returns every known tool invocation for the given source root, in run order.
 // Callers filter by name.
 func Tools(opts ToolsOptions) []Tool {
@@ -141,30 +136,32 @@ func Tools(opts ToolsOptions) []Tool {
 	qaDir := config.QaToolsDir
 	oroRoot := config.OroRootDir
 
-	phpstanConfig := configFallback(sourceRoot, qaDir, "phpstan.neon")
-	rectorConfig := configFallback(sourceRoot, qaDir, "rector.php")
-	phpCSFixerConfig := configFallback(sourceRoot, qaDir, ".php-cs-fixer.dist.php")
-	twigCSFixerConfig := configFallback(sourceRoot, qaDir, ".twig-cs-fixer.php")
-	eslintConfig := configFallback(sourceRoot, oroRoot, ".eslintrc.yml")
-	eslintIgnore := configFallback(sourceRoot, oroRoot, ".eslintignore")
-	stylelintConfig := configFallback(sourceRoot, oroRoot, ".stylelintrc.yml")
-	stylelintIgnore := configFallback(sourceRoot, oroRoot, ".stylelintignore")
-	stylelintCSSConfig := configFallback(sourceRoot, oroRoot, ".stylelintrc-css.yml")
-	stylelintCSSIgnore := configFallback(sourceRoot, oroRoot, ".stylelintignore-css")
+	// A project's own config layers on top of the base one rather than replacing it; see
+	// mergedConfig. The ignore files are the exception, and the one there explains why.
+	phpstanConfig := mergedConfig(sourceRoot, qaDir, "phpstan.neon", neonMerge)
+	rectorConfig := mergedConfig(sourceRoot, qaDir, "rector.php", rectorMerge)
+	phpCSFixerConfig := mergedConfig(sourceRoot, qaDir, ".php-cs-fixer.dist.php", phpCSFixerMerge)
+	twigCSFixerConfig := mergedConfig(sourceRoot, qaDir, ".twig-cs-fixer.php", twigCSFixerMerge)
+	eslintConfig := mergedConfig(sourceRoot, oroRoot, ".eslintrc.yml", yamlExtendsMerge)
+	eslintIgnore := mergedConfig(sourceRoot, oroRoot, ".eslintignore", nil)
+	stylelintConfig := mergedConfig(sourceRoot, oroRoot, ".stylelintrc.yml", yamlExtendsMerge)
+	stylelintIgnore := mergedConfig(sourceRoot, oroRoot, ".stylelintignore", nil)
+	stylelintCSSConfig := mergedConfig(sourceRoot, oroRoot, ".stylelintrc-css.yml", yamlExtendsMerge)
+	stylelintCSSIgnore := mergedConfig(sourceRoot, oroRoot, ".stylelintignore-css", nil)
 
-	rectorArgs := []string{oroRoot + "/bin/rector", "process", "--config=" + rectorConfig}
-	phpCSFixerArgs := []string{oroRoot + "/bin/php-cs-fixer", "fix", "--config=" + phpCSFixerConfig}
+	rectorArgs := []string{oroRoot + "/bin/rector", "process", "--config=" + rectorConfig.Path}
+	phpCSFixerArgs := []string{oroRoot + "/bin/php-cs-fixer", "fix", "--config=" + phpCSFixerConfig.Path}
 	// No positional path for twig-cs-fixer: a CLI path would override the config's Finder,
 	// which is what discovers bundle templates under src/**/Resources/views.
-	twigArgs := []string{oroRoot + "/bin/twig-cs-fixer", "lint", "--config=" + twigCSFixerConfig}
+	twigArgs := []string{oroRoot + "/bin/twig-cs-fixer", "lint", "--config=" + twigCSFixerConfig.Path}
 	eslintArgs := []string{
 		"npx", "--yes", "eslint",
 		"--resolve-plugins-relative-to", qaDir + "/node_modules",
-		"--config", eslintConfig, "--ignore-path", eslintIgnore,
+		"--config", eslintConfig.Path, "--ignore-path", eslintIgnore.Path,
 		"--quiet", "--no-error-on-unmatched-pattern",
 	}
-	stylelintArgs := []string{"npx", "--yes", "stylelint", scssTarget, "--config", stylelintConfig, "--ignore-path", stylelintIgnore, "--quiet", "--allow-empty-input"}
-	stylelintCSSArgs := []string{"npx", "--yes", "stylelint", cssTarget, "--config", stylelintCSSConfig, "--ignore-path", stylelintCSSIgnore, "--quiet", "--allow-empty-input"}
+	stylelintArgs := []string{"npx", "--yes", "stylelint", scssTarget, "--config", stylelintConfig.Path, "--ignore-path", stylelintIgnore.Path, "--quiet", "--allow-empty-input"}
+	stylelintCSSArgs := []string{"npx", "--yes", "stylelint", cssTarget, "--config", stylelintCSSConfig.Path, "--ignore-path", stylelintCSSIgnore.Path, "--quiet", "--allow-empty-input"}
 
 	switch mode {
 	case ModeFix:
@@ -200,8 +197,10 @@ func Tools(opts ToolsOptions) []Tool {
 
 	tools := []Tool{
 		{
-			Name:  "phpstan",
-			Setup: phpstanCacheWarmup(opts.Env),
+			Name: "phpstan",
+			// The merged config is written before the cache is warmed: a failed write must stop
+			// the tool, and the warmup is the more expensive of the two.
+			Setup: joinSetup(phpstanConfig.Setup, phpstanCacheWarmup(opts.Env)),
 			// --memory-limit=-1 is not a convenience. PHPStan analyses in parallel worker
 			// processes sized from the core count, and a worker that reaches PHP's memory_limit
 			// dies and returns a garbled response. That surfaces as `Internal error: Call to a
@@ -211,14 +210,18 @@ func Tools(opts ToolsOptions) []Tool {
 			//
 			// --no-progress because a CI log has no terminal to redraw: the bar arrives as
 			// hundreds of block characters wrapped around the real output.
-			Args: append([]string{oroRoot + "/bin/phpstan", "analyze", analyzePath, "--configuration=" + phpstanConfig, "--autoload-file=" + oroRoot + "/vendor/autoload.php", "--memory-limit=-1", "--no-progress"}, phpstanReportArgs...),
+			// The environment variable flips the shared-autoload bootstrap to put the
+			// application's tree first; see SharedAutoloadPrependEnv. It reaches the parallel
+			// workers because they are child processes of this one, and they are where the
+			// kernel is actually booted.
+			Args: append([]string{SharedAutoloadPrependEnv + "=1", oroRoot + "/bin/phpstan", "analyze", analyzePath, "--configuration=" + phpstanConfig.Path, "--autoload-file=" + oroRoot + "/vendor/autoload.php", "--memory-limit=-1", "--no-progress"}, phpstanReportArgs...),
 		},
-		{Name: "rector", Args: rectorArgs, WorkDir: oroRoot},
-		{Name: "php-cs-fixer", Args: phpCSFixerArgs},
-		{Name: "twig-cs-fixer", Args: twigArgs},
-		{Name: "eslint", Args: eslintArgs},
-		{Name: "stylelint", Args: stylelintArgs},
-		{Name: "stylelint-css", Args: stylelintCSSArgs},
+		{Name: "rector", Args: rectorArgs, WorkDir: oroRoot, Setup: rectorConfig.Setup},
+		{Name: "php-cs-fixer", Args: phpCSFixerArgs, Setup: phpCSFixerConfig.Setup},
+		{Name: "twig-cs-fixer", Args: twigArgs, Setup: twigCSFixerConfig.Setup},
+		{Name: "eslint", Args: eslintArgs, Setup: eslintConfig.Setup},
+		{Name: "stylelint", Args: stylelintArgs, Setup: stylelintConfig.Setup},
+		{Name: "stylelint-css", Args: stylelintCSSArgs, Setup: stylelintCSSConfig.Setup},
 	}
 
 	if opts.Report != ReportNone {
@@ -399,9 +402,14 @@ func ComposerInstallCommand(packages []string) string {
 
 	// Package names are compared lowercased, the way composer normalizes them, and stripped of
 	// their ":constraint" suffix so a manifest pinning "^3.0" still counts as declaring it.
+	//
+	// `replace` counts as declared too, and that is not a detail: SharedVendorScript moves the
+	// shared packages from the requirements into `replace`, so without it every run would see
+	// them as undeclared and require them straight back in — reinstalling the duplicate copy the
+	// patch exists to remove.
 	missing := fmt.Sprintf(
 		`php -r '$m = json_decode(@file_get_contents(%q), true) ?: []; `+
-			`$have = array_change_key_case(($m["require"] ?? []) + ($m["require-dev"] ?? [])); `+
+			`$have = array_change_key_case(($m["require"] ?? []) + ($m["require-dev"] ?? []) + ($m["replace"] ?? [])); `+
 			`$out = []; foreach (array_filter(explode(" ", %q)) as $p) { `+
 			`if (!isset($have[strtolower(explode(":", $p)[0])])) { $out[] = $p; } } `+
 			`echo implode(" ", $out);'`,
@@ -415,10 +423,194 @@ func ComposerInstallCommand(packages []string) string {
 	// $MISSING is deliberately unquoted: it is a space-separated package list composer must see
 	// as separate arguments. `require` installs the manifest's other packages along the way, so
 	// the install branch is only for the case where nothing is missing.
+	//
+	// The manifest patch written by SharedVendorScript takes packages out of the QA
+	// requirements, which leaves any committed lock file stale: `install` would then abort with
+	// "the lock file is not up to date". The patch records that it changed something, and this
+	// is the one run that re-resolves — afterwards the marker is gone and installs go back to
+	// being lock-driven. The require branch subsumes it, because requiring re-resolves anyway.
+	marker := config.QaToolsDir + "/" + ManifestDirtyFile
+
+	// The marker is cleared by the resolution that consumed it, not afterwards: a failed
+	// re-resolution has to stay marked so the next run retries it, and clearing it
+	// unconditionally would also swallow the exit status the step is judged on.
 	return fmt.Sprintf(
-		`MISSING="$(%s)"; if [ -n "$MISSING" ]; then (yes y || true) | composer bin qa require --dev -W --no-interaction $MISSING; `+
+		`MISSING="$(%[1]s)"; if [ -n "$MISSING" ]; then (yes y || true) | composer bin qa require --dev -W --no-interaction $MISSING && rm -f %[2]s; `+
+			`elif [ -f %[2]s ]; then composer bin qa update -W --no-interaction --no-progress && rm -f %[2]s; `+
 			`else composer bin qa install --no-interaction --no-progress; fi`,
-		missing)
+		missing, marker)
+}
+
+// ManifestDirtyFile is written into the QA namespace by SharedVendorScript when it changed the
+// manifest, so ComposerInstallCommand knows the committed lock no longer matches and has to
+// re-resolve once instead of failing on it.
+const ManifestDirtyFile = ".orobox-manifest-dirty"
+
+// SharedAutoloadRelPath is where SharedVendorScript writes the bootstrap that puts the
+// application's autoloader behind the QA one. It is inside the QA namespace, under orobox/, the
+// same convention the deploy recipe follows, and it is registered through the manifest's
+// `autoload.files` so every tool gets it — not only PHPStan, which is the only one that takes
+// an --autoload-file.
+const SharedAutoloadRelPath = "orobox/oro-autoload.php"
+
+// SharedAutoloadPrependEnv makes the bootstrap register the application's autoloader *first*
+// instead of last. It is set for PHPStan and for nothing else, because PHPStan is the only tool
+// that boots the application kernel: the dumped debug container inline-requires vendor files by
+// absolute path, so every class the container touches has to come from the application's tree or
+// the second copy fatals with "Cannot redeclare".
+//
+// The other tools never load that container. They keep the QA tree in front, which is what lets
+// them use dependency versions the application's tree does not have — php-cs-fixer's
+// sebastian/diff and PHPStan's phpdoc-parser are both several majors ahead of Oro's copies.
+const SharedAutoloadPrependEnv = "OROBOX_QA_AUTOLOAD_PREPEND"
+
+// sharedAutoloadPHP registers the application's autoloader alongside the QA one, in the order
+// SharedAutoloadPrependEnv asks for.
+//
+// Composer's generated autoload.php always prepends its loader, so the order is taken back:
+// unregistered, then re-registered where it belongs. Appended (the default) keeps the isolation
+// the QA namespace exists for — the tools load their own dependencies from their own tree, and
+// the application's tree only serves what the QA tree does not have. Prepended is the opposite
+// trade, and only PHPStan needs it.
+//
+// It runs from the manifest's `autoload.files`, which is the earliest hook there is: Composer
+// includes it while building the loader, before any tool code can autoload a shared class and
+// pin the process to the wrong copy.
+const sharedAutoloadPHP = `<?php
+
+declare(strict_types=1);
+
+/**
+ * Written by orobox. Do not edit: every ` + "`orobox qa-init`" + ` rewrites it.
+ *
+ * The QA tools live in an isolated Composer tree, the application in its own. A package
+ * installed in both can be compiled twice in one PHP process: the dumped Symfony debug
+ * container inline-requires vendor files by absolute path, and include_once dedupes on the
+ * path, not on the class name — so a second copy under another path fatals with
+ * "Cannot redeclare". The shared packages are therefore installed once, in the application's
+ * tree, and reached from here.
+ */
+
+$autoload = '` + config.OroRootDir + `/vendor/autoload.php';
+
+// The QA namespace is populated before the application's vendor tree exists in the deploy
+// pipeline's layer cache, and the tools have to keep working there.
+if (!is_file($autoload)) {
+    return;
+}
+
+$loader = require $autoload;
+
+if ($loader instanceof \Composer\Autoload\ClassLoader) {
+    spl_autoload_unregister([$loader, 'loadClass']);
+    $loader->register(getenv('` + SharedAutoloadPrependEnv + `') === '1');
+}
+`
+
+// manifestPatchPHP rewrites the QA manifest so the packages the application already ships are
+// not installed a second time.
+//
+// Pinning them to the application's Symfony line — which is what GetQaSymfonyConstraints does —
+// is not enough: two *identical* copies still fatal, because the dumped debug container
+// inline-requires vendor files by path. Only one copy may exist, so each shared package the
+// application actually ships is declared in `replace` (which tells Composer not to install it)
+// and dropped from the QA requirements.
+//
+// The version comes from the application's installed.json rather than from a constant, because
+// that is the copy the tools will really load. A package the application does not ship is left
+// alone, keeping its pinned requirement.
+func manifestPatchPHP() string {
+	var names strings.Builder
+	for i, name := range config.QaSharedPackages() {
+		if i > 0 {
+			names.WriteString(", ")
+		}
+		fmt.Fprintf(&names, "'%s'", name)
+	}
+
+	return fmt.Sprintf(`<?php
+
+declare(strict_types=1);
+
+$manifestPath = '%[1]s/composer.json';
+$installedPath = '%[2]s/vendor/composer/installed.json';
+$markerPath = '%[1]s/%[3]s';
+$bootstrap = '%[4]s';
+$shared = [%[5]s];
+
+$manifest = json_decode((string) @file_get_contents($manifestPath), true);
+if (!is_array($manifest)) {
+    fwrite(STDERR, sprintf("orobox: %%s is not readable JSON\n", $manifestPath));
+    exit(1);
+}
+$before = json_encode($manifest);
+
+$provided = [];
+$installed = json_decode((string) @file_get_contents($installedPath), true);
+foreach ((is_array($installed) ? ($installed['packages'] ?? $installed) : []) as $package) {
+    if (isset($package['name'], $package['version'])) {
+        $provided[strtolower((string) $package['name'])] = ltrim((string) $package['version'], 'v');
+    }
+}
+
+foreach ($shared as $name) {
+    $version = $provided[strtolower($name)] ?? null;
+    if ($version === null) {
+        // Not in the application's tree: the QA namespace is the only place it can come from,
+        // so it keeps its pinned requirement.
+        continue;
+    }
+
+    $manifest['replace'][$name] = $version;
+
+    foreach (['require', 'require-dev'] as $section) {
+        unset($manifest[$section][$name]);
+        if (isset($manifest[$section]) && [] === $manifest[$section]) {
+            unset($manifest[$section]);
+        }
+    }
+}
+
+$files = $manifest['autoload']['files'] ?? [];
+if (!in_array($bootstrap, $files, true)) {
+    $files[] = $bootstrap;
+}
+$manifest['autoload']['files'] = array_values($files);
+
+if (json_encode($manifest) === $before) {
+    exit(0);
+}
+
+file_put_contents($manifestPath, json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+file_put_contents($markerPath, '');
+`, config.QaToolsDir, config.OroRootDir, ManifestDirtyFile, SharedAutoloadRelPath, names.String())
+}
+
+// SharedVendorScript prepares the QA namespace so the tools and the application share one copy
+// of every package both trees need. It creates the namespace and its minimal manifest when they
+// are missing, writes the autoload bootstrap, and patches the manifest.
+//
+// It has to run before Composer populates the namespace: a `replace` entry added afterwards
+// would leave the duplicate copy on disk until the next resolution.
+//
+// The patch runs from a file rather than `php -r` because it is long enough that shell quoting
+// would be the only thing likely to break it; /tmp keeps it out of the committed namespace.
+func SharedVendorScript() string {
+	qa := config.QaToolsDir
+	patchPath := "/tmp/orobox-qa-manifest.php"
+
+	return fmt.Sprintf(`set -e
+mkdir -p %[1]s/%[2]s
+[ -f %[1]s/composer.json ] || printf '{"name":"orobox/qa-tools"}' > %[1]s/composer.json
+printf '%%s' '%[3]s' | base64 -d > %[1]s/%[4]s
+printf '%%s' '%[5]s' | base64 -d > %[6]s
+php %[6]s`,
+		qa,
+		filepath.Dir(SharedAutoloadRelPath),
+		base64.StdEncoding.EncodeToString([]byte(sharedAutoloadPHP)),
+		SharedAutoloadRelPath,
+		base64.StdEncoding.EncodeToString([]byte(manifestPatchPHP())),
+		patchPath)
 }
 
 // oroKernelClass is the OroCommerce application kernel. The Symfony container is dumped to
@@ -458,15 +650,64 @@ func SymfonyConfigDir(env Env) string {
 // phpstanCacheWarmup warms env's debug cache before PHPStan runs. The bootstrap shipped by
 // algoritma/php-coding-standards aborts when the dumped container is missing, which is always
 // the case on a clean pipeline checkout and after `orobox clean` locally. Warming is skipped
-// when both artifacts are already there, so a normal local run pays nothing.
+// as soon as the dumped container is there, so a normal local run pays nothing.
+//
+// Only the container is checked. The other artifact PHPStan reads, the dumped Symfony config
+// directory, is written for the framework bundles that ship one, so an install can legitimately
+// end with a container and no Symfony/Config directory. Gating on both then warms the cache on
+// every single run, which is the slowest step in the QA set.
 //
 // Debug is forced on regardless of the ORO_DEBUG the QA step runs under, because the dumped
 // container PHPStan reads only exists in a debug cache. Warming queries Oro's config tables, so
 // it needs env's database installed: in the pipeline that is the QA step's own oro:install
 // --env=test, locally it is the dev install `orobox install` already performed.
 func phpstanCacheWarmup(env Env) string {
-	return fmt.Sprintf("{ [ -f %s ] && [ -d %s ]; } || ORO_DEBUG=1 php %s/bin/console cache:warmup --env=%s",
-		ContainerXMLPath(env), SymfonyConfigDir(env), config.OroRootDir, env.orDefault())
+	return fmt.Sprintf("[ -f %s ] || ORO_DEBUG=1 php %s/bin/console cache:warmup --env=%s",
+		ContainerXMLPath(env), config.OroRootDir, env.orDefault())
+}
+
+// kernelBootstrapPHP is the preamble both PHPStan kernel loaders share: the application's
+// autoloader, its environment, and its kernel class.
+//
+// The environment is the part that is easy to miss. `bin/console` never instantiates the kernel
+// itself — it hands over to symfony/runtime, which boots the dotenv files first, so every
+// %env(...)% placeholder in the application's configuration resolves. A loader that instantiates
+// the kernel directly skips that, and the placeholders silently fall back to whatever default the
+// configuration declares: Doctrine then connects to the default host instead of the database
+// service and PHPStan reports "connection to server at 127.0.0.1 ... refused" against whichever
+// file it happened to be analysing.
+//
+// Which file to boot is not guessable either — Oro renames it through composer.json's
+// extra.runtime.dotenv_path (.env-app), and the environment and debug variables with it — so the
+// runtime configuration is read from there, exactly like symfony/runtime does, with the framework
+// defaults when a project declares none.
+func kernelBootstrapPHP() string {
+	oro := config.OroRootDir
+
+	return `<?php
+
+declare(strict_types=1);
+
+require '` + oro + `/vendor/autoload.php';
+require_once '` + oro + `/src/` + oroKernelClass + `.php';
+
+$runtime = [];
+$composer = json_decode((string) @file_get_contents('` + oro + `/composer.json'), true);
+if (is_array($composer)) {
+    $runtime = $composer['extra']['runtime'] ?? [];
+}
+
+$dotenvPath = '` + oro + `/' . ($runtime['dotenv_path'] ?? '.env');
+
+if (is_file($dotenvPath) && class_exists(\Symfony\Component\Dotenv\Dotenv::class)) {
+    // Existing variables win: the QA step runs inside the application container, whose own
+    // environment is the more specific one.
+    (new \Symfony\Component\Dotenv\Dotenv(
+        $runtime['env_var_name'] ?? 'APP_ENV',
+        $runtime['debug_var_name'] ?? 'APP_DEBUG',
+    ))->bootEnv($dotenvPath);
+}
+`
 }
 
 // consoleApplicationLoaderPHP boots the real Oro kernel so phpstan-symfony can enumerate
@@ -474,32 +715,22 @@ func phpstanCacheWarmup(env Env) string {
 // application classes). It boots env to match the containerXmlPath below: that is the cache the
 // QA step warms, so the loader and the dumped container have to agree.
 func consoleApplicationLoaderPHP(env Env) string {
-	return `<?php
-
-declare(strict_types=1);
-
-use Symfony\Bundle\FrameworkBundle\Console\Application;
-
-require '` + config.OroRootDir + `/vendor/autoload.php';
-require_once '` + config.OroRootDir + `/src/` + oroKernelClass + `.php';
-
+	return kernelBootstrapPHP() + `
 $kernel = new ` + oroKernelClass + `('` + string(env.orDefault()) + `', true);
 
-return new Application($kernel);
+return new \Symfony\Bundle\FrameworkBundle\Console\Application($kernel);
 `
 }
 
 // objectManagerLoaderPHP returns Oro's Doctrine ObjectManager for phpstan-doctrine,
 // replacing the throwing stub the plugin generates. Boots env for the same reason as the
 // console loader above.
+//
+// This is the loader that needs the dotenv boot most: phpstan-doctrine asks the manager for the
+// database platform, and Doctrine DBAL 3 opens a real connection to detect the server version
+// unless the configuration pins it.
 func objectManagerLoaderPHP(env Env) string {
-	return `<?php
-
-declare(strict_types=1);
-
-require '` + config.OroRootDir + `/vendor/autoload.php';
-require_once '` + config.OroRootDir + `/src/` + oroKernelClass + `.php';
-
+	return kernelBootstrapPHP() + `
 $kernel = new ` + oroKernelClass + `('` + string(env.orDefault()) + `', true);
 $kernel->boot();
 
