@@ -616,20 +616,22 @@ func qaWarmupCommand() string {
 	return fmt.Sprintf(`# Preparing the QA cache: Oro install and warmed test cache
 set -e
 stamp=%[1]s/.orobox-qa-fingerprint
-fingerprint=$(cat composer.lock $(find src -path '*Migrations*' -type f 2>/dev/null | sort) 2>/dev/null | md5sum | cut -c1-32)
+%[7]s
 full_install() {
   rm -rf %[4]s "$stamp"
   %[5]s
   %[6]s
   php bin/console oro:install --env=test --no-interaction --drop-database --skip-translations
   php bin/console cache:warmup --env=test
-  printf '%%s' "$fingerprint" > "$stamp"
+  if [ -n "$fingerprint" ]; then
+    printf '%%s' "$fingerprint" > "$stamp"
+  fi
 }
-if [ -z "$OROBOX_NO_CACHE" ] && [ "$(cat "$stamp" 2>/dev/null)" = "$fingerprint" ] && [ -f %[2]s ] && [ -d %[3]s ]; then
+if [ -n "$fingerprint" ] && [ -z "$OROBOX_NO_CACHE" ] && [ "$(cat "$stamp" 2>/dev/null)" = "$fingerprint" ] && [ -f %[2]s ] && [ -d %[3]s ]; then
   echo 'Reusing the cached Oro install and warmed test cache.'
   exit 0
 fi
-if [ -z "$OROBOX_NO_CACHE" ] && [ -s "$stamp" ]; then
+if [ -n "$fingerprint" ] && [ -z "$OROBOX_NO_CACHE" ] && [ -s "$stamp" ]; then
   echo 'The cached install is stale: applying the pending migrations instead of reinstalling.'
   rm -rf %[4]s
   %[5]s
@@ -642,7 +644,33 @@ fi
 echo 'Rebuilding the QA cache: installing Oro and warming the test cache. Later runs reuse this.'
 full_install`,
 		qatools.CacheVolumeDir(), qatools.ContainerXMLPath(qatools.EnvTest), qatools.SymfonyConfigDir(qatools.EnvTest),
-		qatools.CacheDir(qatools.EnvTest), oroWritableDirsCommand(), qaDatabaseResetCommand())
+		qatools.CacheDir(qatools.EnvTest), oroWritableDirsCommand(), qaDatabaseResetCommand(),
+		sourceFingerprintCommand("the QA cache will be rebuilt and not cached"))
+}
+
+// sourceFingerprintCommand computes the fingerprint the QA and test caches are keyed on —
+// composer.lock plus every migration file — into the shell variable "fingerprint", and leaves it
+// empty when it cannot.
+//
+// The files are read one per `cat` rather than as one argument list, which a project with many
+// bundles can overflow, and the result is caught instead of being left to `set -e`. The earlier
+// form put the whole computation in a command substitution with stderr sent to /dev/null, so any
+// failure to read a file took the step down with no output whatsoever: the run reported a bare
+// "exit code: 1" for a step that had not printed a single line. Now the reason reaches the step
+// output and the step continues without its cache, which costs time and nothing else.
+//
+// consequence describes, for that message, what proceeding without a fingerprint means.
+func sourceFingerprintCommand(consequence string) string {
+	return fmt.Sprintf(`fingerprint_sources() {
+  cat composer.lock
+  find src -path '*Migrations*' -type f 2>/dev/null | LC_ALL=C sort | while IFS= read -r file; do
+    cat "$file"
+  done
+}
+fingerprint=$(fingerprint_sources | md5sum | cut -c1-32) || fingerprint=''
+if [ -z "$fingerprint" ]; then
+  echo 'Could not fingerprint composer.lock and the migration files: %s.'
+fi`, consequence)
 }
 
 // qaDatabaseResetCommand empties the persistent QA database before oro:install runs against it.
@@ -877,16 +905,21 @@ restore_dump() {
 }
 save_dump() {
   pg_dump -h %[4]s -U %[5]s --no-owner --no-privileges %[7]s | gzip -c > %[1]s
-  printf '%%s' "$fingerprint" > %[2]s
+  if [ -n "$fingerprint" ]; then
+    printf '%%s' "$fingerprint" > %[2]s
+  fi
 }
 rebuild() {
   # Applies whatever migrations the restored schema is missing, and — the part that matters even
   # when there are none — regenerates the extend entity classes the dump does not carry.
   php bin/console oro:platform:update --force --env=test --timeout=0 --skip-download-translations --skip-translations
 }
-fingerprint=$(cat composer.lock $(find src -path '*Migrations*' -type f 2>/dev/null | sort) 2>/dev/null | md5sum | cut -c1-32)-pg%[8]s
+%[10]s
+if [ -n "$fingerprint" ]; then
+  fingerprint="$fingerprint-pg%[8]s"
+fi
 php bin/console doctrine:database:create --env=test --if-not-exists
-if [ -z "$OROBOX_NO_CACHE" ] && [ "$(cat %[2]s 2>/dev/null)" = "$fingerprint" ] && [ -f %[1]s ]; then
+if [ -n "$fingerprint" ] && [ -z "$OROBOX_NO_CACHE" ] && [ "$(cat %[2]s 2>/dev/null)" = "$fingerprint" ] && [ -f %[1]s ]; then
   echo 'Restoring the cached test database.'
   restore_dump %[1]s
   rebuild
@@ -906,7 +939,8 @@ php bin/console oro:install --no-interaction --env=test --skip-translations
 save_dump`,
 		testDBDumpFile, testDBStampFile, oroWritableDirsCommand(),
 		testDBService, testDBUser, testDBPassword, testDBName, major,
-		testDBBaseDumpFile)
+		testDBBaseDumpFile,
+		sourceFingerprintCommand("the cached test database will be rebuilt and not cached"))
 }
 
 // postgresMajor is the major version of a pinned image tag: "16.1-alpine" is 16. It names the

@@ -69,7 +69,8 @@ func runDeployInitCommand(conf *config.OroConfig) {
 		os.Exit(1)
 	}
 
-	utils.PrintSuccess("Deployer initialized. Commit deploy.php, vendor-bin/deploy/composer.json and composer.lock.")
+	utils.PrintSuccess("Deployer initialized. Commit " + config.DeployStubRelPath + ", " +
+		config.DeployRecipeRelPath + ", vendor-bin/deploy/composer.json and vendor-bin/deploy/composer.lock.")
 	utils.PrintInfo("Then run 'orobox deploy <stage>'.")
 }
 

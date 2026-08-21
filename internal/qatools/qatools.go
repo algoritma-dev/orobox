@@ -79,6 +79,10 @@ type ToolsOptions struct {
 	Mode        Mode
 	Report      Report
 	ReportDir   string
+	// Baseline is the container path PHPStan writes a generated baseline to. Empty for a normal
+	// analysis; when set, PHPStan records what it finds instead of failing on it, so the only tool
+	// the caller should keep in the list is PHPStan itself — the others have no baseline.
+	Baseline string
 }
 
 // Tool is a single QA tool invocation.
@@ -180,9 +184,9 @@ func Tools(opts ToolsOptions) []Tool {
 
 	// Each tool's own GitLab reporter, so nothing needs converting anywhere. The flag names differ
 	// because their CLIs do; the document they produce is the same CodeClimate subset.
-	var phpstanReportArgs []string
+	var phpstanExtraArgs []string
 	if opts.Report == ReportGitLab {
-		phpstanReportArgs = []string{"--error-format=gitlab"}
+		phpstanExtraArgs = []string{"--error-format=gitlab"}
 		rectorArgs = append(rectorArgs, "--output-format=gitlab")
 		phpCSFixerArgs = append(phpCSFixerArgs, "--format=gitlab")
 		twigArgs = append(twigArgs, "--report=gitlab")
@@ -193,6 +197,21 @@ func Tools(opts ToolsOptions) []Tool {
 		stylelintFormatter := "--custom-formatter=" + qaDir + "/node_modules/stylelint-formatter-gitlab"
 		stylelintArgs = append(stylelintArgs, stylelintFormatter)
 		stylelintCSSArgs = append(stylelintCSSArgs, stylelintFormatter)
+	}
+
+	// Generating a baseline replaces PHPStan's reporting rather than adding to it: the run's whole
+	// output is the baseline file, so the error format is irrelevant and the two flags are refused
+	// together by the command layer.
+	//
+	// --allow-empty-baseline is what keeps a clean tree from failing the command: without it PHPStan
+	// exits non-zero with "Baseline could not be generated" when it finds nothing to record, and an
+	// empty baseline is the correct answer in that case.
+	//
+	// A baseline already active through the project config does not have to be excluded here.
+	// PHPStan drops the file it is about to generate from its own includes, so a regenerated
+	// baseline lists what the tree reports today rather than coming back empty.
+	if opts.Baseline != "" {
+		phpstanExtraArgs = []string{"--generate-baseline=" + opts.Baseline, "--allow-empty-baseline"}
 	}
 
 	tools := []Tool{
@@ -214,7 +233,7 @@ func Tools(opts ToolsOptions) []Tool {
 			// application's tree first; see SharedAutoloadPrependEnv. It reaches the parallel
 			// workers because they are child processes of this one, and they are where the
 			// kernel is actually booted.
-			Args: append([]string{SharedAutoloadPrependEnv + "=1", oroRoot + "/bin/phpstan", "analyze", analyzePath, "--configuration=" + phpstanConfig.Path, "--autoload-file=" + oroRoot + "/vendor/autoload.php", "--memory-limit=-1", "--no-progress"}, phpstanReportArgs...),
+			Args: append([]string{SharedAutoloadPrependEnv + "=1", oroRoot + "/bin/phpstan", "analyze", analyzePath, "--configuration=" + phpstanConfig.Path, "--autoload-file=" + oroRoot + "/vendor/autoload.php", "--memory-limit=-1", "--no-progress"}, phpstanExtraArgs...),
 		},
 		{Name: "rector", Args: rectorArgs, WorkDir: oroRoot, Setup: rectorConfig.Setup},
 		{Name: "php-cs-fixer", Args: phpCSFixerArgs, Setup: phpCSFixerConfig.Setup},

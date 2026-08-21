@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/algoritma-dev/orobox/internal/config"
@@ -32,6 +33,8 @@ var (
 	qaReportPath     string
 	qaCacheScope     string
 	qaBaseCacheScope string
+
+	qaGenerateBaseline bool
 )
 
 var qaCmd = &cobra.Command{
@@ -60,6 +63,7 @@ func init() {
 	qaCmd.Flags().StringVar(&qaReportPath, "report-path", "", "Where to write the report (default: "+reportsRelDir+"/code-quality.json)")
 	qaCmd.Flags().StringVar(&qaCacheScope, "cache-scope", "", "Name the cache volume family, dagger engine only (default: the current branch)")
 	qaCmd.Flags().StringVar(&qaBaseCacheScope, "base-cache-scope", "", "Seed a missing test database dump from this cache scope, dagger engine only")
+	qaCmd.Flags().BoolVar(&qaGenerateBaseline, "generate-baseline", false, "Record PHPStan's current findings in "+qatools.BaselineFile+" instead of failing on them")
 }
 
 // checkMissingToolBinaries returns the names of tools whose binaries are not present in the container.
@@ -125,14 +129,66 @@ func runQaCommand() {
 		os.Exit(1)
 	}
 
+	baseline := ""
+	if qaGenerateBaseline {
+		if baseline, err = resolveBaseline(engine, format); err != nil {
+			utils.PrintError(err.Error())
+			os.Exit(1)
+		}
+		// The baseline run is a PHPStan run, whatever the configuration enables: a project that
+		// left PHPStan off in .orobox.yaml and then asked for a baseline asked for PHPStan.
+		qaPhpstan = true
+	}
+
 	if engine == engineDagger {
 		runQaOnDagger(format)
 		return
 	}
-	runQaOnCompose(format)
+	runQaOnCompose(format, baseline)
 }
 
-func runQaOnCompose(format qatools.Report) {
+// resolveBaseline validates --generate-baseline against the rest of the command and returns the
+// container path PHPStan writes.
+//
+// The Dagger engine is refused rather than supported. It analyses a clean clone inside a container
+// whose filesystem is thrown away with the run, so the baseline it generated would never reach the
+// checkout that has to commit it — the same reason that engine runs the tools in check-only mode.
+//
+// A report is refused because the two ask PHPStan for different output from one run: --report wants
+// the findings as GitLab JSON, a baseline run wants them as NEON in a file and prints nothing to
+// act on.
+//
+// The other tools are refused instead of ignored. Only PHPStan has a baseline, and a command line
+// that named Rector too would otherwise run PHPStan alone without saying so.
+func resolveBaseline(engine string, format qatools.Report) (string, error) {
+	if engine == engineDagger {
+		return "", fmt.Errorf("--generate-baseline needs --engine=%s: the %s engine analyses a throwaway clone, so the baseline it wrote could not be committed", engineCompose, engineDagger)
+	}
+	if format != qatools.ReportNone {
+		return "", fmt.Errorf("--generate-baseline and --report cannot be combined: a baseline run records the findings in %s instead of reporting them", qatools.BaselineFile)
+	}
+
+	var others []string
+	for flag, set := range map[string]bool{
+		"--rector":        qaRector,
+		"--php-cs-fixer":  qaPhpCSFixer,
+		"--twig-cs-fixer": qaTwigCSFixer,
+		"--eslint":        qaEslint,
+		"--stylelint":     qaStylelint,
+	} {
+		if set {
+			others = append(others, flag)
+		}
+	}
+	if len(others) > 0 {
+		sort.Strings(others)
+		return "", fmt.Errorf("--generate-baseline only applies to PHPStan; drop %s", strings.Join(others, ", "))
+	}
+
+	return qatools.BaselinePath(config.GetSourceRootContainerPath()), nil
+}
+
+func runQaOnCompose(format qatools.Report, baseline string) {
 	workingDir := config.GetSourceRootContainerPath()
 	env := resolveQaEnv()
 
@@ -159,6 +215,7 @@ func runQaOnCompose(format qatools.Report) {
 		Mode:        qatools.ModeFix,
 		Report:      format,
 		ReportDir:   containerReportDir,
+		Baseline:    baseline,
 	})
 
 	anyEnabled := false
@@ -211,6 +268,15 @@ func runQaOnCompose(format qatools.Report) {
 
 	err := docker.RunComposeCommand("", args...)
 
+	if baseline != "" {
+		if err != nil {
+			utils.PrintError("PHPStan could not generate the baseline.")
+			os.Exit(1)
+		}
+		finishBaseline(config.GetHostBundlePath())
+		return
+	}
+
 	if format != qatools.ReportNone {
 		// The script exits 0 whatever the tools concluded, so the outcome comes from the status
 		// file and the reports are merged either way.
@@ -224,6 +290,45 @@ func runQaOnCompose(format qatools.Report) {
 	}
 
 	utils.PrintSuccess("All selected QA tools passed!")
+}
+
+// finishBaseline wires the freshly generated baseline into the project's own phpstan.neon, so the
+// next `orobox qa` actually reads it.
+//
+// projectDir is the host source root, the same directory the container wrote the baseline to
+// through the bind mount. A missing phpstan.neon is written rather than reported: the file is the
+// project's half of the merged configuration, and the include has nowhere else to live.
+//
+// A failure here warns instead of failing the command. The baseline itself is on disk and correct
+// at that point, and one `includes` line is something the developer can add.
+func finishBaseline(projectDir string) {
+	baselinePath := qatools.BaselinePath(projectDir)
+	if _, err := os.Stat(baselinePath); err != nil {
+		utils.PrintError(fmt.Sprintf("PHPStan reported success but %s was not written: %v", qatools.BaselineFile, err))
+		os.Exit(1)
+	}
+	utils.PrintSuccess("Wrote " + baselinePath + ".")
+
+	configPath := filepath.Join(projectDir, "phpstan.neon")
+	current, err := os.ReadFile(configPath)
+	if err != nil && !os.IsNotExist(err) {
+		utils.PrintWarning(fmt.Sprintf("Could not read %s: %v", configPath, err))
+		utils.PrintWarning("Add the baseline to its `includes` by hand to activate it.")
+		return
+	}
+
+	updated, changed := qatools.EnsureBaselineInclude(string(current))
+	if !changed {
+		utils.PrintInfo(fmt.Sprintf("phpstan.neon already includes %s.", qatools.BaselineFile))
+		return
+	}
+
+	if err := os.WriteFile(configPath, []byte(updated), 0o644); err != nil {
+		utils.PrintWarning(fmt.Sprintf("Could not add %s to %s: %v", qatools.BaselineFile, configPath, err))
+		utils.PrintWarning("Add it to the file's `includes` by hand to activate it.")
+		return
+	}
+	utils.PrintSuccess(fmt.Sprintf("Added %s to the `includes` of %s.", qatools.BaselineFile, configPath))
 }
 
 // runQaOnDagger runs the pipeline's own QA step: the same tools, the same check-only mode and the
@@ -257,8 +362,12 @@ func runQaOnDagger(format qatools.Report) {
 	utils.PrintInfo("Running the QA tools in the pipeline engine. The first run has no caches and takes a while.")
 
 	result, runErr := pipeline.Run(context.Background(), plan, pipeline.Options{
-		ProjectDir:    projectDir,
-		Debug:         viper.GetBool("debug"),
+		ProjectDir: projectDir,
+		Debug:      viper.GetBool("debug"),
+		// composer install runs in the pipeline too, so a private VCS repository over SSH needs
+		// the developer's agent here exactly as a deploy does.
+		SSHAuthSock:   os.Getenv("SSH_AUTH_SOCK"),
+		SSHPrivateKey: os.Getenv("OROBOX_DEPLOY_SSH_KEY"),
 		ReportHostDir: filepath.Join(projectDir, rawReportsRelDir),
 	})
 

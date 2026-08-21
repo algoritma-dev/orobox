@@ -216,11 +216,15 @@ func loadDeployConfig() (*config.OroConfig, error) {
 	return &conf, nil
 }
 
-// checkDeployerFiles verifies the two files the release step needs from the repository.
+// checkDeployerFiles verifies the three files the release step needs from the repository.
 // The vendor tree itself is installed inside the pipeline, so it is deliberately not checked:
 // a CI clone never has it.
+//
+// The recipe is checked even though deploy-init rewrites it on every run, because nothing in the
+// pipeline does: deploy.php requires it by path, so a checkout without it fails inside the release
+// container, long after the build has been paid for.
 func checkDeployerFiles(projectDir string) error {
-	for _, rel := range []string{config.DeployStubRelPath, "vendor-bin/deploy/composer.json"} {
+	for _, rel := range []string{config.DeployStubRelPath, "vendor-bin/deploy/composer.json", config.DeployRecipeRelPath} {
 		if _, err := os.Stat(filepath.Join(projectDir, rel)); err != nil {
 			return fmt.Errorf("%s is missing: run 'orobox deploy-init' and commit the generated files", rel)
 		}

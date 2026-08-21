@@ -290,6 +290,26 @@ Configures and installs the necessary QA tools (PHPStan, coding standards, ESLin
 orobox qa-init
 ```
 
+`qa-init` also writes a configuration stub for each enabled tool into your source root, when the
+file is not there yet. The stubs are yours from the first write on: Orobox layers them on top of the
+shared standard rather than replacing it — see
+[Project configuration files](#project-configuration-files) — so what you put in them wins without
+repeating the standard.
+
+| Stub | Written for |
+| --- | --- |
+| `phpstan.neon`, `rector.php`, `.php-cs-fixer.dist.php`, `.twig-cs-fixer.php` | every install type |
+| `.eslintrc.yml`, `.stylelintrc.yml`, `.stylelintrc-css.yml` | `type: bundle` only |
+
+The JS stubs are bundle-only because a project install roots its sources at the same directory as
+OroCommerce's own copies of those files, so a stub there would replace them rather than extend them.
+The ignore files (`.eslintignore`, `.stylelintignore`) are never generated for the same reason: they
+are chosen, not merged.
+
+The finder in `.php-cs-fixer.dist.php` and `.twig-cs-fixer.php` is the tree those tools actually
+walk — the merge takes rules from both sides but the finder from yours. Edit it rather than deleting
+it.
+
 ### 9. Run QA Tools (`qa`)
 Executes the QA analysis tools. When no flag is provided, runs the tools enabled in `.orobox.yaml` under `test.qa` (all tools are enabled by default if not configured).
 ```bash
@@ -306,11 +326,39 @@ Options:
 - `--report=gitlab`: Write a GitLab Code Quality report.
 - `--report-path`: Where to write it (default `var/orobox/reports/code-quality.json`).
 - `--cache-scope`, `--base-cache-scope`: Dagger engine only; same meaning as on `orobox deploy`.
+- `--generate-baseline`: Record PHPStan's current findings instead of failing on them. See
+  [The PHPStan baseline](#the-phpstan-baseline).
 
 CLI flags always override the configuration. Example:
 ```bash
 orobox qa --phpstan --eslint
 ```
+
+#### The PHPStan baseline
+
+An existing codebase usually has more findings than anyone is going to fix before the next commit.
+A baseline is how PHPStan is turned on anyway: the findings that exist today are recorded in a file
+and ignored from then on, so a run fails only on what was added after it.
+
+```bash
+orobox qa --generate-baseline
+```
+
+The command runs PHPStan alone — that is the only tool with a baseline — writes
+`phpstan-baseline.neon` next to your `phpstan.neon`, and adds it to that file's `includes` so the
+next `orobox qa` reads it. Both files belong in the repository: without the baseline every developer
+and every pipeline sees the whole backlog again.
+
+Run it again after fixing some of the findings and the baseline shrinks to what is still there;
+PHPStan leaves the file it is regenerating out of its own configuration, so a refresh reports the
+tree as it is now rather than coming back empty.
+
+Two combinations are refused rather than half-honoured:
+
+- `--engine=dagger`, because that engine analyses a throwaway clone of a git ref — the baseline it
+  wrote would never reach the checkout that has to commit it.
+- `--report=gitlab`, because a baseline run records the findings in NEON instead of reporting them,
+  so there would be nothing to put in the report.
 
 PHPStan boots the real application kernel — phpstan-symfony enumerates the console commands,
 phpstan-doctrine asks Doctrine for the entity manager — so the loaders Orobox generates in
@@ -430,45 +478,13 @@ wrong, they are what says whether the tool or the merge is to blame.
 
 #### GitLab CI
 
-```yaml
-.orobox:
-  image: docker:27
-  services:
-    - docker:27-dind
-  variables:
-    DOCKER_HOST: tcp://docker:2375
-    DOCKER_TLS_CERTDIR: ""
+`orobox ci-init` generates the pipeline — see
+[CI Initialization (`ci-init`)](#13-ci-initialization-ci-init). The generated jobs run
+`orobox qa --report=gitlab`, `orobox test --report=gitlab` and `orobox deploy <stage>`, and publish
+the reports at the paths those commands write to.
 
-lint:
-  extends: .orobox
-  script:
-    - orobox qa --report=gitlab
-  artifacts:
-    reports:
-      codequality: var/orobox/reports/code-quality.json
-
-test:
-  extends: .orobox
-  script:
-    - orobox test --report=gitlab
-  artifacts:
-    reports:
-      junit: var/orobox/reports/junit.xml
-
-deploy:production:
-  extends: .orobox
-  script:
-    - orobox deploy production --yes --skip-qa --skip-test
-  needs: [lint, test]
-  artifacts:
-    paths:
-      - var/orobox/deploy/production/
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main"
-```
-
-`--skip-qa --skip-test` on the deploy job is sound here in a way it would not be otherwise: the two
-jobs ran the same code, on the same commit, against the same cache scope.
+`--skip-qa --skip-test` on the generated deploy job is sound in a way it would not be otherwise:
+the lint and test jobs ran the same code, on the same commit, against the same cache scope.
 
 Note that `orobox deploy` in CI also builds from `CI_PROJECT_DIR` rather than cloning, and the
 release therefore checks out the commit that was built (`CI_COMMIT_SHA`) rather than the stage's
@@ -510,7 +526,7 @@ Generated files:
 - `deploy.php` — the Deployer entry point. Created only when absent, and yours afterwards: put shared files/dirs and any project-specific tasks here.
 - `vendor-bin/deploy/orobox/oro.php` — the Oro recipe. Rewritten on every `deploy-init` run, so recipe fixes reach existing projects without a manual merge.
 
-Commit `deploy.php`, `vendor-bin/deploy/composer.json` and `vendor-bin/deploy/composer.lock`. The pipeline installs Deployer's vendor tree itself, so it does not need to be committed.
+Commit `deploy.php`, `vendor-bin/deploy/orobox/oro.php`, `vendor-bin/deploy/composer.json` and `vendor-bin/deploy/composer.lock`. The recipe is committed even though `deploy-init` rewrites it: nothing in the pipeline regenerates it, and `deploy.php` requires it by path. The pipeline installs Deployer's vendor tree itself, so that does not need to be committed.
 
 Resulting `deploy` block:
 ```yaml
@@ -538,7 +554,32 @@ deploy:
 
 Re-running `deploy-init` reuses the existing values as prompt defaults, so it doubles as an edit flow.
 
-### 13. Deploy (`deploy`)
+### 13. CI Initialization (`ci-init`)
+Generates the GitLab CI pipeline from `.orobox.yaml`.
+
+**Available for `type: project` only** — the only CI-viable engine is Dagger, and its image exists
+for the project type alone. Any other type falls back to the compose engine, which would need a full
+`composer install` and a full `oro:install` per job.
+
+```bash
+orobox ci-init
+```
+
+Generated files:
+- `.gitlab-ci-orobox.yml` — the `orobox:lint`, `orobox:test` and `orobox:deploy:<stage>` jobs.
+  Rewritten on every run, so job improvements reach existing projects without a manual merge.
+- `.gitlab-ci.yml` — created only when absent, and yours afterwards. It does nothing but
+  `include: - local: .gitlab-ci-orobox.yml`; put your own stages, variables and jobs here.
+
+One deploy job is generated per stage in the `deploy` block, gated on that stage's `ref` and set to
+`when: manual`. Remove `when: manual` in your own file to release on every push instead.
+
+The generated jobs install the `orobox` binary pinned to the version that generated the file, plus
+`git`, which the pipeline needs to derive its upload exclude list from `.gitignore`.
+
+If `.gitlab-ci.yml` already existed without the include, `ci-init` prints the two lines to add.
+
+### 14. Deploy (`deploy`)
 Runs the full pipeline for one stage: build and check in [Dagger](https://dagger.io), then release through PHP Deployer.
 ```bash
 orobox deploy production
@@ -629,8 +670,9 @@ Environment variables read by `orobox deploy`:
 
 #### GitLab CI example
 
-A three-job pipeline — lint, test, deploy — is in [Running the checks in CI](#running-the-checks-in-ci),
-where the lint and test jobs use `orobox qa` and `orobox test` rather than a `deploy` in disguise.
+`orobox ci-init` generates the three-job pipeline — lint, test, deploy — see
+[CI Initialization (`ci-init`)](#13-ci-initialization-ci-init). The lint and test jobs use
+`orobox qa` and `orobox test` rather than a `deploy` in disguise.
 
 Add the deploy key as a masked CI variable named `OROBOX_DEPLOY_SSH_KEY`.
 

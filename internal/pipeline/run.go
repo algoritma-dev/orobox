@@ -60,6 +60,10 @@ type Result struct {
 // container. An ssh config entry points the stage host at it, so no agent is needed in CI.
 const deployKeyPath = "/root/.ssh/id_orobox_deploy"
 
+// containerSSHAgentSocket is where the host agent socket is forwarded inside every container
+// that talks to an SSH server: composer's git clones and the remote release alike.
+const containerSSHAgentSocket = "/tmp/ssh-agent.sock"
+
 type runner struct {
 	client *dagger.Client
 	plan   *Plan
@@ -402,22 +406,41 @@ func (r *runner) lockSource(ctx context.Context) (*dagger.Directory, error) {
 		return nil, fmt.Errorf("could not list the repository contents: %w", err)
 	}
 	present := map[string]bool{}
+	directories := map[string]bool{}
 	for _, entry := range entries {
-		present[strings.TrimSuffix(entry, "/")] = true
+		name := strings.TrimSuffix(entry, "/")
+		present[name] = true
+		if strings.HasSuffix(entry, "/") {
+			directories[name] = true
+		}
 	}
 	if !present["composer.lock"] {
 		return nil, fmt.Errorf("composer.lock is missing from %s: the pipeline installs dependencies from the lock file and will not resolve them itself",
 			r.sourceDescription())
 	}
 
+	paths := LockLayerPaths([]byte(manifest))
+	// A patches-file declares its patches outside composer.json, so the paths they live in can
+	// only be known after reading it. A file that cannot be read is left to composer to report.
+	if file := PatchesFile([]byte(manifest)); file != "" && present[strings.SplitN(file, "/", 2)[0]] {
+		if contents, err := r.source.File(file).Contents(ctx); err == nil {
+			paths = append(paths, PatchFilePaths([]byte(contents))...)
+		}
+	}
+
 	dir := r.client.Directory()
-	for _, path := range LockLayerPaths([]byte(manifest)) {
+	mounted := map[string]bool{}
+	for _, path := range paths {
 		// Only the top-level name can be checked cheaply; a nested path repository is trusted to
 		// exist, and composer reports it clearly enough when it does not.
 		if top := strings.SplitN(path, "/", 2)[0]; !present[top] {
 			continue
 		}
-		if strings.Contains(path, ".") && !strings.Contains(path, "/") {
+		if mounted[path] {
+			continue
+		}
+		mounted[path] = true
+		if !strings.Contains(path, "/") && !directories[path] {
 			dir = dir.WithFile(path, r.source.File(path))
 			continue
 		}
@@ -492,7 +515,42 @@ func (r *runner) container(step Step) *dagger.Container {
 		ctr = ctr.WithWorkdir(step.Workdir)
 	}
 
+	// composer.json may point at private VCS repositories over SSH, so every layer that runs
+	// composer needs the same credentials the clone got.
+	ctr = r.withComposerSSH(ctr)
+
 	return ctr.WithExec([]string{"mkdir", "-p", artifactContainerDir})
+}
+
+// withComposerSSH gives a container the credentials composer needs to clone a private VCS
+// repository declared in composer.json. The layer containers have no ~/.ssh at all, so without
+// this an SSH repository URL fails on host key verification before authentication is even
+// attempted. The agent socket is preferred when one exists; a key passed as a secret is the CI
+// case. Nothing here depends on the host's known_hosts, which would make the dependency layers
+// differ per developer and lose their cache.
+func (r *runner) withComposerSSH(ctr *dagger.Container) *dagger.Container {
+	if r.sshSocket == nil && r.sshKey == nil {
+		return ctr
+	}
+
+	// HOME may be unwritable in the published image, so the host keys are collected in /tmp
+	// rather than ~/.ssh; accept-new trusts a server on first sight but still detects a key
+	// that changed within the run.
+	sshCommand := "ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known_hosts"
+
+	switch {
+	case r.sshSocket != nil:
+		ctr = ctr.WithUnixSocket(containerSSHAgentSocket, r.sshSocket).
+			WithEnvVariable("SSH_AUTH_SOCK", containerSSHAgentSocket)
+	case r.sshKey != nil:
+		ctr = ctr.WithMountedSecret(deployKeyPath, r.sshKey, dagger.ContainerWithMountedSecretOpts{
+			Owner: "root",
+			Mode:  0o600,
+		})
+		sshCommand += " -i " + deployKeyPath + " -o IdentitiesOnly=yes"
+	}
+
+	return ctr.WithEnvVariable("GIT_SSH_COMMAND", sshCommand)
 }
 
 // exec runs the step's commands, one exec per command so the engine can cache them
@@ -568,8 +626,8 @@ func (r *runner) releaseContainer(artifacts map[string]*dagger.File) (*dagger.Co
 	ctr = ctr.WithExec([]string{"mkdir", "-p", "/root/.ssh"})
 
 	if r.sshSocket != nil {
-		ctr = ctr.WithUnixSocket("/tmp/ssh-agent.sock", r.sshSocket).
-			WithEnvVariable("SSH_AUTH_SOCK", "/tmp/ssh-agent.sock")
+		ctr = ctr.WithUnixSocket(containerSSHAgentSocket, r.sshSocket).
+			WithEnvVariable("SSH_AUTH_SOCK", containerSSHAgentSocket)
 	}
 	if r.sshKey != nil {
 		// An ssh config entry beats starting an agent inside the container: the key never

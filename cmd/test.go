@@ -181,8 +181,12 @@ func runTestOnDagger(format qatools.Report) {
 	utils.PrintInfo("Running the tests in the pipeline engine. The first run has no caches and takes a while.")
 
 	result, runErr := pipeline.Run(context.Background(), plan, pipeline.Options{
-		ProjectDir:    projectDir,
-		Debug:         viper.GetBool("debug"),
+		ProjectDir: projectDir,
+		Debug:      viper.GetBool("debug"),
+		// composer install runs in the pipeline too, so a private VCS repository over SSH needs
+		// the developer's agent here exactly as a deploy does.
+		SSHAuthSock:   os.Getenv("SSH_AUTH_SOCK"),
+		SSHPrivateKey: os.Getenv("OROBOX_DEPLOY_SSH_KEY"),
 		ReportHostDir: filepath.Join(projectDir, rawReportsRelDir),
 	})
 

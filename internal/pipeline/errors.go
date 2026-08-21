@@ -210,6 +210,13 @@ func (r *runner) describe(stage string, err error) error {
 	// The engine log is a fallback: when the failing command's own output is available it says
 	// everything, and appending engine internals only buries it.
 	if !hasOutput {
+		// Saying so is worth a line: a report that jumps from the exit code to engine internals
+		// reads as if the output had been lost on the way, when the command really printed
+		// nothing — which points at the command itself, usually a shell script that died with
+		// its stderr redirected away.
+		if execErr != nil {
+			report.WriteString("\n  (the command produced no output)")
+		}
 		if tail := r.log.Tail(); tail != "" {
 			report.WriteString("\n  engine log (last lines):\n" + indent(tail))
 		}
@@ -260,9 +267,13 @@ func (r *runner) cloneError(err error) error {
 // requirements table and only summarises it at the end ("Found 1 not fulfilled requirement"):
 // the row that failed sits in the middle and a plain tail throws away the one line that matters.
 func trimOutput(out string) string {
-	out = strings.TrimSpace(out)
+	out, hidden := withoutDeprecations(strings.TrimSpace(out))
+	suffix := ""
+	if hidden > 0 {
+		suffix = fmt.Sprintf("\n... (%d deprecation notice(s) hidden)", hidden)
+	}
 	if len(out) <= outputLimit {
-		return out
+		return out + suffix
 	}
 
 	// Cut on a line boundary so the tail starts with a whole line.
@@ -278,8 +289,44 @@ func trimOutput(out string) string {
 	}
 	report.WriteString("... (truncated)\n")
 	report.WriteString(tail)
+	report.WriteString(suffix)
 	return report.String()
 }
+
+// withoutDeprecations removes the deprecation notices a Symfony console command in a debug
+// environment prints, and returns how many it dropped.
+//
+// Oro emits hundreds of them on every kernel boot, each one long and each one containing the word
+// "errors" ("... now to avoid errors ..."). They are why a failing step could report nothing
+// useful: they filled the retained tail, and failureLines rescued them from the dropped part
+// instead of the line that actually failed. Nothing is lost by hiding them — a deprecation is
+// never why a command exited non-zero.
+func withoutDeprecations(out string) (string, int) {
+	if !strings.Contains(out, "Deprecated:") {
+		return out, 0
+	}
+
+	lines := strings.Split(out, "\n")
+	kept := make([]string, 0, len(lines))
+	hidden := 0
+	for _, line := range lines {
+		if deprecationNotice.MatchString(line) {
+			hidden++
+			continue
+		}
+		kept = append(kept, line)
+	}
+
+	// A command whose whole output is deprecations still has to show something.
+	if len(strings.TrimSpace(strings.Join(kept, ""))) == 0 {
+		return out, 0
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n")), hidden
+}
+
+// deprecationNotice matches both shapes the notices arrive in: the logger's own line, and the
+// continuation of one wrapped by the console.
+var deprecationNotice = regexp.MustCompile(`(User Deprecated|Deprecated:)|now to avoid errors or add an explicit @return`)
 
 // failureLinesLimit caps the rescued lines; a run with hundreds of failures would otherwise
 // reproduce the output the truncation exists to avoid.

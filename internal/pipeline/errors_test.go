@@ -242,3 +242,36 @@ func TestTrimOutputRescuesFailingLinesFromTheDroppedPart(t *testing.T) {
 		t.Errorf("output is %d bytes, truncation is not doing its job", len(got))
 	}
 }
+
+func TestTrimOutputHidesDeprecationsSoTheRealErrorSurvives(t *testing.T) {
+	// What an Oro console command prints in the test environment: hundreds of deprecation
+	// notices around the one line that says why it failed. Every notice carries the word
+	// "errors", so they used to be rescued as failures and fill the report on their own.
+	var out strings.Builder
+	out.WriteString(`[ERROR] An exception occurred: SQLSTATE[3F000]: Invalid schema name` + "\n")
+	for out.Len() < outputLimit*3 {
+		out.WriteString(`2026-08-21T08:36:43+00:00 [info] User Deprecated: Method "Symfony\Component\HttpKernel\Bundle\Bundle::build()" might add "void" as a native return type declaration in the future. Do the same in child class "Doctrine\Bundle\DoctrineBundle\DoctrineBundle" now to avoid errors or add an explicit @return annotation to suppress this message.` + "\n")
+	}
+
+	got := trimOutput(out.String())
+
+	if !strings.Contains(got, "SQLSTATE[3F000]") {
+		t.Errorf("the deprecations buried the real error:\n%s", got)
+	}
+	if strings.Contains(got, "User Deprecated") {
+		t.Errorf("deprecation notices are still reported:\n%s", got)
+	}
+	if !strings.Contains(got, "deprecation notice(s) hidden") {
+		t.Errorf("hiding the notices is not signalled:\n%s", got)
+	}
+}
+
+func TestTrimOutputKeepsDeprecationsWhenThatIsAllThereIs(t *testing.T) {
+	// Hiding every line would leave a report with nothing in it at all, which is worse than
+	// reporting notices nobody needs.
+	out := `2026-08-21T08:36:43+00:00 [info] User Deprecated: Method "Bundle::build()" might add "void".`
+
+	if got := trimOutput(out); !strings.Contains(got, "User Deprecated") {
+		t.Errorf("an output that is only deprecations was hidden entirely: %q", got)
+	}
+}

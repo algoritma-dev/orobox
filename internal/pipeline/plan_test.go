@@ -458,9 +458,16 @@ func TestPlanTestStageCachesTheOroInstall(t *testing.T) {
 		t.Errorf("test fingerprint does not cover the client major: %s", test)
 	}
 
-	// The fingerprint covers exactly what decides the schema.
-	if !strings.Contains(test, "cat composer.lock $(find src -path '*Migrations*'") {
-		t.Errorf("test fingerprint does not cover composer.lock and the migrations: %s", test)
+	// The fingerprint covers exactly what decides the schema, and a failure to compute it leaves
+	// the variable empty instead of taking the step down without a word.
+	for _, want := range []string{
+		"cat composer.lock",
+		"find src -path '*Migrations*' -type f",
+		`fingerprint=$(fingerprint_sources | md5sum | cut -c1-32) || fingerprint=''`,
+	} {
+		if !strings.Contains(test, want) {
+			t.Errorf("test fingerprint missing %q: %s", want, test)
+		}
 	}
 
 	// var/ is gitignored, so the writable directories have to exist before the installer's
@@ -1048,6 +1055,37 @@ func TestChecksPlanRunsOneInvocationPerSuite(t *testing.T) {
 	} {
 		if !strings.Contains(commands, want) {
 			t.Errorf("missing %q:\n%s", want, commands)
+		}
+	}
+}
+
+func TestCacheScriptsSurviveAnUncomputableFingerprint(t *testing.T) {
+	// A fingerprint that cannot be computed used to end the step with exit code 1 and no output
+	// at all: the computation sat in a command substitution with stderr on /dev/null, under
+	// `set -e` and `pipefail`. Now it says why and rebuilds, so no cache branch may be entered
+	// on an empty fingerprint and no stamp may be written from one — a stamp holding "" or
+	// "-pg16" would be matched by the next run whose fingerprint is just as broken.
+	p := NewWithOverrides(testConf("6.1", true), functionalStage(), "repo", Overrides{
+		CacheScope:     "feature/x",
+		BaseCacheScope: "main",
+	})
+
+	for name, script := range map[string]string{"QA": joined(p.QA.Commands), "test": joined(p.Test.Commands)} {
+		if !strings.Contains(script, "Could not fingerprint composer.lock and the migration files") {
+			t.Errorf("the %s script does not report an uncomputable fingerprint: %s", name, script)
+		}
+		for _, line := range strings.Split(script, "\n") {
+			trimmed := strings.TrimSpace(line)
+			// Only the branches that compare a stamp: seeding from the base dump does not read
+			// one, and is as valid without a fingerprint as with one.
+			if strings.HasPrefix(trimmed, "if [ ") && strings.Contains(trimmed, `= "$fingerprint"`) &&
+				!strings.Contains(trimmed, `[ -n "$fingerprint" ]`) {
+				t.Errorf("the %s script reuses a cache without checking the fingerprint was computed: %s", name, trimmed)
+			}
+			if strings.HasPrefix(trimmed, "printf") && strings.Contains(trimmed, `"$fingerprint"`) &&
+				!strings.Contains(script, "if [ -n \"$fingerprint\" ]; then\n    printf") {
+				t.Errorf("the %s script writes a stamp without checking the fingerprint was computed: %s", name, trimmed)
+			}
 		}
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
 	"github.com/algoritma-dev/orobox/internal/qatools"
+	"github.com/algoritma-dev/orobox/internal/scaffold"
 	"github.com/algoritma-dev/orobox/internal/utils"
 
 	"github.com/spf13/cobra"
@@ -151,7 +152,33 @@ func runQaInitCommand(conf config.OroConfig) {
 		utils.PrintSuccess(fmt.Sprintf("%s QA packages installed.", strings.ToUpper(plan.JSManager)))
 	}
 
+	writeQaStubs(config.GetHostBundlePath(), conf.Type)
+
 	utils.PrintSuccess("QA tools initialized successfully!")
+}
+
+// writeQaStubs writes the QA configuration stubs into the project's own checkout, so the files the
+// QA run already layers on top of the shared standard are visible and correctly shaped instead of
+// having to be guessed.
+//
+// It warns rather than fails, like runQaScript below: the tools are installed and usable without
+// the stubs, and an install that reported failure because one stub could not be written would be
+// misleading.
+func writeQaStubs(projectDir, typeName string) {
+	stubs := scaffold.QaStubs(typeName)
+	if len(stubs) == 0 {
+		return
+	}
+
+	results, err := scaffold.WriteAll(projectDir, stubs, scaffold.QaStubDataFor(typeName))
+	for _, result := range results {
+		if result.Written {
+			utils.PrintSuccess("Wrote " + result.Artifact.RelPath + " (yours from now on).")
+		}
+	}
+	if err != nil {
+		utils.PrintWarning(fmt.Sprintf("Could not write every QA configuration stub: %v", err))
+	}
 }
 
 // runQaScript runs a shell script in the application container, warning rather than failing:

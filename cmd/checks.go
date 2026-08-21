@@ -23,14 +23,14 @@ const (
 	engineDagger  = "dagger"
 )
 
-// reportsRelDir is where the reports live, relative to the project root. It mirrors
-// config.DeployArtifactsDir: everything Orobox generates for a run belongs under var/orobox.
-const reportsRelDir = "var/orobox/reports"
+// reportsRelDir is where the reports live, relative to the project root. The value lives in
+// internal/config because the generated GitLab pipeline names the very same paths.
+const reportsRelDir = config.ReportsRelDir
 
 // rawReportsRelDir holds the per-tool files exactly as the tools wrote them. They are kept rather
 // than deleted after the merge: when a merged report looks wrong, the tool's own output is the
 // only thing that says whether the tool or the merge is to blame.
-const rawReportsRelDir = reportsRelDir + "/raw"
+const rawReportsRelDir = config.RawReportsRelDir
 
 // resolveEngine picks where the checks run.
 //

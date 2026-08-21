@@ -135,8 +135,21 @@ func TestCheckDeployerFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "vendor-bin", "deploy", "composer.json"), []byte("{}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// deploy.php requires the recipe, and nothing in the pipeline regenerates it: only deploy-init
+	// writes it. Without this check a missing recipe fails inside the release container instead of
+	// here.
+	if err := checkDeployerFiles(dir); err == nil || !strings.Contains(err.Error(), config.DeployRecipeRelPath) {
+		t.Errorf("error = %v, want the missing %s to be reported", err, config.DeployRecipeRelPath)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, config.DeployRecipeRelPath)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, config.DeployRecipeRelPath), []byte("<?php"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := checkDeployerFiles(dir); err != nil {
-		t.Errorf("checkDeployerFiles() error = %v, want nil once both files exist", err)
+		t.Errorf("checkDeployerFiles() error = %v, want nil once every file exists", err)
 	}
 }
 

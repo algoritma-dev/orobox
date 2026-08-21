@@ -6,8 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
 	"github.com/algoritma-dev/orobox/internal/qatools"
+	"github.com/algoritma-dev/orobox/internal/scaffold"
 	"github.com/spf13/viper"
 )
 
@@ -247,7 +249,7 @@ func TestQaComposeReportModeUsesTheAggregatingScript(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runQaOnCompose(format)
+	runQaOnCompose(format, "")
 
 	var script string
 	for _, args := range calls {
@@ -281,5 +283,57 @@ func TestQaPathPrefixForAMonorepo(t *testing.T) {
 
 	if got := qaPathPrefix(engineCompose); got.RepoSubdir != "" {
 		t.Errorf("the compose engine writes from inside the project, so RepoSubdir must be empty: %q", got.RepoSubdir)
+	}
+}
+
+func TestWriteQaStubsWritesOnceAndSkipsProjectJSConfigs(t *testing.T) {
+	old := scaffold.Templates
+	scaffold.Templates = os.DirFS("..")
+	t.Cleanup(func() { scaffold.Templates = old })
+
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+
+	dir := t.TempDir()
+
+	writeQaStubs(dir, config.InstallTypeProject)
+
+	for _, want := range []string{"phpstan.neon", "rector.php", ".php-cs-fixer.dist.php", ".twig-cs-fixer.php"} {
+		if _, err := os.Stat(filepath.Join(dir, want)); err != nil {
+			t.Errorf("%s was not written: %v", want, err)
+		}
+	}
+	// Writing this would clobber OroCommerce's own file, which sits at the very same path for a
+	// project install.
+	if _, err := os.Stat(filepath.Join(dir, ".eslintrc.yml")); err == nil {
+		t.Error(".eslintrc.yml was written for a project install")
+	}
+
+	// The project owns the stubs from the first write.
+	mine := filepath.Join(dir, "phpstan.neon")
+	if err := os.WriteFile(mine, []byte("# mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeQaStubs(dir, config.InstallTypeProject)
+	if data, _ := os.ReadFile(mine); string(data) != "# mine" {
+		t.Errorf("phpstan.neon was overwritten on the second run: %q", data)
+	}
+}
+
+func TestWriteQaStubsForBundleIncludesJSConfigs(t *testing.T) {
+	old := scaffold.Templates
+	scaffold.Templates = os.DirFS("..")
+	t.Cleanup(func() { scaffold.Templates = old })
+
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+
+	dir := t.TempDir()
+	writeQaStubs(dir, config.InstallTypeBundle)
+
+	for _, want := range []string{".eslintrc.yml", ".stylelintrc.yml", ".stylelintrc-css.yml"} {
+		if _, err := os.Stat(filepath.Join(dir, want)); err != nil {
+			t.Errorf("%s was not written for a bundle install: %v", want, err)
+		}
 	}
 }
