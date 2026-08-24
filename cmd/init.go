@@ -150,8 +150,19 @@ func performInstallation() bool {
 		return false
 	}
 
-	// Run volume-init to fix permissions before any composer/git command
-	if err := docker.RunComposeCommandSilently("Ensuring permissions...", "run", "--rm", "-T", "volume-init"); err != nil {
+	// Run volume-init to fix permissions before any composer/git command.
+	//
+	// Every one-off container below runs with --no-deps (see initRunArgs): the services we
+	// need are already started explicitly above, and the `application` service depends_on
+	// web/consumer/cron, so without it Compose would start the whole long-running stack
+	// before OroCommerce exists. Those services cannot boot without an installed database,
+	// so `restart: unless-stopped` puts them in a restart loop, and every retry compiles the
+	// Symfony container into var/cache/dev. That races oro:install, whose
+	// "rm -rf var/cache/*" then fails with "can't remove 'var/cache/dev': Directory not
+	// empty", leaving a half-written entity-config cache behind. oro:install later reads it
+	// and dies in oro:entity-extend:cache:clear with "ConfigCache::getCacheKey(): Argument #1
+	// ($key) must be of type string, null given".
+	if err := docker.RunComposeCommandSilently("Ensuring permissions...", initRunArgs("volume-init")...); err != nil {
 		utils.PrintWarning(fmt.Sprintf("volume-init failed: %v", err))
 	}
 
@@ -162,7 +173,7 @@ func performInstallation() bool {
 
 	// 3. For bundle, we need to clone into the volume if not already there
 	// Always try to clone if composer.json is missing in the container
-	checkCmd := []string{"run", "--rm", "-T", "application", "test", "-f", "composer.json"}
+	checkCmd := initRunArgs("application", "test", "-f", "composer.json")
 	utils.StartLoader("Checking for OroCommerce installation...")
 	_, err = docker.RunComposeCommandWithOutput(checkCmd...)
 	utils.StopLoader()
@@ -179,7 +190,7 @@ func performInstallation() bool {
 		// Drop orobox-managed env files from the clone before copying: they are
 		// single-file bind mounts at OroRoot, and cp cannot replace a mount point
 		// ("can't create ... File exists"). The mounted versions are authoritative.
-		cloneCmd := []string{"run", "--rm", "-T"}
+		cloneCmd := initRunArgs()
 		cloneCmd = append(cloneCmd, docker.CredentialRunArgs(conf.Composer, oroRepo)...)
 		cloneCmd = append(cloneCmd, "application", "bash", "-c",
 			fmt.Sprintf("git clone -b %s --depth 1 %s /tmp/oro-app && rm -f /tmp/oro-app/.env-app.local /tmp/oro-app/.env-app.test && cp -rf /tmp/oro-app/. . && rm -rf /tmp/oro-app && composer install", resolvedVersion, oroRepo))
@@ -199,12 +210,12 @@ func performInstallation() bool {
 		}
 
 		// Sources present: check for vendors (especially if vendor-oro was just added)
-		checkVendor := []string{"run", "--rm", "-T", "application", "test", "-f", "vendor/autoload.php"}
+		checkVendor := initRunArgs("application", "test", "-f", "vendor/autoload.php")
 		utils.StartLoader("Checking for vendors...")
 		_, errVendor := docker.RunComposeCommandWithOutput(checkVendor...)
 		utils.StopLoader()
 		if errVendor != nil {
-			installCmd := []string{"run", "--rm", "-T"}
+			installCmd := initRunArgs()
 			installCmd = append(installCmd, docker.CredentialRunArgs(conf.Composer)...)
 			installCmd = append(installCmd, "application", "composer", "install")
 			if err := docker.RunComposeCommandSilently("Installing dependencies...", installCmd...); err != nil {
@@ -238,7 +249,7 @@ func performInstallation() bool {
 			` && COMPOSER_ALLOW_SUPERUSER=1 composer require "%s:@dev" --no-interaction --no-scripts`,
 			bundlePackageName,
 		)
-		requireCmd := []string{"run", "--rm", "-T"}
+		requireCmd := initRunArgs()
 		requireCmd = append(requireCmd, docker.CredentialRunArgs(conf.Composer)...)
 		requireCmd = append(requireCmd, "application", "bash", "-c", bashCmd)
 		if err := docker.RunComposeCommandSilently("Installing bundle into vendor...", requireCmd...); err != nil {
@@ -257,7 +268,7 @@ func performInstallation() bool {
 		return true
 	}
 
-	volumeSetupCmd := []string{"run", "--rm", "-T"}
+	volumeSetupCmd := initRunArgs()
 	volumeSetupCmd = append(volumeSetupCmd, docker.CredentialRunArgs(conf.Composer)...)
 	volumeSetupCmd = append(volumeSetupCmd, "volume-setup")
 	if err := docker.RunSetupComposeCommandSilently("Setting up volumes for installation...", volumeSetupCmd...); err != nil {
@@ -269,6 +280,23 @@ func performInstallation() bool {
 	}
 
 	return true
+}
+
+// initRunArgs builds the leading `docker compose run` arguments for the one-off containers
+// init uses, appending any extra arguments (service name and command).
+//
+// --no-deps is the important part: init runs before OroCommerce is installed, and the
+// `application` service depends_on web, consumer and cron. Without it Compose starts that
+// whole long-running stack, which cannot boot against an empty database and therefore
+// restart-loops (restart: unless-stopped), recompiling the Symfony container into
+// var/cache/dev on every retry. That concurrent writer makes oro:install's
+// "rm -rf var/cache/*" fail ("can't remove 'var/cache/dev': Directory not empty") and the
+// surviving half-written entity-config cache then crashes
+// oro:entity-extend:cache:clear with a null cache key. The services init genuinely needs
+// (db, gotenberg and the optional ones) are started explicitly beforehand.
+func initRunArgs(extra ...string) []string {
+	args := []string{"run", "--rm", "-T", "--no-deps"}
+	return append(args, extra...)
 }
 
 // seedProjectEnvFiles copies Orobox's generated env files into the checkout for install

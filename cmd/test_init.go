@@ -45,6 +45,8 @@ var testInitCmd = &cobra.Command{
 			return
 		}
 
+		// Everything the test installation needs is started explicitly here, because the
+		// one-off containers below run with --no-deps (see testInitRunArgs).
 		serviceNames := []string{"db-test"}
 		if conf.Services.Redis {
 			serviceNames = append(serviceNames, "redis")
@@ -54,6 +56,11 @@ var testInitCmd = &cobra.Command{
 		}
 		if conf.Services.Elasticsearch {
 			serviceNames = append(serviceNames, "elasticsearch")
+		}
+		if conf.Services.Mailpit {
+			// Previously started as a transitive dependency of `application`; keep it so
+			// the test install still has a mailer to point at.
+			serviceNames = append(serviceNames, "mail")
 		}
 
 		if err := docker.EnsureServicesRunning(serviceNames); err != nil {
@@ -90,7 +97,7 @@ var testInitCmd = &cobra.Command{
 			return
 		}
 
-		createCmd := []string{"run", "--rm", "-T", "application", "php", "bin/console", "doctrine:database:create", "--env=test", "--if-not-exists"}
+		createCmd := testInitRunArgs("php", "bin/console", "doctrine:database:create", "--env=test", "--if-not-exists")
 		if err := docker.RunComposeCommandSilently("Creating test database...", createCmd...); err != nil {
 			utils.PrintError(fmt.Sprintf("failed to create test database: %v", err))
 			return
@@ -103,12 +110,12 @@ var testInitCmd = &cobra.Command{
 			return
 		}
 
-		clearCacheCmd := []string{"run", "--rm", "-T", "application", "bash", "-c", "rm -rf var/cache/test"}
+		clearCacheCmd := testInitRunArgs("bash", "-c", "rm -rf var/cache/test")
 		if err := docker.RunComposeCommandSilently("Clearing cache for test environment...", clearCacheCmd...); err != nil {
 			utils.PrintWarning(fmt.Sprintf("failed to clear cache: %v", err))
 		}
 
-		installCmd := []string{"run", "--rm", "-T", "application", "php", "bin/console", "oro:install", "--no-interaction", "--env=test", "--skip-translations"}
+		installCmd := testInitRunArgs("php", "bin/console", "oro:install", "--no-interaction", "--env=test", "--skip-translations")
 		if err := docker.RunComposeCommandSilently("Running Oro installation for test environment (this may take several minutes)...", installCmd...); err != nil {
 			utils.PrintError(fmt.Sprintf("test environment installation failed: %v", err))
 			return
@@ -128,6 +135,21 @@ var testInitCmd = &cobra.Command{
 		fmt.Printf("  - Password: %s\n", dbPass)
 		fmt.Printf("  - Database: %s\n", dbName)
 	},
+}
+
+// testInitRunArgs builds a one-off `docker compose run` in the application service for the
+// test environment setup, appending the given command.
+//
+// --no-deps keeps this from starting the dev stack. The `application` service depends_on
+// web, consumer and cron, so without it Compose would boot those (plus php-fpm-app, ws and
+// the dev `db`) even though the test installation only talks to db-test. Beyond being
+// wasteful, consumer and cron restart-loop whenever they cannot reach an installed database
+// and each retry rewrites var/cache — the race that used to break `orobox init`
+// (see initRunArgs in init.go). The services the test install needs are started explicitly
+// via EnsureServicesRunning above.
+func testInitRunArgs(command ...string) []string {
+	args := []string{"run", "--rm", "-T", "--no-deps", "application"}
+	return append(args, command...)
 }
 
 func init() {

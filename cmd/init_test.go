@@ -6,6 +6,55 @@ import (
 	"testing"
 )
 
+// TestInitRunArgsNeverStartsDependencies guards the fix for the install crash where the
+// long-running stack (web/consumer/cron), pulled in by the `application` service's
+// depends_on, restart-looped against an empty database and kept rewriting var/cache/dev.
+// That raced oro:install's cache wipe and left a half-written entity-config cache, which
+// crashed oro:entity-extend:cache:clear with a null cache key.
+func TestInitRunArgsNeverStartsDependencies(t *testing.T) {
+	args := initRunArgs("application", "test", "-f", "composer.json")
+
+	if !containsArg(args, "--no-deps") {
+		t.Errorf("initRunArgs must pass --no-deps so init never starts web/consumer/cron, got: %v", args)
+	}
+
+	// --no-deps is a `run` option, so it has to precede the service name.
+	noDeps, service := indexOfArg(args, "--no-deps"), indexOfArg(args, "application")
+	if noDeps > service {
+		t.Errorf("--no-deps must come before the service name, got: %v", args)
+	}
+
+	// The one-off container still has to clean up after itself and stay non-interactive.
+	for _, want := range []string{"run", "--rm", "-T"} {
+		if !containsArg(args, want) {
+			t.Errorf("initRunArgs missing %q, got: %v", want, args)
+		}
+	}
+
+	// Extra arguments are preserved, in order, after the options.
+	if got := strings.Join(args[len(args)-4:], " "); got != "application test -f composer.json" {
+		t.Errorf("initRunArgs should append extra args verbatim, got trailing %q", got)
+	}
+
+	// With no extra arguments it is just the option prefix, ready for credential args.
+	if got := strings.Join(initRunArgs(), " "); got != "run --rm -T --no-deps" {
+		t.Errorf("initRunArgs() prefix = %q", got)
+	}
+}
+
+func containsArg(args []string, want string) bool {
+	return indexOfArg(args, want) >= 0
+}
+
+func indexOfArg(args []string, want string) int {
+	for i, a := range args {
+		if a == want {
+			return i
+		}
+	}
+	return -1
+}
+
 func TestGenerateConfig(t *testing.T) {
 	// Create a temporary directory for testing
 	tmpDir, err := os.MkdirTemp("", "orobox-init-test")

@@ -1,0 +1,23 @@
+type: bundle
+class: E2ETestBundle
+namespace: Orobox\Bundle\E2ETestBundle\E2ETestBundle
+oro_version: "{{.Version}}"
+domains:
+  - host: {{.Host}}
+    root: public
+    ssl: false
+services:
+  redis: false
+  redisinsight: false
+  mailpit: true
+  rabbitmq: false
+  elasticsearch: false
+  kibana: false
+  adminer: true
+test:
+  use_tmpfs: true
+  tmpfs_size: 1g
+commands:
+  - name: e2e-cache-clear
+    command: php bin/console cache:clear
+    description: Clear the Symfony cache (exercised by the e2e suite)
