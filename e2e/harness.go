@@ -178,11 +178,39 @@ func (b *Box) exec(ctx context.Context, args ...string) RunResult {
 	return res
 }
 
+// stepTimeout bounds a single orobox invocation. Without it a stalled step (composer
+// install, oro:install) consumes the whole `go test -timeout`, and since the captured
+// output is only printed when the step returns, the run shows nothing at all about where it
+// stopped. E2E_STEP_TIMEOUT (any time.ParseDuration value, "0" to disable) turns the stall
+// into a per-step failure that reports what the step had printed so far.
+func stepTimeout() time.Duration {
+	raw := os.Getenv("E2E_STEP_TIMEOUT")
+	if raw == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return 0
+	}
+	return d
+}
+
+// execBounded runs orobox under the E2E_STEP_TIMEOUT deadline, or unbounded when none is set.
+func (b *Box) execBounded(args ...string) RunResult {
+	d := stepTimeout()
+	if d == 0 {
+		return b.exec(context.Background(), args...)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	defer cancel()
+	return b.exec(ctx, args...)
+}
+
 // Run executes orobox and fails the test on a nonzero exit or a printed error marker
 // (hard gate).
 func (b *Box) Run(args ...string) RunResult {
 	b.t.Helper()
-	res := b.exec(context.Background(), args...)
+	res := b.execBounded(args...)
 	if failed(res) {
 		b.t.Fatalf("orobox %s failed (exit %d)\nstdout:\n%s\nstderr:\n%s",
 			strings.Join(args, " "), res.ExitCode, res.Stdout, res.Stderr)
@@ -193,7 +221,7 @@ func (b *Box) Run(args ...string) RunResult {
 // TryRun executes orobox and returns the result without failing the test (best-effort).
 func (b *Box) TryRun(args ...string) RunResult {
 	b.t.Helper()
-	return b.exec(context.Background(), args...)
+	return b.execBounded(args...)
 }
 
 // RunTimeout executes orobox under a deadline; a deadline kill is not a failure.
@@ -225,9 +253,15 @@ func (b *Box) AssertHTTP200(url string) {
 	b.t.Fatalf("no HTTP 200 from %s (last: %s)", url, last)
 }
 
+// teardownTimeout bounds the `orobox down` run in teardown: cleanup must not be able to
+// hold the whole suite open the way an unbounded step can.
+const teardownTimeout = 10 * time.Minute
+
 func (b *Box) teardown() {
 	// Best-effort: never fail the test in teardown.
-	_ = b.exec(context.Background(), "down")
+	ctx, cancel := context.WithTimeout(context.Background(), teardownTimeout)
+	defer cancel()
+	_ = b.exec(ctx, "down")
 	b.dockerDownVolumes()
 }
 

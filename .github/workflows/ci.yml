@@ -47,6 +47,9 @@ jobs:
   e2e:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    # Below the 6h hard limit for GitHub-hosted runners: a job that hits the platform limit
+    # is *cancelled*, which skips the diagnostics steps below and leaves nothing to look at.
+    timeout-minutes: 300
     strategy:
       fail-fast: false
       matrix:
@@ -70,15 +73,40 @@ jobs:
       - name: Build orobox
         run: make build
 
+      - name: Disk and Docker state before e2e
+        run: |
+          df -h /
+          docker system df
+
       - name: Run e2e (version ${{ matrix.version }})
         env:
           OROBOX_BIN: ${{ github.workspace }}/orobox
           E2E_VERSIONS: ${{ matrix.version }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: go test -tags e2e -timeout 6h -v ./e2e/...
+          # Tee each orobox invocation to the job log as it runs. Without this the harness
+          # only reports a step once it returns, so a long or stalled install shows nothing
+          # at all in the log.
+          E2E_STREAM: "1"
+          # Bound one orobox invocation, so a stall fails that step (with whatever it had
+          # printed) instead of eating the whole -timeout and being killed with no output.
+          E2E_STEP_TIMEOUT: 90m
+        # Must stay under the job timeout-minutes above, so the panic and its goroutine dump
+        # are actually emitted.
+        run: go test -tags e2e -timeout 4h -v ./e2e/...
 
-      - name: Upload logs on failure
-        if: failure()
+      - name: Docker diagnostics
+        if: always()
+        run: |
+          df -h /
+          docker system df
+          docker ps -a
+          for c in $(docker ps -aq); do
+            echo "=== $(docker inspect --format '{{.Name}} {{.State.Status}} {{.State.ExitCode}}' "$c") ==="
+            docker logs --tail 200 "$c" 2>&1 || true
+          done
+
+      - name: Upload logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-logs-${{ matrix.version }}

@@ -4,9 +4,12 @@ package utils
 import (
 	"bufio"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/term"
 )
 
 var (
@@ -113,13 +116,31 @@ func AskSelection(reader *bufio.Reader, question string, options []string, defau
 	return options[idx-1]
 }
 
+// stdoutIsTerminal reports whether stdout is a terminal. Overridable in tests.
+var stdoutIsTerminal = func() bool {
+	return term.IsTerminal(int(os.Stdout.Fd()))
+}
+
 // StartLoader starts a spinner loader with a message.
+//
+// The spinner repaints one line with a carriage return, which only works on a terminal.
+// Piped or captured output (CI logs, the e2e harness) keeps every frame instead: ten lines a
+// second for as long as the step runs, which buries the real output and, in a long install,
+// alone exceeds a GitHub Actions step log. So off a terminal the message is printed once and
+// no spinner runs.
 func StartLoader(message string) {
 	loaderMu.Lock()
 	defer loaderMu.Unlock()
 
 	if loaderStop != nil {
 		return // Loader already running
+	}
+
+	if !stdoutIsTerminal() {
+		if message != "" {
+			fmt.Println(message)
+		}
+		return
 	}
 
 	loaderStop = make(chan struct{})
