@@ -57,6 +57,16 @@ func runDeployInitCommand(conf *config.OroConfig) {
 	deployConf := askDeployConfig(conf)
 	conf.Deploy = deployConf
 
+	// Validate before writing. Every orobox command validates .orobox.yaml as it loads it, so a
+	// stage missing a required field does not just break `orobox deploy`: it takes the whole
+	// project down, `down` and `clear` included, and the only way back is editing the YAML by
+	// hand. Refusing to write leaves a working project.
+	if err := conf.ValidateDeploy(); err != nil {
+		utils.PrintError(err.Error())
+		utils.PrintInfo("Nothing was written: .orobox.yaml is unchanged. Re-run 'orobox deploy-init' and answer the required questions (stage name, ref, host, user, deploy path).")
+		os.Exit(1)
+	}
+
 	configPath := ".orobox.yaml"
 	if err := config.SaveConfig(configPath, conf); err != nil {
 		utils.PrintError(fmt.Sprintf("Could not write %s: %v", configPath, err))
@@ -165,13 +175,13 @@ func askDeployConfig(conf *config.OroConfig) *config.DeployConfig {
 func askStage(reader *bufio.Reader, defaults config.StageConfig) config.StageConfig {
 	utils.PrintTitle("Stage")
 
-	name := utils.AskQuestion(reader, "Stage name", orDefault(defaults.Name, "production"))
+	name := askRequired(reader, "Stage name", orDefault(defaults.Name, "production"))
 	stage := config.StageConfig{
 		Name:       name,
-		Ref:        utils.AskQuestion(reader, "Git ref to build and deploy", orDefault(defaults.Ref, "main")),
-		Host:       utils.AskQuestion(reader, "Remote host", defaults.Host),
-		User:       utils.AskQuestion(reader, "Remote SSH user", orDefault(defaults.User, "deploy")),
-		DeployPath: utils.AskQuestion(reader, "Remote deploy path", orDefault(defaults.DeployPath, "/var/www/oro")),
+		Ref:        askRequired(reader, "Git ref to build and deploy", orDefault(defaults.Ref, "main")),
+		Host:       askRequired(reader, "Remote host", defaults.Host),
+		User:       askRequired(reader, "Remote SSH user", orDefault(defaults.User, "deploy")),
+		DeployPath: askRequired(reader, "Remote deploy path", orDefault(defaults.DeployPath, "/var/www/oro")),
 	}
 
 	stage.Port = askInt(reader, "Remote SSH port", defaults.SSHPort())
@@ -183,6 +193,23 @@ func askStage(reader *bufio.Reader, defaults config.StageConfig) config.StageCon
 	stage.RestartCommand = utils.AskQuestion(reader, "Command to restart consumers/cron on the remote (empty to skip)", defaults.RestartCommand)
 
 	return stage
+}
+
+// askRequired asks until the answer is non-empty, because these values end up in .orobox.yaml
+// and config validation rejects the whole file when one of them is blank — which is how a
+// half-answered deploy-init used to leave a project where no orobox command would run.
+//
+// A non-interactive run (no stdin, as in CI or the e2e harness) reads EOF and gets the default
+// back, empty included: there is nobody to re-ask. The caller's validation is what refuses to
+// write in that case.
+func askRequired(reader *bufio.Reader, question, defaultValue string) string {
+	for {
+		answer, eof := utils.AskQuestionOrEOF(reader, question, defaultValue)
+		if answer = strings.TrimSpace(answer); answer != "" || eof {
+			return answer
+		}
+		utils.PrintWarning(fmt.Sprintf("%s is required.", question))
+	}
 }
 
 func askInt(reader *bufio.Reader, question string, defaultValue int) int {

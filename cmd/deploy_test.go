@@ -334,3 +334,70 @@ func TestDeployExplicitRefWinsOverTheBuiltCommit(t *testing.T) {
 		t.Errorf("an explicit --ref must not be overridden: %q", ref)
 	}
 }
+
+// TestDeployInitRefusesToWriteAnIncompleteStage guards the e2e failure where a non-interactive
+// deploy-init accepted the empty default for "Remote host", wrote the stage to .orobox.yaml and
+// left a project where *every* orobox command — ci-init and down included — died with
+// `config error: deploy stage at index 0 is missing required field "host"`.
+//
+// The guard is the validation that now runs before the write; this asserts the shape it has to
+// catch, so a prompt that silently returns an empty required value cannot pass unnoticed again.
+func TestDeployInitRefusesToWriteAnIncompleteStage(t *testing.T) {
+	oldStdin := stdin
+	// No input at all: the reader is at EOF, which is what a CI run or the e2e harness provides.
+	stdin = strings.NewReader("")
+	defer func() { stdin = oldStdin }()
+
+	conf := &config.OroConfig{Type: config.InstallTypeProject}
+	conf.Deploy = askDeployConfig(conf)
+
+	if len(conf.Deploy.Stages) != 1 {
+		t.Fatalf("expected one stage, got %d", len(conf.Deploy.Stages))
+	}
+	if conf.Deploy.Stages[0].Host != "" {
+		t.Fatalf("expected an empty host with no input, got %q", conf.Deploy.Stages[0].Host)
+	}
+	if err := conf.ValidateDeploy(); err == nil {
+		t.Fatal("expected ValidateDeploy to reject a stage with no host, so deploy-init can refuse to write it")
+	}
+}
+
+// TestDeployInitKeepsExistingStageValuesWithoutInput is the other half: with a complete stage
+// already in .orobox.yaml, a non-interactive re-run is an edit that changes nothing, and the
+// result must still validate.
+func TestDeployInitKeepsExistingStageValuesWithoutInput(t *testing.T) {
+	oldStdin := stdin
+	stdin = strings.NewReader("")
+	defer func() { stdin = oldStdin }()
+
+	conf := &config.OroConfig{
+		Type: config.InstallTypeProject,
+		Deploy: &config.DeployConfig{
+			Repository: "https://example.test/app.git",
+			Stages: []config.StageConfig{{
+				Name:       "production",
+				Ref:        "main",
+				Host:       "deploy.example.test",
+				User:       "deploy",
+				DeployPath: "/var/www/oro",
+			}},
+		},
+	}
+
+	conf.Deploy = askDeployConfig(conf)
+	if err := conf.ValidateDeploy(); err != nil {
+		t.Fatalf("re-running deploy-init over a complete stage must stay valid: %v", err)
+	}
+	if got := conf.Deploy.Stages[0].Host; got != "deploy.example.test" {
+		t.Fatalf("host = %q, want the existing value kept", got)
+	}
+}
+
+// TestAskRequiredReAsksOnBlankInput covers the interactive half: a user who just hits enter on a
+// required question is asked again rather than having the blank accepted.
+func TestAskRequiredReAsksOnBlankInput(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader("\n\ndeploy.example.test\n"))
+	if got := askRequired(reader, "Remote host", ""); got != "deploy.example.test" {
+		t.Fatalf("askRequired() = %q, want the first non-empty answer", got)
+	}
+}

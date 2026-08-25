@@ -3,7 +3,9 @@ package utils
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -54,13 +56,24 @@ func PrintTitle(message string) {
 
 // AskQuestion asks a question to the user and returns the answer or a default value.
 func AskQuestion(reader *bufio.Reader, question string, defaultValue string) string {
+	answer, _ := AskQuestionOrEOF(reader, question, defaultValue)
+	return answer
+}
+
+// AskQuestionOrEOF is AskQuestion plus whether the reader is exhausted.
+//
+// The second return value is what lets a caller re-ask for a required value without hanging: a
+// non-interactive run — a script, a CI job, the e2e harness — hits EOF on the first read, so a
+// loop that only checked for an empty answer would never end.
+func AskQuestionOrEOF(reader *bufio.Reader, question string, defaultValue string) (string, bool) {
 	fmt.Printf("%s%s%s [%s]: ", colorCyan, question, colorReset, defaultValue)
-	input, _ := reader.ReadString('\n')
+	input, err := reader.ReadString('\n')
+	eof := errors.Is(err, io.EOF)
 	input = strings.TrimSpace(input)
 	if input == "" {
-		return defaultValue
+		return defaultValue, eof
 	}
-	return input
+	return input, eof
 }
 
 // AskYesNo asks a yes/no question to the user and returns the boolean response.

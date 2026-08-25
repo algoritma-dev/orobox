@@ -680,9 +680,15 @@ func SymfonyConfigDir(env Env) string {
 // container PHPStan reads only exists in a debug cache. Warming queries Oro's config tables, so
 // it needs env's database installed: in the pipeline that is the QA step's own oro:install
 // --env=test, locally it is the dev install `orobox install` already performed.
+//
+// The mkdir is the consequence of that same "can legitimately not exist": phpstan.neon lists the
+// directory under scanDirectories, and PHPStan refuses to start when a scanned directory is
+// missing ("Scanned directory /var/www/oro/var/cache/test/Symfony/Config does not exist."), which
+// is how a warm cache without dumped configs used to fail the whole QA set. An empty directory
+// contributes no symbols, so creating it changes nothing but the startup check.
 func phpstanCacheWarmup(env Env) string {
-	return fmt.Sprintf("[ -f %s ] || ORO_DEBUG=1 php %s/bin/console cache:warmup --env=%s",
-		ContainerXMLPath(env), config.OroRootDir, env.orDefault())
+	return fmt.Sprintf("{ [ -f %s ] || ORO_DEBUG=1 php %s/bin/console cache:warmup --env=%s; } && mkdir -p %s",
+		ContainerXMLPath(env), config.OroRootDir, env.orDefault(), SymfonyConfigDir(env))
 }
 
 // kernelBootstrapPHP is the preamble both PHPStan kernel loaders share: the application's

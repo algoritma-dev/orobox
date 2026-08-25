@@ -124,8 +124,15 @@ func TestPhpstanWarmsTheDebugCacheOfItsEnv(t *testing.T) {
 
 		// The dumped Symfony config directory is not part of the gate: an install can end with
 		// a container and no Symfony/Config, and checking it there warms on every run.
-		if strings.Contains(setup, SymfonyConfigDir(tc.env)) {
+		if strings.Contains(setup, "[ -f "+SymfonyConfigDir(tc.env)+" ]") {
 			t.Errorf("%s: phpstan warmup gated on the Symfony config dir: %s", tc.env, setup)
+		}
+
+		// It is created instead, because phpstan.neon scans it and PHPStan refuses to start on a
+		// missing scanDirectories entry ("Scanned directory ... does not exist"), which failed the
+		// whole QA set on an install whose bundles dumped no configs.
+		if !strings.Contains(setup, "mkdir -p "+SymfonyConfigDir(tc.env)) {
+			t.Errorf("%s: phpstan setup must create the scanned Symfony config dir: %s", tc.env, setup)
 		}
 
 		if got := ContainerXMLPath(tc.env); got != config.OroRootDir+tc.xmlFile {
