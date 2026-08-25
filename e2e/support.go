@@ -2,6 +2,8 @@
 package e2e
 
 import (
+	"bytes"
+	"encoding/xml"
 	"fmt"
 	"strings"
 	"text/template"
@@ -156,4 +158,73 @@ func ResolveBinary(getenv func(string) string) (string, bool) {
 		return p, false
 	}
 	return "", true
+}
+
+// e2eTestSuites are the PHPUnit suites the `test` step gates on, one orobox invocation each.
+// Oro's phpunit.xml also defines "selenium", which needs a browser stack and is out of scope.
+//
+// Running them one at a time is what makes the report readable: `orobox test -t unit -t
+// functional` produces a single JUnit document, so a functional suite that executed nothing
+// would hide behind the unit suite's count.
+var e2eTestSuites = []string{"unit", "functional"}
+
+// e2eTestFilter narrows each suite to a handful of tests.
+//
+// The step exists to prove that `orobox test` really drives PHPUnit against the environment
+// `test-init` provisioned — unit and functional alike. It is not here to run
+// OroPlatform/OroCommerce's own suites: those take hours and their outcome says nothing about
+// orobox. The filter is a PHPUnit regex over "Class::method".
+//
+// "UserTest" is chosen because UserBundle carries a class matching it in both suites in every
+// supported version (Tests/Unit/Entity/UserTest and Tests/Functional/Api/RestJsonApi/UserTest,
+// verified for 5.1, 6.0, 6.1 and 7.0), and because it holds no backslash: PHPUnit treats the
+// filter as a regex, so a namespace-shaped filter would have its separators read as escapes.
+const e2eTestFilter = "UserTest"
+
+// junitTotals is the part of a JUnit report the suite gates on.
+type junitTotals struct {
+	Tests    int
+	Failures int
+	Errors   int
+}
+
+// parseJUnitTotals sums the counters of a JUnit document's top-level suites.
+//
+// The counts are what distinguishes a passing run from a run that executed nothing: PHPUnit
+// exits 0 when a --filter matches no test at all, so the exit code alone would grade a
+// silently empty run as green.
+//
+// Both roots PHPUnit and report.MergeJUnit can produce are accepted: <testsuites>, and the
+// bare <testsuite> a single invocation may write.
+func parseJUnitTotals(data []byte) (junitTotals, error) {
+	type suite struct {
+		Tests    int `xml:"tests,attr"`
+		Failures int `xml:"failures,attr"`
+		Errors   int `xml:"errors,attr"`
+	}
+
+	var root struct {
+		XMLName xml.Name `xml:"testsuites"`
+		Suites  []suite  `xml:"testsuite"`
+	}
+	if err := xml.Unmarshal(bytes.TrimSpace(data), &root); err != nil {
+		var single struct {
+			XMLName  xml.Name `xml:"testsuite"`
+			Tests    int      `xml:"tests,attr"`
+			Failures int      `xml:"failures,attr"`
+			Errors   int      `xml:"errors,attr"`
+		}
+		if singleErr := xml.Unmarshal(bytes.TrimSpace(data), &single); singleErr != nil {
+			return junitTotals{}, fmt.Errorf("not a JUnit document: %w", err)
+		}
+		return junitTotals{Tests: single.Tests, Failures: single.Failures, Errors: single.Errors}, nil
+	}
+
+	var totals junitTotals
+	for _, s := range root.Suites {
+		totals.Tests += s.Tests
+		totals.Failures += s.Failures
+		totals.Errors += s.Errors
+	}
+	return totals, nil
 }

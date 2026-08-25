@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"encoding/xml"
 	"os"
 	"strings"
 	"testing"
@@ -178,5 +179,64 @@ func TestFixturesRenderValid(t *testing.T) {
 		if !found {
 			t.Errorf("%s must define the %q command the suite runs", f.path, e2eRunCommand)
 		}
+	}
+}
+
+func TestParseJUnitTotalsSumsSuites(t *testing.T) {
+	doc := []byte(`<?xml version="1.0"?>
+<testsuites>
+  <testsuite name="unit" tests="4" failures="1" errors="0"/>
+  <testsuite name="functional" tests="2" failures="0" errors="1"/>
+</testsuites>`)
+
+	got, err := parseJUnitTotals(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != (junitTotals{Tests: 6, Failures: 1, Errors: 1}) {
+		t.Fatalf("parseJUnitTotals() = %+v", got)
+	}
+}
+
+func TestParseJUnitTotalsAcceptsBareSuiteRoot(t *testing.T) {
+	doc := []byte(`<testsuite name="unit" tests="3" failures="0" errors="0"/>`)
+
+	got, err := parseJUnitTotals(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Tests != 3 {
+		t.Fatalf("parseJUnitTotals() = %+v, want 3 tests", got)
+	}
+}
+
+// An empty document is what report mode writes when PHPUnit never produced a log: it must parse,
+// and it must report zero tests, because that is the "executed nothing" case the step gates on.
+func TestParseJUnitTotalsEmptyDocumentCountsNoTests(t *testing.T) {
+	doc := []byte(xml.Header + "<testsuites></testsuites>")
+
+	got, err := parseJUnitTotals(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Tests != 0 {
+		t.Fatalf("parseJUnitTotals() = %+v, want no tests", got)
+	}
+}
+
+func TestParseJUnitTotalsRejectsGarbage(t *testing.T) {
+	if _, err := parseJUnitTotals([]byte("not xml at all")); err == nil {
+		t.Fatal("expected an error for a non-JUnit document")
+	}
+}
+
+// The filter has to be usable as a PHPUnit regex over "Class::method": a namespace-shaped value
+// would have its backslashes read as regex escapes (\B is a word-boundary assertion).
+func TestTestFilterHoldsNoRegexEscapes(t *testing.T) {
+	if strings.ContainsAny(e2eTestFilter, `\/`) {
+		t.Fatalf("e2eTestFilter %q must not contain path or escape characters", e2eTestFilter)
+	}
+	if len(e2eTestSuites) == 0 {
+		t.Fatal("no test suites declared for the test step")
 	}
 }

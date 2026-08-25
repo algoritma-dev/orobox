@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/scaffold"
 )
 
@@ -122,13 +123,7 @@ func runGreenPath(t *testing.T, c Case) {
 			c.Type, c.Version, res.ExitCode, res.Stdout, res.Stderr)
 	}
 
-	// 7. test — best-effort.
-	if res := box.TryRun("test"); failed(res) {
-		t.Logf("test skipped/failed (best-effort) for %s %s: exit %d\n%s\n%s",
-			c.Type, c.Version, res.ExitCode, res.Stdout, res.Stderr)
-	}
-
-	// 8. logs (follow-mode: bounded by timeout, kill is expected), xdebug lifecycle.
+	// 7. logs (follow-mode: bounded by timeout, kill is expected), xdebug lifecycle.
 	if res := box.RunTimeout(5*time.Second, "logs", "--nginx"); res.Stdout == "" && res.Stderr == "" {
 		t.Logf("logs produced no output for %s %s", c.Type, c.Version)
 	}
@@ -136,7 +131,7 @@ func runGreenPath(t *testing.T, c Case) {
 	box.Run("xdebug", "on")
 	box.Run("xdebug", "off")
 
-	// 9. generators — assert they wrote something into the checkout.
+	// 8. generators — assert they wrote something into the checkout.
 	//
 	// deploy-init and ci-init are project-only by design: a bundle checkout is not a
 	// deployable application, and its CI would have to stand up a full development stack per
@@ -168,10 +163,77 @@ func runGreenPath(t *testing.T, c Case) {
 	// a full oro:install --env=test, so this is one of the slower steps.
 	box.Run("test-init")
 
+	// 9. test — narrowed, and deliberately after test-init: while the test database is
+	// missing, `orobox test` prints "run 'orobox test-init'" and returns without ever
+	// invoking PHPUnit, so run any earlier the step asserts nothing.
+	assertNarrowedTests(t, box, c)
+
 	// 10. clear + down (teardown also runs in cleanup). The command is "clear", not
 	// "clean": it removes every container and volume so the next run starts fresh.
 	box.Run("clear")
 	box.Run("down")
+}
+
+// assertNarrowedTests drives `orobox test` once per gated suite, each run narrowed by
+// e2eTestFilter, and grades it from the JUnit report rather than from the exit code.
+//
+// Grading follows the suite's contract for `test`: a community install that cannot run the
+// current PHPUnit tooling at all is logged and skipped, because that is a property of the
+// install and not of orobox. What is not tolerated is a run that claims success without
+// executing a test — PHPUnit exits 0 on "No tests executed", so the report's counts are the
+// only thing that separates the two — nor tests that ran and did not pass.
+func assertNarrowedTests(t *testing.T, box *Box, c Case) {
+	t.Helper()
+
+	for _, suite := range e2eTestSuites {
+		reportRel := filepath.Join(config.ReportsRelDir, "junit-"+suite+".xml")
+
+		// Every run writes its raw log to the same reports/raw/test/junit.xml, and the report is
+		// merged from whatever that directory holds. Clearing it first is what keeps a suite that
+		// crashed before PHPUnit wrote anything from being graded on the previous suite's counts.
+		// Best-effort: the container may own the file, and a stale-file misgrade is a smaller
+		// problem than a case that cannot run at all.
+		rawDir := filepath.Join(box.Dir(), config.RawReportsRelDir, "test")
+		if err := os.RemoveAll(rawDir); err != nil {
+			t.Logf("could not clear %s before the %s suite: %v", rawDir, suite, err)
+		}
+
+		res := box.TryRun("test",
+			"--testsuite", suite,
+			"--filter", e2eTestFilter,
+			"--report", "gitlab",
+			"--report-path", reportRel)
+
+		// In report mode a failing suite still writes the report and then exits nonzero, so the
+		// report is read before the exit code is judged.
+		data, err := os.ReadFile(filepath.Join(box.Dir(), reportRel))
+		if err != nil {
+			if failed(res) {
+				t.Logf("test --testsuite %s skipped/failed (best-effort) for %s %s: exit %d\n%s\n%s",
+					suite, c.Type, c.Version, res.ExitCode, res.Stdout, res.Stderr)
+				continue
+			}
+			t.Errorf("test --testsuite %s exited 0 but wrote no report at %s: %v", suite, reportRel, err)
+			continue
+		}
+
+		totals, parseErr := parseJUnitTotals(data)
+		switch {
+		case parseErr != nil:
+			t.Errorf("test --testsuite %s wrote an unreadable report: %v", suite, parseErr)
+		case totals.Tests == 0 && failed(res):
+			t.Logf("test --testsuite %s skipped/failed (best-effort) for %s %s: exit %d\n%s\n%s",
+				suite, c.Type, c.Version, res.ExitCode, res.Stdout, res.Stderr)
+		case totals.Tests == 0:
+			t.Errorf("test --testsuite %s executed no test: filter %q matched nothing in %s %s",
+				suite, e2eTestFilter, c.Type, c.Version)
+		case totals.Failures+totals.Errors > 0:
+			t.Errorf("test --testsuite %s ran %d tests with %d failures and %d errors\n%s\n%s",
+				suite, totals.Tests, totals.Failures, totals.Errors, res.Stdout, res.Stderr)
+		default:
+			t.Logf("test --testsuite %s ran %d tests, all green", suite, totals.Tests)
+		}
+	}
 }
 
 // assertGenerator runs a generator command and asserts it created at least one file

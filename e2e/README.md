@@ -20,16 +20,27 @@ Design spec: [`docs/superpowers/specs/2026-08-24-e2e-test-suite-design.md`](../d
   suite asserts that orobox refuses them instead of expecting files.
 - `test-init` provisions the test database rather than writing files, so it is
   asserted to complete rather than to generate anything.
+- `test` runs **after** `test-init` (without the test database `orobox test`
+  never reaches PHPUnit) and is **narrowed**: one run per suite (`unit`,
+  `functional`), each with `--filter UserTest`, so a handful of Oro's own tests
+  execute instead of the whole OroPlatform/OroCommerce suite, which takes hours
+  and says nothing about orobox. The step is graded from the JUnit report
+  (`--report gitlab`), not from the exit code: PHPUnit exits 0 when a filter
+  matches nothing, so the report's counts are what separate a real pass from an
+  empty run.
 
 ### Grading
 
 - **Hard gate** (failure fails the case): `init`, `up` (must serve HTTP 200 on
   storefront and `/admin`), `run`, `console`, `db backup`, `db restore`, the
   generators, `test-init`, `clear`, `down`.
-- **Best-effort** (logged, never fails the case): `qa` and `test`. A fresh
-  community install of an older version may not support the current QA tooling;
-  when unsupported the step is logged and skipped, when supported it must run
-  green.
+- **Best-effort** (logged, never fails the case): `qa`, and a `test` run that
+  could not execute anything at all. A fresh community install of an older
+  version may not support the current QA/PHPUnit tooling; when unsupported the
+  step is logged and skipped, when supported it must run green.
+- **Hard gate inside the best-effort step:** once `test` does execute, it must
+  execute something and it must pass — a report with zero tests, or with
+  failures or errors, fails the case.
 
 ### Intentionally excluded
 
