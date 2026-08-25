@@ -3,6 +3,7 @@ package cmd
 import (
 	"io"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/algoritma-dev/orobox/internal/docker"
@@ -87,5 +88,19 @@ func TestDbCommand(t *testing.T) {
 	}
 	if !foundPlatformUpdate {
 		t.Errorf("Expected platform update command not found in calls")
+	}
+}
+
+// TestRestoreCacheClearDetachesBeforeDeleting guards the restore failure where clearing the cache
+// ran as a bare `rm -rf var/cache/dev` against a live stack: web, consumer and cron kept warming
+// the cache while rm walked it, so the command died with
+// "rm: can't remove 'var/cache/dev/oro_data/doctrine_metadata': Directory not empty" and the
+// restore continued on a half-cleared cache.
+func TestRestoreCacheClearDetachesBeforeDeleting(t *testing.T) {
+	if !strings.Contains(cacheClearScript, "mv ") {
+		t.Fatal("cache clear must rename var/cache/dev before removing it")
+	}
+	if strings.Index(cacheClearScript, "mv ") > strings.Index(cacheClearScript, "rm -rf") {
+		t.Fatal("the rename has to come before the removal, or the removal still races the writers")
 	}
 }

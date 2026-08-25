@@ -76,6 +76,17 @@ var dbRestoreCmd = &cobra.Command{
 	},
 }
 
+// cacheClearScript empties var/cache/dev without racing the processes that write into it: it
+// detaches the directory with a rename and only then deletes it. Left as a shell snippet
+// because both steps have to happen in the container, in that order, in one exec.
+const cacheClearScript = `set -e
+dir=var/cache/dev
+if [ -d "$dir" ]; then
+  old="$dir.orobox-old.$$"
+  mv "$dir" "$old"
+  rm -rf "$old"
+fi`
+
 func init() {
 	rootCmd.AddCommand(dbCmd)
 	dbCmd.AddCommand(dbBackupCmd)
@@ -192,9 +203,16 @@ func restoreDatabase(file string) {
 		utils.PrintSuccess("Configuration URLs updated.")
 	}
 
-	// 3. Clear cache
+	// 3. Clear cache.
+	//
+	// The rename is the part that matters: a restore runs against a live stack, so web,
+	// consumer and cron keep warming the cache while the directory is being removed. A plain
+	// `rm -rf var/cache/dev` then walks a tree that grows underneath it and fails with
+	// "Directory not empty". After the rename those writers resolve var/cache/dev afresh and
+	// repopulate a new directory, and the detached tree can be removed with nothing writing
+	// into it.
 	utils.StartLoader("Clearing cache...")
-	if err := docker.RunComposeCommandSilently("", "exec", "-T", "application", "rm", "-rf", "var/cache/dev"); err != nil {
+	if err := docker.RunComposeCommandSilently("", "exec", "-T", "application", "sh", "-c", cacheClearScript); err != nil {
 		utils.StopLoader()
 		utils.PrintWarning(fmt.Sprintf("Failed to clear cache: %v", err))
 	} else {
