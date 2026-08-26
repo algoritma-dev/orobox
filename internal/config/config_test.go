@@ -521,6 +521,84 @@ func TestSaveConfigOmitsUnsetSSHAgent(t *testing.T) {
 	}
 }
 
+// A config file that says nothing about QA must survive a load/save round-trip with every tool
+// still enabled. IsQaToolEnabled treats an unset key as enabled, so a written `phpstan: false`
+// does not just record the current state — it silently disables the tool for good. `orobox
+// deploy-init` rewrites the whole file, so this is the difference between `orobox qa-init`
+// installing the tool set and reporting "No QA tools are enabled in configuration".
+func TestSaveConfigKeepsUnsetQaToolsEnabled(t *testing.T) {
+	viper.Reset()
+	viper.SetConfigType("yaml")
+	source := "type: project\noro_version: \"6.1\"\ntest:\n  use_tmpfs: true\n  tmpfs_size: 1g\n"
+	if err := viper.ReadConfig(strings.NewReader(source)); err != nil {
+		t.Fatal(err)
+	}
+
+	var conf OroConfig
+	if err := viper.Unmarshal(&conf); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	configPath := filepath.Join(t.TempDir(), ".orobox.yaml")
+	if err := SaveConfig(configPath, &conf); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("Read saved config failed: %v", err)
+	}
+	if strings.Contains(string(data), "phpstan") {
+		t.Errorf("expected the qa section to be omitted when unset, got:\n%s", data)
+	}
+
+	viper.Reset()
+	viper.SetConfigFile(configPath)
+	if err := viper.ReadInConfig(); err != nil {
+		t.Fatalf("Reload failed: %v", err)
+	}
+	for _, tool := range []string{"phpstan", "rector", "php-cs-fixer", "twig-cs-fixer", "eslint", "stylelint"} {
+		if !IsQaToolEnabled(tool) {
+			t.Errorf("%s is disabled after a round-trip that never configured it", tool)
+		}
+	}
+}
+
+// An explicitly disabled tool is a decision, and a round-trip must preserve it.
+func TestSaveConfigPreservesExplicitQaTools(t *testing.T) {
+	viper.Reset()
+	viper.SetConfigType("yaml")
+	source := "type: project\ntest:\n  qa:\n    phpstan: false\n    rector: true\n"
+	if err := viper.ReadConfig(strings.NewReader(source)); err != nil {
+		t.Fatal(err)
+	}
+
+	var conf OroConfig
+	if err := viper.Unmarshal(&conf); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	configPath := filepath.Join(t.TempDir(), ".orobox.yaml")
+	if err := SaveConfig(configPath, &conf); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	viper.Reset()
+	viper.SetConfigFile(configPath)
+	if err := viper.ReadInConfig(); err != nil {
+		t.Fatalf("Reload failed: %v", err)
+	}
+	if IsQaToolEnabled("phpstan") {
+		t.Error("an explicit phpstan: false was lost by the round-trip")
+	}
+	if !IsQaToolEnabled("rector") {
+		t.Error("an explicit rector: true was lost by the round-trip")
+	}
+	if !IsQaToolEnabled("eslint") {
+		t.Error("eslint was never configured and must stay enabled")
+	}
+}
+
 func TestQaSharedPackagesIsACopy(t *testing.T) {
 	first := QaSharedPackages()
 	if len(first) == 0 {

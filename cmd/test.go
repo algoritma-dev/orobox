@@ -82,6 +82,13 @@ func runTestOnCompose(format qatools.Report) {
 		utils.PrintWarning(fmt.Sprintf("failed to ensure services are running: %v", err))
 	}
 
+	// The probe below is a psql, so it has to wait for the server rather than for the
+	// container. It stays a warning like the line above: PHPUnit reports a down database
+	// better than this does.
+	if err := docker.WaitForDatabaseReady(true); err != nil {
+		utils.PrintWarning(err.Error())
+	}
+
 	// Check if database is initialized
 	utils.StartLoader("Checking test environment...")
 	isInstalled, err := docker.IsDatabaseInitialized(true)
@@ -95,7 +102,9 @@ func runTestOnCompose(format qatools.Report) {
 	if !isInstalled {
 		utils.PrintError("Test database is not initialized.")
 		utils.PrintInfo("Please run 'orobox test-init' to prepare the test environment.")
-		return
+		// PHPUnit never ran, so the suite is neither passing nor failing: exiting 0 here
+		// reported a green test run to every caller that only reads the exit code.
+		os.Exit(1)
 	}
 
 	var args []string

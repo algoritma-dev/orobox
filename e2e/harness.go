@@ -23,6 +23,11 @@ type Box struct {
 	c   Case
 	dir string
 	bin string
+	// logDir collects one file per orobox invocation plus the generated compose configuration,
+	// so a failed CI run leaves an artifact behind instead of only scrollback. Empty disables
+	// the capture, which is what a unit test wants.
+	logDir string
+	step   int
 }
 
 var (
@@ -124,6 +129,13 @@ func NewBox(t *testing.T, c Case) *Box {
 	}
 
 	b := &Box{t: t, c: c, dir: dir, bin: binaryPath(t)}
+	b.logDir = filepath.Join(ResolveLogDir(os.Getenv), c.ProjectName())
+	if err := os.MkdirAll(b.logDir, 0o755); err != nil {
+		// Losing the artifact must not fail the case: the suite still reports through the
+		// job log, which is what it did before the directory existed at all.
+		t.Logf("could not create the log directory %s: %v", b.logDir, err)
+		b.logDir = ""
+	}
 	// No pre-clean: init must start the install from whatever state it manages itself,
 	// so the suite exercises the real installation (including init's own volume handling).
 	// Teardown still removes volumes afterwards for test hygiene.
@@ -175,7 +187,20 @@ func (b *Box) exec(ctx context.Context, args ...string) RunResult {
 			res.ExitCode = -1
 		}
 	}
+	b.writeStepLog(args, res)
 	return res
+}
+
+// writeStepLog records one invocation. Best-effort throughout: an artifact that cannot be
+// written is worth a note, never a failed case.
+func (b *Box) writeStepLog(args []string, res RunResult) {
+	if b.logDir == "" {
+		return
+	}
+	b.step++
+	if err := WriteStepLog(b.logDir, b.step, args, res); err != nil {
+		b.t.Logf("could not write the log for step %d: %v", b.step, err)
+	}
 }
 
 // stepTimeout bounds a single orobox invocation. Without it a stalled step (composer
@@ -258,11 +283,26 @@ func (b *Box) AssertHTTP200(url string) {
 const teardownTimeout = 10 * time.Minute
 
 func (b *Box) teardown() {
+	// The generated configuration is copied first: it is the part of the case that answers
+	// "what did orobox actually render", and it lives in the workdir Go removes once every
+	// cleanup has run.
+	b.captureGeneratedConfig()
+
 	// Best-effort: never fail the test in teardown.
 	ctx, cancel := context.WithTimeout(context.Background(), teardownTimeout)
 	defer cancel()
 	_ = b.exec(ctx, "down")
 	b.dockerDownVolumes()
+}
+
+// captureGeneratedConfig copies this case's generated configuration into the log directory.
+func (b *Box) captureGeneratedConfig() {
+	if b.logDir == "" {
+		return
+	}
+	if err := CaptureGeneratedConfig(b.dir, b.logDir); err != nil {
+		b.t.Logf("could not capture the generated configuration: %v", err)
+	}
 }
 
 // dockerDownVolumes removes this case's containers AND named volumes during teardown so

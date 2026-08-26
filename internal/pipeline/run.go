@@ -262,6 +262,13 @@ func (r *runner) resolveSource(ctx context.Context) error {
 		excludes := HostExcludes(dir)
 		r.source = r.client.Host().Directory(dir, dagger.HostDirectoryOpts{Exclude: excludes})
 		fmt.Printf("Building the working tree in %s (%d excluded paths)\n", dir, len(excludes))
+		// Named, not counted: a count is what made the "stat vendor-bin/qa: no such file or
+		// directory" failure unreconstructable. Absent patterns are not an error — see
+		// MissingExcludes — so this is a note, printed only when there are any.
+		if missing := MissingExcludes(dir, excludes); len(missing) > 0 {
+			fmt.Printf("Excluded paths no longer on disk (harmless, listed for diagnosis): %s\n",
+				strings.Join(missing, ", "))
+		}
 	case SourceGit:
 		if err := r.resolveGitSource(ctx); err != nil {
 			return err

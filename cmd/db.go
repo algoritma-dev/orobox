@@ -58,10 +58,11 @@ var dbBackupCmd = &cobra.Command{
 	Use:   "backup [file]",
 	Short: "Backup the database to a file",
 	Args:  cobra.ExactArgs(1),
-	Run: func(_ *cobra.Command, args []string) {
+	// A pg_dump that fails is a runtime problem, not a usage problem.
+	SilenceUsage: true,
+	RunE: func(_ *cobra.Command, args []string) error {
 		docker.EnsureDockerCompose()
-		backupFile := args[0]
-		backupDatabase(backupFile)
+		return backupDatabase(args[0])
 	},
 }
 
@@ -69,10 +70,11 @@ var dbRestoreCmd = &cobra.Command{
 	Use:   "restore [file]",
 	Short: "Restore the database from a file",
 	Args:  cobra.ExactArgs(1),
-	Run: func(_ *cobra.Command, args []string) {
+	// See dbBackupCmd.
+	SilenceUsage: true,
+	RunE: func(_ *cobra.Command, args []string) error {
 		docker.EnsureDockerCompose()
-		restoreFile := args[0]
-		restoreDatabase(restoreFile)
+		return restoreDatabase(args[0])
 	},
 }
 
@@ -93,7 +95,10 @@ func init() {
 	dbCmd.AddCommand(dbRestoreCmd)
 }
 
-func backupDatabase(file string) {
+// backupDatabase returns the error rather than only printing it: a backup that produced no
+// usable dump must not report success to whoever runs it, and a caller writing a dump into a
+// deploy or CI step reads the exit code.
+func backupDatabase(file string) error {
 	utils.StartLoader("Creating database backup...")
 	defer utils.StopLoader()
 
@@ -103,7 +108,7 @@ func backupDatabase(file string) {
 	if err != nil {
 		utils.StopLoader()
 		utils.PrintError(fmt.Sprintf("Failed to create file: %v", err))
-		return
+		return err
 	}
 	defer f.Close()
 
@@ -114,17 +119,21 @@ func backupDatabase(file string) {
 		f.Close()
 		_ = os.Remove(file)
 		utils.PrintError(fmt.Sprintf("Backup failed: %v", err))
-		return
+		return err
 	}
 
 	utils.StopLoader()
 	utils.PrintSuccess(fmt.Sprintf("Backup saved to %s", file))
+	return nil
 }
 
-func restoreDatabase(file string) {
+// restoreDatabase returns the error rather than only printing it: every step below leaves the
+// database in a state the caller has to know about, and a restore that stopped halfway must not
+// look like a successful one.
+func restoreDatabase(file string) error {
 	if _, err := os.Stat(file); os.IsNotExist(err) {
 		utils.PrintError(fmt.Sprintf("File %s does not exist", file))
-		return
+		return fmt.Errorf("backup file %s does not exist", file)
 	}
 
 	dbUser, _, dbName, _ := docker.GetDatabaseCredentials()
@@ -132,7 +141,14 @@ func restoreDatabase(file string) {
 	// Ensure services are running
 	if err := docker.EnsureServicesRunning([]string{"db", "application"}); err != nil {
 		utils.PrintError(fmt.Sprintf("Failed to start services: %v", err))
-		return
+		return err
+	}
+
+	// The drop/create/restore below are all psql, so wait for the server and not just for
+	// the container.
+	if err := docker.WaitForDatabaseReady(false); err != nil {
+		utils.PrintError(err.Error())
+		return err
 	}
 
 	// 1. Restore the database
@@ -150,7 +166,7 @@ func restoreDatabase(file string) {
 		if err := dbExec(nil, nil, clearArgs...); err != nil && q != terminateQuery {
 			utils.StopLoader()
 			utils.PrintError(fmt.Sprintf("Failed to clear database: %v", err))
-			return
+			return err
 		}
 	}
 
@@ -158,14 +174,14 @@ func restoreDatabase(file string) {
 	if err := dbExec(nil, nil, extensionArgs...); err != nil {
 		utils.StopLoader()
 		utils.PrintError(fmt.Sprintf("Failed to create uuid-ossp extension: %v", err))
-		return
+		return err
 	}
 
 	f, err := os.Open(file)
 	if err != nil {
 		utils.StopLoader()
 		utils.PrintError(fmt.Sprintf("Failed to open file: %v", err))
-		return
+		return err
 	}
 	defer f.Close()
 
@@ -174,7 +190,7 @@ func restoreDatabase(file string) {
 	if err := dbExec(f, nil, args...); err != nil {
 		utils.StopLoader()
 		utils.PrintError(fmt.Sprintf("Restore failed: %v", err))
-		return
+		return err
 	}
 	utils.StopLoader()
 	utils.PrintSuccess("Database restored.")
@@ -221,14 +237,18 @@ func restoreDatabase(file string) {
 	}
 
 	// 4. Update platform
+	// The restore is not finished until the schema matches the code: reporting
+	// "Restore completed successfully!" after this failed left a database the application
+	// cannot boot against behind a zero exit code.
 	utils.StartLoader("Running oro:platform:update...")
 	if err := docker.RunComposeCommandSilently("", "exec", "-T", "application", "bin/console", "oro:platform:update", "--force", "--timeout=0"); err != nil {
 		utils.StopLoader()
 		utils.PrintError(fmt.Sprintf("oro:platform:update failed: %v", err))
-	} else {
-		utils.StopLoader()
-		utils.PrintSuccess("Platform updated.")
+		return err
 	}
+	utils.StopLoader()
+	utils.PrintSuccess("Platform updated.")
 
 	utils.PrintSuccess("Restore completed successfully!")
+	return nil
 }

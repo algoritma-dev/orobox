@@ -27,7 +27,7 @@ func TestTestComposeReportModeLogsJUnitAndMerges(t *testing.T) {
 	}
 	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
 		if len(args) > 0 && args[0] == "ps" {
-			return []byte(`{"Service": "application", "State": "running"}`), nil
+			return psRunningRequested(args), nil
 		}
 		return []byte("[]"), nil
 	}
@@ -93,7 +93,7 @@ func TestTestComposeWithoutReportIsUnchanged(t *testing.T) {
 	}
 	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
 		if len(args) > 0 && args[0] == "ps" {
-			return []byte(`{"Service": "application", "State": "running"}`), nil
+			return psRunningRequested(args), nil
 		}
 		return []byte("[]"), nil
 	}
@@ -132,7 +132,7 @@ func TestTestComposeJoinsSeveralSuites(t *testing.T) {
 	}
 	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
 		if len(args) > 0 && args[0] == "ps" {
-			return []byte(`{"Service": "application", "State": "running"}`), nil
+			return psRunningRequested(args), nil
 		}
 		return []byte("[]"), nil
 	}

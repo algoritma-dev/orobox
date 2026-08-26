@@ -13,13 +13,16 @@ import (
 var cleanCmd = &cobra.Command{
 	Use:   "clear",
 	Short: "Remove all containers and volumes to start fresh",
-	Run: func(_ *cobra.Command, _ []string) {
+	// See upCmd: a compose failure is not a usage error.
+	SilenceUsage: true,
+	RunE: func(_ *cobra.Command, _ []string) error {
 		docker.EnsureDockerCompose()
 		if err := docker.RunComposeCommandSilently("Cleaning up containers and volumes...", "down", "-v", "--remove-orphans"); err != nil {
 			utils.PrintError(fmt.Sprintf("Cleanup failed: %v", err))
-			return
+			return err
 		}
 		utils.PrintSuccess("Cleanup complete.")
+		return nil
 	},
 }
 

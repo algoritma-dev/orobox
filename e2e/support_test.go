@@ -3,6 +3,7 @@ package e2e
 import (
 	"encoding/xml"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -179,6 +180,124 @@ func TestFixturesRenderValid(t *testing.T) {
 		if !found {
 			t.Errorf("%s must define the %q command the suite runs", f.path, e2eRunCommand)
 		}
+	}
+}
+
+// The workflow used to upload /tmp/orobox*.log, a path the harness never wrote: every run
+// reported "No files were found with the provided path" and no artifact was ever produced. The
+// log directory is now something the harness actually creates, and the workflow uploads it.
+func TestResolveLogDirPrefersEnv(t *testing.T) {
+	got := ResolveLogDir(func(k string) string {
+		if k == "E2E_LOG_DIR" {
+			return "/artifacts/e2e"
+		}
+		return ""
+	})
+	if got != "/artifacts/e2e" {
+		t.Fatalf("ResolveLogDir() = %q, want /artifacts/e2e", got)
+	}
+}
+
+func TestResolveLogDirHasADefault(t *testing.T) {
+	got := ResolveLogDir(func(string) string { return "" })
+	if got == "" {
+		t.Fatal("ResolveLogDir() is empty: the upload step would have nothing to point at")
+	}
+	if !filepath.IsAbs(got) {
+		t.Errorf("ResolveLogDir() = %q, want an absolute path so the workflow can name it", got)
+	}
+}
+
+// One file per invocation, ordered, and named after the command — so a failed run is read by
+// looking at the last file rather than by scrolling the whole job log.
+func TestStepLogNameIsOrderedAndSafe(t *testing.T) {
+	cases := []struct {
+		step int
+		args []string
+		want string
+	}{
+		{1, []string{"init", "-t", "project", "-v", "5.1"}, "01-init-t-project-v-5.1.log"},
+		{2, []string{"up"}, "02-up.log"},
+		{12, []string{"db", "backup", "/tmp/x/backup.sql"}, "12-db-backup-tmp-x-backup.sql.log"},
+		{3, nil, "03-orobox.log"},
+	}
+	for _, c := range cases {
+		if got := stepLogName(c.step, c.args); got != c.want {
+			t.Errorf("stepLogName(%d, %v) = %q, want %q", c.step, c.args, got, c.want)
+		}
+	}
+}
+
+func TestStepLogNameHoldsNoPathSeparators(t *testing.T) {
+	got := stepLogName(1, []string{"db", "restore", "/tmp/TestMatrix/001/dump.sql"})
+	if strings.ContainsAny(got, `/\`) {
+		t.Fatalf("stepLogName produced %q, which would escape the log directory", got)
+	}
+}
+
+// The log has to carry the command, its exit code and both streams: a step that failed on a
+// printed error marker with a zero exit is exactly the case where the exit code alone says
+// nothing.
+func TestWriteStepLogRecordsTheWholeInvocation(t *testing.T) {
+	dir := t.TempDir()
+	res := RunResult{Stdout: "installing\n", Stderr: "boom\n", ExitCode: 1}
+
+	if err := WriteStepLog(dir, 4, []string{"init", "-t", "bundle"}, res); err != nil {
+		t.Fatal(err)
+	}
+
+	body, err := os.ReadFile(filepath.Join(dir, "04-init-t-bundle.log"))
+	if err != nil {
+		t.Fatalf("the log was not written where its name says: %v", err)
+	}
+	for _, want := range []string{"orobox init -t bundle", "exit: 1", "installing", "boom"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("log is missing %q:\n%s", want, body)
+		}
+	}
+}
+
+// The generated compose files and env files are what the job log cannot show, and they live in
+// a workdir Go deletes once the case ends.
+func TestCaptureGeneratedConfigCopiesTheGeneratedFiles(t *testing.T) {
+	caseDir, logDir := t.TempDir(), t.TempDir()
+	internal := filepath.Join(caseDir, ".orobox")
+	if err := os.MkdirAll(filepath.Join(internal, "certs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"docker-compose.yml": "services: {}\n",
+		".env":               "ORO_DB_HOST=db\n",
+	} {
+		if err := os.WriteFile(filepath.Join(internal, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := CaptureGeneratedConfig(caseDir, logDir); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, want := range map[string]string{
+		"docker-compose.yml": "services: {}\n",
+		".env":               "ORO_DB_HOST=db\n",
+	} {
+		got, err := os.ReadFile(filepath.Join(logDir, "orobox-config", name))
+		if err != nil {
+			t.Errorf("%s was not captured: %v", name, err)
+			continue
+		}
+		if string(got) != want {
+			t.Errorf("%s = %q, want %q", name, got, want)
+		}
+	}
+}
+
+// A case that failed before init generated anything has nothing to copy. That is the common
+// shape of a broken run, so it must not turn into a teardown error on top of the real failure.
+func TestCaptureGeneratedConfigToleratesAMissingInternalDir(t *testing.T) {
+	if err := CaptureGeneratedConfig(t.TempDir(), t.TempDir()); err != nil {
+		t.Fatalf("CaptureGeneratedConfig() = %v, want nil when nothing was generated", err)
 	}
 }
 

@@ -31,20 +31,28 @@ type ServicesConfig struct {
 }
 
 // QaConfig represents the configuration for enabled QA tools.
+//
+// Every field is a pointer, and that is not cosmetic. IsQaToolEnabled reads an unset key as
+// enabled, so "unset" and "false" are different states — and a plain bool cannot tell them
+// apart. `orobox deploy-init` rewrites the whole config file through SaveConfig, so a value
+// field would turn every tool the file never mentioned into an explicit `false` and disable
+// the entire QA tool set for good.
 type QaConfig struct {
-	Phpstan     bool `yaml:"phpstan" mapstructure:"phpstan"`
-	Rector      bool `yaml:"rector" mapstructure:"rector"`
-	PhpCSFixer  bool `yaml:"php_cs_fixer" mapstructure:"php_cs_fixer"`
-	TwigCSFixer bool `yaml:"twig_cs_fixer" mapstructure:"twig_cs_fixer"`
-	Eslint      bool `yaml:"eslint" mapstructure:"eslint"`
-	Stylelint   bool `yaml:"stylelint" mapstructure:"stylelint"`
+	Phpstan     *bool `yaml:"phpstan,omitempty" mapstructure:"phpstan"`
+	Rector      *bool `yaml:"rector,omitempty" mapstructure:"rector"`
+	PhpCSFixer  *bool `yaml:"php_cs_fixer,omitempty" mapstructure:"php_cs_fixer"`
+	TwigCSFixer *bool `yaml:"twig_cs_fixer,omitempty" mapstructure:"twig_cs_fixer"`
+	Eslint      *bool `yaml:"eslint,omitempty" mapstructure:"eslint"`
+	Stylelint   *bool `yaml:"stylelint,omitempty" mapstructure:"stylelint"`
 }
 
 // TestConfig represents the configuration for the test environment.
 type TestConfig struct {
-	UseTmpfs  bool     `yaml:"use_tmpfs" mapstructure:"use_tmpfs"`
-	TmpfsSize string   `yaml:"tmpfs_size" mapstructure:"tmpfs_size"`
-	Qa        QaConfig `yaml:"qa" mapstructure:"qa"`
+	UseTmpfs  bool   `yaml:"use_tmpfs" mapstructure:"use_tmpfs"`
+	TmpfsSize string `yaml:"tmpfs_size" mapstructure:"tmpfs_size"`
+	// Qa is a pointer for the same reason its fields are: a struct value would always be
+	// serialized, turning a config that never mentioned QA into one that disables it.
+	Qa *QaConfig `yaml:"qa,omitempty" mapstructure:"qa"`
 }
 
 // CommandConfig represents a custom command that can be run in the container.

@@ -11,8 +11,14 @@ services:
       com.symfony.server.service-prefix: ORO_DB
     ports:
       - "5433:5432"
+    # Same reasoning as the dev db: EnsureServicesRunning reads this service's health out of
+    # `docker compose ps`, so the interval is how long it can report "starting" for a server
+    # that is already accepting.
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB" ]
+      interval: 2s
+      timeout: 5s
+      retries: 45
       start_period: 60s
     restart: unless-stopped
     {{if .UseTmpfs -}}

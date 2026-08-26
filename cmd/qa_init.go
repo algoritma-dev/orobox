@@ -18,18 +18,20 @@ import (
 var qaInitCmd = &cobra.Command{
 	Use:   "qa-init",
 	Short: "Initialize QA tools in the project or bundle",
-	Run: func(_ *cobra.Command, _ []string) {
+	// A composer or npm install that fails is a runtime problem, not a usage problem.
+	SilenceUsage: true,
+	RunE: func(_ *cobra.Command, _ []string) error {
 		docker.SetIncludeTestFiles(true)
 		docker.EnsureDockerCompose()
 
 		var conf config.OroConfig
 		if err := viper.Unmarshal(&conf); err != nil {
 			utils.PrintError(fmt.Sprintf("Error reading config: %v", err))
-			return
+			return err
 		}
 
 		utils.PrintInfo("Initializing QA tools...")
-		runQaInitCommand(conf)
+		return runQaInitCommand(conf)
 	},
 }
 
@@ -37,7 +39,10 @@ func init() {
 	rootCmd.AddCommand(qaInitCmd)
 }
 
-func runQaInitCommand(conf config.OroConfig) {
+// runQaInitCommand returns the error rather than only printing it: the tools it installs are
+// what `orobox qa` runs, so an install that stopped halfway and exited 0 left every later
+// command reporting a missing binary instead of the failure that caused it.
+func runQaInitCommand(conf config.OroConfig) error {
 	oroRoot := config.OroRootDir
 	qaToolsDir := config.QaToolsDir
 
@@ -45,7 +50,7 @@ func runQaInitCommand(conf config.OroConfig) {
 
 	if !plan.NeedsComposerTools && !plan.NeedsJSTools {
 		utils.PrintWarning("No QA tools are enabled in configuration. Nothing to install.")
-		return
+		return nil
 	}
 
 	// 1. Install PHP packages using bamarni/composer-bin-plugin.
@@ -62,14 +67,14 @@ func runQaInitCommand(conf config.OroConfig) {
 		initArgs := []string{"exec", "-T", "application", "sh", "-c", initCmd}
 		if err := docker.RunComposeCommandSilently("Preparing QA tools namespace...", initArgs...); err != nil {
 			utils.PrintError(fmt.Sprintf("Failed to prepare QA tools namespace: %v", err))
-			return
+			return err
 		}
 
 		for _, plugin := range []string{"phpstan/extension-installer", "algoritma/php-coding-standards"} {
 			configArgs := []string{"exec", "-T", "application", "composer", "-d", qaToolsDir, "config", "--no-plugins", "allow-plugins." + plugin, "true"}
 			if err := docker.RunComposeCommandSilently("Allowing plugin "+plugin+" in QA namespace...", configArgs...); err != nil {
 				utils.PrintError(fmt.Sprintf("Failed to allow plugin %s: %v", plugin, err))
-				return
+				return err
 			}
 		}
 		utils.PrintSuccess("QA namespace configured.")
@@ -90,7 +95,7 @@ func runQaInitCommand(conf config.OroConfig) {
 		} {
 			if err := docker.RunComposeCommandSilently(step.msg, step.args...); err != nil {
 				utils.PrintError(fmt.Sprintf("%s failed: %v", step.msg, err))
-				return
+				return err
 			}
 		}
 		utils.PrintSuccess("bamarni/composer-bin-plugin installed.")
@@ -99,7 +104,7 @@ func runQaInitCommand(conf config.OroConfig) {
 		removeArgs := []string{"exec", "-w", oroRoot, "-T", "application", "composer", "remove", "--dev", "--no-scripts", "friendsofphp/php-cs-fixer"}
 		if err := docker.RunComposeCommandSilently("Removing project php-cs-fixer...", removeArgs...); err != nil {
 			utils.PrintError(fmt.Sprintf("Failed to remove project php-cs-fixer: %v", err))
-			return
+			return err
 		}
 
 		// 1bis. Hand the packages the application already ships over to its tree: one copy of a
@@ -120,7 +125,7 @@ func runQaInitCommand(conf config.OroConfig) {
 
 		if err := docker.RunComposeCommand("Installing Composer QA packages...", composerArgs...); err != nil {
 			utils.PrintError(fmt.Sprintf("Failed to install Composer packages: %v", err))
-			return
+			return err
 		}
 		utils.PrintSuccess("Composer QA packages installed.")
 
@@ -147,7 +152,7 @@ func runQaInitCommand(conf config.OroConfig) {
 		npmArgs = append(npmArgs, plan.JSPackages...)
 		if err := docker.RunComposeCommandSilently(fmt.Sprintf("Installing %s QA packages...", strings.ToUpper(plan.JSManager)), npmArgs...); err != nil {
 			utils.PrintError(fmt.Sprintf("Failed to install %s packages: %v", plan.JSManager, err))
-			return
+			return err
 		}
 		utils.PrintSuccess(fmt.Sprintf("%s QA packages installed.", strings.ToUpper(plan.JSManager)))
 	}
@@ -155,6 +160,7 @@ func runQaInitCommand(conf config.OroConfig) {
 	writeQaStubs(config.GetHostBundlePath(), conf.Type)
 
 	utils.PrintSuccess("QA tools initialized successfully!")
+	return nil
 }
 
 // writeQaStubs writes the QA configuration stubs into the project's own checkout, so the files the

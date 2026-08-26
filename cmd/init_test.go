@@ -4,6 +4,10 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/algoritma-dev/orobox/internal/docker"
+
+	"github.com/spf13/viper"
 )
 
 // TestInitRunArgsNeverStartsDependencies guards the fix for the install crash where the
@@ -53,6 +57,79 @@ func indexOfArg(args []string, want string) int {
 		}
 	}
 	return -1
+}
+
+// A failed installation must make `orobox init` exit non-zero.
+//
+// The exit code is the only signal a CI job, a Makefile or the e2e harness can act on: while
+// init printed "OroCommerce download/install failed" and still returned 0, every caller saw a
+// successful bootstrap and carried on against a project that was never installed.
+func TestInitCommandFailsWhenInstallationFails(t *testing.T) {
+	restore := stubInitEnvironment(t)
+	defer restore()
+
+	performInstallation = func() bool { return false }
+
+	rootCmd.SetArgs([]string{"init", "-t", "project", "-v", "6.1", "-b", bundlePath})
+	if err := rootCmd.Execute(); err == nil {
+		t.Error("expected a non-nil error so Execute exits 1, got nil")
+	}
+}
+
+// The mirror case: a successful installation must keep exiting 0.
+func TestInitCommandSucceedsWhenInstallationSucceeds(t *testing.T) {
+	restore := stubInitEnvironment(t)
+	defer restore()
+
+	performInstallation = func() bool { return true }
+
+	rootCmd.SetArgs([]string{"init", "-t", "project", "-v", "6.1", "-b", bundlePath})
+	if err := rootCmd.Execute(); err != nil {
+		t.Errorf("expected no error for a successful install, got %v", err)
+	}
+}
+
+// stubInitEnvironment points `orobox init` at a throwaway directory and replaces the two things
+// it would otherwise reach for: the compose runners and performInstallation itself. It returns
+// the restore func the caller defers.
+func stubInitEnvironment(t *testing.T) func() {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	origWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oldPerform := performInstallation
+	oldBundlePath := bundlePath
+	oldInstallType := installType
+	oldStdin := stdin
+	oldRun := docker.RunComposeCommand
+	oldRunSilently := docker.RunComposeCommandSilently
+
+	bundlePath = tmpDir
+	installType = ""
+	// generateConfig still prompts: -t and -v cover the type and the version, so the answers
+	// are the version selection, the host and the root taken as defaults, then "n" to SSL so
+	// the run never reaches mkcert. The remaining service questions hit EOF and take theirs.
+	stdin = strings.NewReader("\n\n\nn\n")
+	docker.RunComposeCommand = func(string, ...string) error { return nil }
+	docker.RunComposeCommandSilently = func(string, ...string) error { return nil }
+
+	return func() {
+		performInstallation = oldPerform
+		bundlePath = oldBundlePath
+		installType = oldInstallType
+		stdin = oldStdin
+		docker.RunComposeCommand = oldRun
+		docker.RunComposeCommandSilently = oldRunSilently
+		rootCmd.SetArgs(nil)
+		if err := os.Chdir(origWd); err != nil {
+			t.Fatal(err)
+		}
+		viper.Reset()
+	}
 }
 
 func TestGenerateConfig(t *testing.T) {

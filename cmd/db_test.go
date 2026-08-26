@@ -26,7 +26,7 @@ func TestDbCommand(t *testing.T) {
 	}
 	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
 		if args[0] == "ps" {
-			return []byte(`{"Service": "db", "State": "running"}`), nil
+			return psRunningRequested(args), nil
 		}
 		return []byte(""), nil
 	}

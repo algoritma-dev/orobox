@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"text/template"
 
@@ -139,9 +141,12 @@ type RunResult struct {
 	ExitCode int
 }
 
-// errorMarker is the glyph utils.PrintError writes for every fatal message. Orobox
-// commands use cobra Run (not RunE) and exit 0 even on failure, so the exit code alone
-// cannot be trusted; a printed error marker is the reliable failure signal.
+// errorMarker is the glyph utils.PrintError writes for every fatal message.
+//
+// It is checked alongside the exit code, not instead of it. The commands this suite drives now
+// propagate their failures (cobra RunE, or os.Exit where the command already used it), so the
+// exit code is meaningful — but a printed error the command then swallowed is still a failure
+// the suite should catch, and this is what catches it.
 const errorMarker = "✘"
 
 // failed reports whether a result indicates failure: a nonzero exit, or an error marker
@@ -150,6 +155,91 @@ func failed(res RunResult) bool {
 	return res.ExitCode != 0 ||
 		strings.Contains(res.Stdout, errorMarker) ||
 		strings.Contains(res.Stderr, errorMarker)
+}
+
+// ResolveLogDir returns the directory the harness writes its artifacts into.
+//
+// The CI job archives this directory, so it has to be a path the harness actually creates: the
+// workflow previously uploaded /tmp/orobox*.log, which nothing ever wrote, and reported "No
+// files were found with the provided path" on every run.
+func ResolveLogDir(getenv func(string) string) string {
+	if dir := getenv("E2E_LOG_DIR"); dir != "" {
+		return dir
+	}
+	return filepath.Join(os.TempDir(), "orobox-e2e-logs")
+}
+
+// stepLogName names one invocation's log: a zero-padded step number so the files read in
+// execution order, followed by the arguments so the failing step is identifiable without
+// opening anything.
+//
+// Everything outside a small safe set collapses to a dash, so an argument carrying a path — a
+// database dump, a report file — cannot put a separator in the name and write outside the log
+// directory.
+func stepLogName(step int, args []string) string {
+	label := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_':
+			return r
+		default:
+			return '-'
+		}
+	}, strings.Join(args, "-"))
+
+	label = strings.Trim(label, "-")
+	for strings.Contains(label, "--") {
+		label = strings.ReplaceAll(label, "--", "-")
+	}
+	if label == "" {
+		label = "orobox"
+	}
+
+	return fmt.Sprintf("%02d-%s.log", step, label)
+}
+
+// WriteStepLog records one orobox invocation under logDir.
+//
+// Kept here rather than on Box so it is exercised by the ordinary test run: the harness itself
+// is behind the e2e build tag, and a guard that only runs inside the hour-long matrix job is a
+// guard that never runs when it is needed.
+func WriteStepLog(logDir string, step int, args []string, res RunResult) error {
+	body := fmt.Sprintf("$ orobox %s\nexit: %d\n\n--- stdout ---\n%s\n--- stderr ---\n%s",
+		strings.Join(args, " "), res.ExitCode, res.Stdout, res.Stderr)
+	return os.WriteFile(filepath.Join(logDir, stepLogName(step, args)), []byte(body), 0o644)
+}
+
+// CaptureGeneratedConfig copies the .orobox directory orobox generated for a case — the compose
+// files, the Dockerfile, the env files — from caseDir into logDir.
+//
+// It is the evidence the job log cannot carry: every bug this suite has caught so far came down
+// to what those generated files ended up containing. A case that failed before init generated
+// anything has nothing to copy, which is not an error. Only the top level is copied, since that
+// is where the generated files are, and only regular files.
+func CaptureGeneratedConfig(caseDir, logDir string) error {
+	src := filepath.Join(caseDir, ".orobox")
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return nil
+	}
+
+	dst := filepath.Join(logDir, "orobox-config")
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(src, entry.Name()))
+		if err != nil {
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(dst, entry.Name()), content, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ResolveBinary returns the orobox binary path from OROBOX_BIN, or signals that one must be built.

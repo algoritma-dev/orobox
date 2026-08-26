@@ -138,7 +138,7 @@ func TestQaGenerateBaselineRunsPhpstanAlone(t *testing.T) {
 	docker.RunComposeCommandSilently = mockRun
 	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
 		if len(args) > 0 && args[0] == "ps" {
-			return []byte(`{"Service": "application", "State": "running"}`), nil
+			return psRunningRequested(args), nil
 		}
 		return []byte("[]"), nil
 	}

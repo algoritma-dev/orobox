@@ -33,7 +33,10 @@ var (
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize the development environment",
-	Run: func(_ *cobra.Command, _ []string) {
+	// A clone, a composer install or an oro:install that fails is a runtime problem, not a
+	// usage problem: printing the flag list after it buries the actual error under help text.
+	SilenceUsage: true,
+	RunE: func(_ *cobra.Command, _ []string) error {
 		absPath, err := filepath.Abs(bundlePath)
 		if err != nil {
 			panic(err)
@@ -69,8 +72,11 @@ var initCmd = &cobra.Command{
 
 		docker.EnsureDockerCompose()
 
+		// The failing step has already printed what went wrong; the error exists so Execute
+		// exits 1. Returning nil here would report a bootstrap that never happened as a
+		// success, and every caller — CI job, Makefile, e2e harness — reads the exit code.
 		if !performInstallation() {
-			return
+			return errors.New("environment initialization failed")
 		}
 
 		utils.PrintSuccess("Environment initialized successfully!")
@@ -82,10 +88,13 @@ var initCmd = &cobra.Command{
 				fmt.Printf("127.0.0.1 %s\n", host)
 			}
 		}
+		return nil
 	},
 }
 
-func performInstallation() bool {
+// performInstallation is a variable so a test can drive the command's exit code without
+// standing up Docker, a clone and a full oro:install.
+var performInstallation = func() bool {
 	var conf config.OroConfig
 	if err := viper.Unmarshal(&conf); err != nil {
 		utils.PrintError(fmt.Sprintf("Error reading config: %v", err))
@@ -147,6 +156,13 @@ func performInstallation() bool {
 	}
 	if err := docker.RunComposeCommandSilently("Starting services for installation...", services...); err != nil {
 		utils.PrintError(fmt.Sprintf("Failed to start services: %v", err))
+		return false
+	}
+
+	// `up -d` returns before Postgres listens, and the database this just started is the one
+	// oro:install writes into. On a first start it also has to initdb and run init-db.sql.
+	if err := docker.WaitForDatabaseReady(false); err != nil {
+		utils.PrintError(err.Error())
 		return false
 	}
 

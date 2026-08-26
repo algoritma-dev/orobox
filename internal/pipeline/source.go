@@ -1,7 +1,9 @@
 package pipeline
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -53,4 +55,33 @@ func HostExcludes(projectDir string) []string {
 		excludes = append(excludes, ".git")
 	}
 	return excludes
+}
+
+// MissingExcludes returns the exclude patterns that name nothing on disk under projectDir.
+//
+// It exists for diagnosis, not validation. An exclude for a path that is not there excludes
+// nothing and is harmless, and the list is legitimately a snapshot: git reports what was in the
+// tree when it ran, and orobox runs containers that write into a project checkout — for a project
+// install the checkout *is* the container's application root — between that call and the tree
+// being uploaded.
+//
+// The reason to surface it is a CI failure that reported
+// "failed to make directory content hashed: stat vendor-bin/qa: no such file or directory"
+// against a tree whose exclude list was only ever logged as a count. Naming the absent patterns
+// makes the next occurrence say which one it was, or rule the exclude list out entirely.
+//
+// Patterns are matched literally. A glob that happens to match nothing is reported too, which is
+// the conservative direction for a diagnostic.
+func MissingExcludes(projectDir string, excludes []string) []string {
+	var missing []string
+	for _, pattern := range excludes {
+		clean := strings.TrimSuffix(strings.TrimSpace(pattern), "/")
+		if clean == "" {
+			continue
+		}
+		if _, err := os.Lstat(filepath.Join(projectDir, clean)); err != nil {
+			missing = append(missing, pattern)
+		}
+	}
+	return missing
 }

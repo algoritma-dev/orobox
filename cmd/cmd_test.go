@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -38,6 +39,42 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Exit(m.Run())
+}
+
+// psAfterUp answers ps the way compose does across a start: nothing while the services are
+// still down, then every requested service running and healthy once an `up` has been issued.
+//
+// Tests that assert an `up` was needed have to model that transition. Answering "already
+// running" from the first call makes EnsureServicesRunning correctly skip the start, and
+// answering "still down" forever makes it wait out the health budget it now honours.
+func psAfterUp(calls [][]string, args []string) []byte {
+	for _, call := range calls {
+		if len(call) > 0 && call[0] == "up" {
+			return psRunningRequested(args)
+		}
+	}
+	return []byte("[]")
+}
+
+// psRunningRequested answers `docker compose ps --format json <services...>` about the services
+// the call actually asked for, reporting each as running and healthy.
+//
+// Compose answers about the services in the request. A mock that always named a single service
+// let EnsureServicesRunning see every other one as absent, and since it waits for health rather
+// than accepting "starting", that meant polling for a service the mock never mentioned.
+func psRunningRequested(args []string) []byte {
+	var statuses []docker.ServiceStatus
+	for _, name := range args[1:] {
+		if strings.HasPrefix(name, "-") || name == "json" {
+			continue
+		}
+		statuses = append(statuses, docker.ServiceStatus{Service: name, State: "running", Health: "healthy"})
+	}
+	body, err := json.Marshal(statuses)
+	if err != nil {
+		panic(err)
+	}
+	return body
 }
 
 func TestUpCommand(t *testing.T) {
@@ -169,7 +206,7 @@ func TestTestCommand(t *testing.T) {
 
 	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
 		if len(args) > 0 && args[0] == "ps" {
-			return []byte(`{"Service": "application", "State": "running"}`), nil
+			return psAfterUp(calls, args), nil
 		}
 		// Return 1 for database check
 		return []byte("1"), nil
@@ -347,7 +384,7 @@ func TestTestCommandBundle(t *testing.T) {
 
 	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
 		if len(args) > 0 && args[0] == "ps" {
-			return []byte(`{"Service": "application", "State": "running"}`), nil
+			return psAfterUp(calls, args), nil
 		}
 		return []byte("1"), nil
 	}
@@ -467,7 +504,7 @@ func TestTestInitCommand(t *testing.T) {
 	// Simulates uninitialized environment to avoid prompts and running containers
 	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
 		if len(args) > 0 && args[0] == "ps" {
-			return []byte(`{"Service": "application", "State": "running"}`), nil
+			return psAfterUp(calls, args), nil
 		}
 		return []byte("0"), nil
 	}

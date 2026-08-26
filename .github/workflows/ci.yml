@@ -73,9 +73,10 @@ jobs:
       - name: Build orobox
         run: make build
 
-      - name: Disk and Docker state before e2e
+      - name: Disk, memory and Docker state before e2e
         run: |
           df -h /
+          free -m
           docker system df
 
       - name: Run e2e (version ${{ matrix.version }})
@@ -90,6 +91,9 @@ jobs:
           # Bound one orobox invocation, so a stall fails that step (with whatever it had
           # printed) instead of eating the whole -timeout and being killed with no output.
           E2E_STEP_TIMEOUT: 90m
+          # Where the harness writes one log per orobox invocation plus each case's generated
+          # compose and env files. The Upload logs step archives exactly this directory.
+          E2E_LOG_DIR: ${{ runner.temp }}/orobox-e2e-logs
         # Must stay under the job timeout-minutes above, so the panic and its goroutine dump
         # are actually emitted.
         run: go test -tags e2e -timeout 4h -v ./e2e/...
@@ -98,6 +102,11 @@ jobs:
         if: always()
         run: |
           df -h /
+          free -m
+          # An OOM kill inside a container surfaces to the application only as
+          # `signal "9"`, with nothing in the job log saying which process was chosen or what
+          # its cgroup limit was. These two make the next occurrence self-explanatory.
+          sudo dmesg | grep -iE "out of memory|oom-kill|killed process" | tail -20 || echo "no OOM kills in dmesg"
           docker system df
           docker ps -a
           for c in $(docker ps -aq); do
@@ -110,9 +119,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: e2e-logs-${{ matrix.version }}
-          path: |
-            /tmp/orobox*.log
-          if-no-files-found: ignore
+          # Must stay in step with E2E_LOG_DIR above. The previous value, /tmp/orobox*.log,
+          # was a path the harness never wrote, so every run of this job reported "No files
+          # were found with the provided path" and produced no artifact at all.
+          path: ${{ runner.temp }}/orobox-e2e-logs
+          if-no-files-found: warn
 
   release:
     needs: [lint, test]

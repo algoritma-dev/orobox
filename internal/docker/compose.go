@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"text/template"
+	"time"
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/utils"
@@ -78,6 +79,27 @@ func GetComposeCommand() []string {
 const (
 	websocketBackendHost = "ws"
 	websocketBackendPort = "8080"
+)
+
+// Memory budget for the container that installs OroCommerce.
+//
+// The long-running services keep the smaller mem_limit from the oro-app template: they never
+// run webpack, and raising their ceiling would give away the protection the limit exists for.
+// The `application` service is different — composer install, oro:install and oro:assets:build
+// all run there, and the webpack production build is the memory peak of the whole install.
+//
+// nodeHeapMB is derived from the limit rather than written next to it, so the two cannot drift
+// into a heap ceiling above the cgroup limit — which is the failure this exists to prevent.
+// The reserve covers node's non-heap memory (young generation, compiled code, source-map
+// buffers) plus the PHP process waiting on it.
+const (
+	buildMemoryLimitMB = 5120
+	buildMemoryReserve = 1024
+)
+
+var (
+	buildMemoryLimit = fmt.Sprintf("%dm", buildMemoryLimitMB)
+	nodeHeapMB       = buildMemoryLimitMB - buildMemoryReserve
 )
 
 // GetNginxPorts returns the configured HTTP and HTTPS ports for Nginx.
@@ -228,6 +250,8 @@ func EnsureDockerCompose() bool {
 		BundleNamespace         string
 		Domains                 []config.DomainConfig
 		MemoryLimit             string
+		BuildMemoryLimit        string
+		NodeHeapMB              int
 		NginxHTTPPort           string
 		NginxHTTPSPort          string
 		PhpFpmPort              string
@@ -256,6 +280,8 @@ func EnsureDockerCompose() bool {
 		CustomBundle:            config.CustomBundlePath,
 		BundleNamespace:         config.GetBundlePath(),
 		MemoryLimit:             "2048M", // Default
+		BuildMemoryLimit:        buildMemoryLimit,
+		NodeHeapMB:              nodeHeapMB,
 		PhpFpmPort:              "9000",
 		UserRuntime:             "www-data",
 		UseTmpfs:                viper.GetBool("test.use_tmpfs"),
@@ -1079,19 +1105,27 @@ func EnsureServicesRunning(serviceNames []string) error {
 		}
 	}
 
+	// "starting" is deliberately not accepted here. A container in that state is running but
+	// has not passed a single probe yet — Postgres is not accepting connections, RabbitMQ is
+	// not listening — and every caller of this function goes straight on to exec into the
+	// service. Those are waited out below instead, along with anything that has to be started.
+	var servicesToAwait []string
 	for _, name := range servicesToCheck {
 		status, ok := statusMap[name]
-		if ok && status.State == "running" && (status.Health == "" || status.Health == "healthy" || status.Health == "starting") {
+		switch {
+		case ok && status.State == "running" && (status.Health == "" || status.Health == "healthy"):
 			ensuredServicesMu.Lock()
 			ensuredServices[name] = true
 			ensuredServicesMu.Unlock()
-		} else {
+		case ok && status.State == "running":
+			servicesToAwait = append(servicesToAwait, name)
+		default:
 			servicesToStart = append(servicesToStart, name)
 		}
 	}
 
 	if len(servicesToStart) == 0 {
-		return nil
+		return waitForServicesHealthy(servicesToAwait)
 	}
 
 	// If any service is not running/healthy, start them
@@ -1101,13 +1135,105 @@ func EnsureServicesRunning(serviceNames []string) error {
 		return err
 	}
 
-	ensuredServicesMu.Lock()
-	for _, name := range servicesToStart {
-		ensuredServices[name] = true
-	}
-	ensuredServicesMu.Unlock()
+	// `up -d` returns once the containers are created and running, which is well before a
+	// healthcheck has passed, so the services it just started are waited on too.
+	return waitForServicesHealthy(append(servicesToAwait, servicesToStart...))
+}
 
-	return nil
+// The health poll budget: 45 attempts two seconds apart, matching the 90s the compose
+// healthchecks themselves tolerate after their start period. Variables so a test can drive the
+// loop without a clock.
+var (
+	serviceHealthAttempts = 45
+	serviceHealthInterval = 2 * time.Second
+)
+
+// waitForServicesHealthy blocks until every named service reports healthy, marking each ensured
+// as it does.
+//
+// A service that declares no healthcheck reports an empty Health and is accepted immediately:
+// `application` and `mail` are such services and appear in almost every call, so waiting on them
+// would hang forever. An explicit "unhealthy" is a failure and not something to keep polling —
+// the probe ran and answered.
+func waitForServicesHealthy(names []string) error {
+	pending := make([]string, 0, len(names))
+	for _, name := range names {
+		ensuredServicesMu.Lock()
+		already := ensuredServices[name]
+		ensuredServicesMu.Unlock()
+		if !already {
+			pending = append(pending, name)
+		}
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+
+	for attempt := 0; attempt < serviceHealthAttempts; attempt++ {
+		if attempt == 1 {
+			// Announced only once it is clear there is something to wait for: a stack that is
+			// already up answers on the first poll.
+			utils.StartLoader(fmt.Sprintf("Waiting for %s to become healthy...", strings.Join(pending, ", ")))
+			defer utils.StopLoader()
+		}
+		if attempt > 0 {
+			sleepFunc(serviceHealthInterval)
+		}
+
+		statuses := serviceStatuses(pending)
+
+		var stillPending []string
+		for _, name := range pending {
+			status, ok := statuses[name]
+			switch {
+			case ok && status.State == "running" && (status.Health == "" || status.Health == "healthy"):
+				ensuredServicesMu.Lock()
+				ensuredServices[name] = true
+				ensuredServicesMu.Unlock()
+			case ok && status.Health == "unhealthy":
+				return fmt.Errorf("service %s is unhealthy: its healthcheck ran and failed", name)
+			default:
+				stillPending = append(stillPending, name)
+			}
+		}
+
+		pending = stillPending
+		if len(pending) == 0 {
+			return nil
+		}
+	}
+
+	budget := time.Duration(serviceHealthAttempts) * serviceHealthInterval
+	return fmt.Errorf("service(s) %s did not become healthy within %s", strings.Join(pending, ", "), budget)
+}
+
+// serviceStatuses reads `docker compose ps` for the given services. A read that fails yields an
+// empty map, which the caller treats as "not ready yet" and retries.
+func serviceStatuses(names []string) map[string]ServiceStatus {
+	output, err := RunComposeCommandWithOutput(append([]string{"ps", "--format", "json"}, names...)...)
+	if err != nil {
+		return nil
+	}
+
+	statuses := make(map[string]ServiceStatus)
+	var list []ServiceStatus
+	if err := json.Unmarshal(output, &list); err == nil {
+		for _, s := range list {
+			statuses[s.Service] = s
+		}
+		return statuses
+	}
+	// Compose also emits one JSON object per line.
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if line == "" {
+			continue
+		}
+		var s ServiceStatus
+		if err := json.Unmarshal([]byte(line), &s); err == nil {
+			statuses[s.Service] = s
+		}
+	}
+	return statuses
 }
 
 // IsDatabaseInitialized checks if the database is initialized.
