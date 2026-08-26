@@ -52,11 +52,11 @@ func WaitForDatabaseReady(test bool) error {
 			sleepFunc(dbReadyInterval)
 		}
 
-		if _, err := RunComposeCommandWithOutput(args...); err == nil {
+		_, err := RunComposeCommandWithOutput(args...)
+		if err == nil {
 			return nil
-		} else {
-			lastErr = err
 		}
+		lastErr = err
 	}
 
 	budget := time.Duration(dbReadyAttempts) * dbReadyInterval
