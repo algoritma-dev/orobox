@@ -160,10 +160,16 @@ func TestPlanQaToolsLayerHoldsTheToolInstall(t *testing.T) {
 		t.Errorf("the QA install pipes `yes` without swallowing its SIGPIPE status: %s", tools)
 	}
 
-	// The configuration scripts must not be in the layer: a configuration committed in the
-	// repository has to win, and the sources are not there yet.
-	if strings.Contains(tools, "phpstan.neon") || strings.Contains(tools, ".twig-cs-fixer.php") {
-		t.Errorf("qa-tools layer writes a configuration file before the sources exist: %s", tools)
+	// The base standard belongs to the layer: it is the installed package's own file, it does not
+	// depend on the sources, and the coding standard's Composer plugin does not always write it.
+	if !strings.Contains(tools, "algoritma-phpstan-create-config") {
+		t.Errorf("qa-tools layer must ask for the base QA configurations: %s", tools)
+	}
+
+	// The fix-up scripts must not be in the layer: they adapt the configuration to the sources'
+	// layout and to the environment the QA step runs in, and the sources are not there yet.
+	if strings.Contains(tools, "consoleApplicationLoader") || strings.Contains(tools, ".twig-cs-fixer.php") {
+		t.Errorf("qa-tools layer adapts a configuration before the sources exist: %s", tools)
 	}
 	qa := joined(p.QA.Commands)
 	if !strings.Contains(qa, "phpstan.neon") {

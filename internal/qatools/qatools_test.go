@@ -214,6 +214,46 @@ func TestConfigScripts(t *testing.T) {
 	}
 }
 
+// TestBaseConfigScript covers the case that produced "Project config file at path
+// vendor-bin/qa/phpstan.neon does not exist": the coding standard's Composer plugin installs
+// without writing its own configurations, so the QA install has to ask for them explicitly.
+func TestBaseConfigScript(t *testing.T) {
+	viper.Reset()
+	defer viper.Reset()
+
+	script := BaseConfigScript()
+	for _, want := range []string{
+		"[ -f " + config.QaToolsDir + "/phpstan.neon ] || (cd " + config.QaToolsDir + " && composer algoritma-phpstan-create-config --no-interaction)",
+		"composer algoritma-rector-create-config",
+		"composer algoritma-cs-create-config",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("base config script missing %q:\n%s", want, script)
+		}
+	}
+
+	// A generation that fails leaves the run degraded, not broken: the tools' configurations are
+	// independent, and a project config can still carry the analysis.
+	if !strings.Contains(script, "|| true") {
+		t.Errorf("a failed generation must not fail the step: %s", script)
+	}
+	if !strings.Contains(script, "did not write") {
+		t.Errorf("a missing base config must be reported: %s", script)
+	}
+
+	// Disabled tools ask for nothing, and with every PHP tool off there is nothing to write.
+	viper.Set("test.qa.rector", false)
+	if script := BaseConfigScript(); strings.Contains(script, "algoritma-rector-create-config") {
+		t.Errorf("rector is disabled: %s", script)
+	}
+
+	viper.Set("test.qa.phpstan", false)
+	viper.Set("test.qa.php_cs_fixer", false)
+	if script := BaseConfigScript(); script != "" {
+		t.Errorf("no PHP tool enabled should write nothing, got %q", script)
+	}
+}
+
 func TestComposerInstallCommand(t *testing.T) {
 	cmd := ComposerInstallCommand([]string{"algoritma/php-coding-standards:*", "symfony/console:^6.4"})
 
@@ -609,9 +649,10 @@ func TestManifestPatchHandsSharedPackagesToTheApplicationTree(t *testing.T) {
 		t.Fatalf("patched manifest is not valid JSON: %v: %s", err, raw)
 	}
 
-	// The version is the one actually installed, not the pinned range: that is the copy the
-	// tools will load through the bootstrap.
-	for name, want := range map[string]string{"symfony/console": "6.4.43", "symfony/service-contracts": "3.7.1"} {
+	// The constraint is the patch line the application ships, not the point release: an exact
+	// version makes a QA package that wants a later patch of the same line unsatisfiable, and
+	// Composer resolves that by silently installing an older release of the package that asked.
+	for name, want := range map[string]string{"symfony/console": "6.4.*", "symfony/service-contracts": "3.7.*"} {
 		if got := patched.Replace[name]; got != want {
 			t.Errorf("replace[%s] = %q, want %q", name, got, want)
 		}

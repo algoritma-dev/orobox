@@ -732,6 +732,12 @@ func qaToolCommands(oroVersion string) []string {
 			qatools.SharedVendorScript(),
 			qatools.ComposerInstallCommand(plan.ComposerPackages),
 		)
+		// The base configurations belong to the layer that installed the packages: they are the
+		// standard's own files, they never depend on the sources, and generating them per commit
+		// would pay for them on every run.
+		if base := qatools.BaseConfigScript(); base != "" {
+			commands = append(commands, base)
+		}
 	}
 
 	if plan.NeedsJSTools {

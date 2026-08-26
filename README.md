@@ -392,9 +392,16 @@ Fatal error: Cannot redeclare interface Symfony\Contracts\Service\ResetInterface
 
 Identical versions in both trees do not help — the paths still differ. So `orobox qa-init` (and the
 deploy pipeline's QA stage) patches `vendor-bin/qa/composer.json` before Composer populates it:
-each shared package the application ships is written into `replace` at the version actually
-installed there and removed from the QA requirements. A package the application does **not** ship
-keeps its pinned requirement and is installed in the QA tree as before.
+each shared package the application ships is written into `replace` at the patch line installed
+there (`6.4.*` for a `v6.4.17`) and removed from the QA requirements. A package the application
+does **not** ship keeps its pinned requirement and is installed in the QA tree as before.
+
+The line rather than the point release, because Composer answers an unsatisfiable requirement by
+installing an older release of whoever asked for it, not by failing: an exact `6.4.16` against
+PHP-CS-Fixer's `symfony/options-resolver: ^6.4.24` quietly pulled in an
+`algoritma/php-coding-standards` old enough that its Composer plugin never wrote the shared
+ruleset, and the QA run then analysed without it. Symfony keeps its patch releases BC, so the
+line is a claim the application's copy can honour.
 
 Replacing the shared packages is not the whole fix, because the two trees always overlap somewhere
 Orobox cannot predict — `twig/twig` arrives in the QA tree through Twig-CS-Fixer, `sebastian/diff`
@@ -422,6 +429,12 @@ Every tool runs against a base configuration Orobox owns: the ruleset
 ships at the application root for the JS ones. A configuration file of the same name in your source
 root is **merged on top of that base** rather than replacing it, so adding one exclude no longer
 drops the whole shared standard. Your file wins wherever the two disagree.
+
+`algoritma/php-coding-standards` writes its files from a Composer plugin event that not every
+release fires — the older releases the shared-vendor pins resolve to on Oro 6.0 install silently
+without one — so the QA install asks for them explicitly afterwards
+(`composer algoritma-phpstan-create-config` and its Rector and PHP-CS-Fixer siblings), and never
+overwrites a file that is already there.
 
 | File | How it merges |
 | --- | --- |

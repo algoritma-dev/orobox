@@ -129,6 +129,12 @@ func runQaInitCommand(conf config.OroConfig) error {
 		}
 		utils.PrintSuccess("Composer QA packages installed.")
 
+		// The base configurations first: the coding standard's Composer plugin does not write
+		// them on every release, and the fix-ups below have nothing to work on without them.
+		if base := qatools.BaseConfigScript(); base != "" {
+			runQaScript("Writing the base QA configurations...", "Base QA configurations in place.", base)
+		}
+
 		// The generated phpstan.neon and the missing twig-cs-fixer config both need fixing up
 		// for the Oro layout; the deploy pipeline runs the very same scripts.
 		if plan.NeedsPhpstan {

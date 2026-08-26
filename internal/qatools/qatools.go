@@ -580,7 +580,16 @@ foreach ($shared as $name) {
         continue;
     }
 
-    $manifest['replace'][$name] = $version;
+    // The constraint covers the patch line the application is on rather than the one version it
+    // ships. An exact "6.4.16" makes every QA package that wants a later patch of the same line
+    // unsatisfiable — php-cs-fixer requires symfony/options-resolver ^6.4.24 — and Composer's
+    // answer to an unsatisfiable requirement is not an error but an older release of whatever
+    // asked for it, which is how the QA tree silently ended up on an algoritma release whose
+    // plugin no longer writes the shared ruleset. Symfony keeps its patch releases BC, so
+    // claiming the line rather than the point release is what keeps the tools current.
+    $manifest['replace'][$name] = preg_match('/^(\d+\.\d+)\./', $version, $line) === 1
+        ? $line[1] . '.*'
+        : $version;
 
     foreach (['require', 'require-dev'] as $section) {
         unset($manifest[$section][$name]);
@@ -790,6 +799,59 @@ func TwigConfigScript() string {
 	cfg := config.QaToolsDir + "/.twig-cs-fixer.php"
 	b64 := base64.StdEncoding.EncodeToString([]byte(twigCsFixerConfigPHP))
 	return fmt.Sprintf("[ -f %[1]s ] || printf '%%s' '%[2]s' | base64 -d > %[1]s", cfg, b64)
+}
+
+// baseConfigGenerators pairs each base configuration file with the algoritma/php-coding-standards
+// command that writes it, in the order the tools run.
+var baseConfigGenerators = []struct {
+	Tool    string
+	File    string
+	Command string
+}{
+	{"phpstan", "phpstan.neon", "algoritma-phpstan-create-config"},
+	{"rector", "rector.php", "algoritma-rector-create-config"},
+	{"php-cs-fixer", ".php-cs-fixer.dist.php", "algoritma-cs-create-config"},
+}
+
+// BaseConfigScript writes the base configurations algoritma/php-coding-standards ships, for the
+// enabled tools that do not have one yet.
+//
+// The package generates them from a Composer plugin listening on its own post-package-install
+// event, and that event is not a contract: the releases pinned to an older Symfony line — which is
+// what the shared-vendor `replace` list resolves to on Oro 6.0, where the application ships
+// symfony/options-resolver 6.4.16 and the newer php-cs-fixer requires ^6.4.24 — install without
+// ever writing a file. The base standard is then silently absent, and PHPStan is handed a
+// --configuration that does not exist ("Project config file at path ... does not exist"), or, on a
+// checkout that commits its own phpstan.neon, quietly analyses without the shared ruleset.
+//
+// The same package also exposes the generation as ordinary Composer commands, and those are the
+// same across the 3.0 line, so they are what this asks for. Each one is run from the QA directory
+// because the writers take relative paths, and only when its file is missing: a committed or
+// already generated configuration is never overwritten.
+//
+// A failed generation warns instead of failing the step. The tools' configs are independent, and
+// with a project configuration in place the run is degraded rather than broken — while a hard
+// failure here would take down a QA install that only wanted the other tools.
+func BaseConfigScript() string {
+	qa := config.QaToolsDir
+
+	lines := []string{"# Writing the base QA configurations the coding standard ships"}
+	for _, gen := range baseConfigGenerators {
+		if !config.IsQaToolEnabled(gen.Tool) {
+			continue
+		}
+		file := qa + "/" + gen.File
+		lines = append(lines,
+			fmt.Sprintf("[ -f %s ] || (cd %s && composer %s --no-interaction) || true", file, qa, gen.Command),
+			fmt.Sprintf(`[ -f %[1]s ] || echo "orobox: algoritma/php-coding-standards did not write %[1]s, so %[2]s runs without the shared standard." >&2`, file, gen.Tool),
+		)
+	}
+
+	if len(lines) == 1 {
+		return ""
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 // PhpstanConfigScript returns a shell script that rewrites the generated
