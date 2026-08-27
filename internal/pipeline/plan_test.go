@@ -999,22 +999,73 @@ func TestEveryRestoreRungRebuildsTheCaches(t *testing.T) {
 
 	// A dump carries the schema and the oro_entity_config rows, but none of the generated extend
 	// classes that make those fields reachable — so a rung that restores one and stops leaves the
-	// kernel blind to every extend field. oro:platform:update regenerates them; a bare
-	// cache:warmup does not, because it boots on top of the empty stubs Oro generates to let the
-	// boot succeed at all.
+	// kernel blind to every extend field. oro:platform:update regenerates them on the seeding
+	// rungs, oro:entity-extend:cache:warmup on the one whose dump is already migrated; a bare
+	// cache:warmup does neither, because it boots on top of the empty stubs Oro generates to let
+	// the boot succeed at all.
 	if !strings.Contains(script, "oro:platform:update --force --env=test --timeout=0 --skip-download-translations --skip-translations") {
 		t.Errorf("the rebuild does not run oro:platform:update with the skip flags: %s", script)
 	}
+	if !strings.Contains(script, "php bin/console oro:entity-extend:cache:warmup --env=test") {
+		t.Errorf("nothing regenerates the extend classes without migrating: %s", script)
+	}
 
-	// Count invocations, not the shell function definitions that precede them.
+	// Count invocations, not the shell function definitions that precede them: every restored
+	// schema is followed by one of the two, and none of them is left unguarded — a rung that dies
+	// takes the whole step with it instead of falling through to the install below.
 	restores := strings.Count(script, "\n  restore_dump ")
-	rebuilds := strings.Count(script, "\n  rebuild\n")
+	guarded := strings.Count(script, "\n  if rebuild; then") + strings.Count(script, "\n  if regenerate; then")
 	if restores == 0 {
 		t.Fatalf("the ladder never restores a dump: %s", script)
 	}
-	if restores != rebuilds {
-		t.Errorf("%d restore(s) but %d rebuild(s): every restored schema must be rebuilt: %s",
-			restores, rebuilds, script)
+	// The cached-dump rung carries two — the plain regeneration and the migrating rebuild it falls
+	// back to — so the count is a floor, not an equality.
+	if guarded < restores {
+		t.Errorf("%d restore(s) but only %d guarded rebuild(s): every restored schema must be rebuilt: %s",
+			restores, guarded, script)
+	}
+	if strings.Contains(script, "\n  rebuild\n") || strings.Contains(script, "\n  regenerate\n") {
+		t.Errorf("a rung calls rebuild/regenerate unguarded, so its failure ends the step: %s", script)
+	}
+}
+
+func TestCachedDumpRungDoesNotReplayTheTestMigrations(t *testing.T) {
+	script := joined(New(testConf("7.0", true), functionalStage(), "repo").Test.Commands)
+
+	// oro:platform:update replays the test environment migrations every time — they carry no
+	// version and are never recorded in oro_migrations — and the cached dump was saved with their
+	// result in it. On Oro 7.0 the migrations' own guard misses (AddAttributesToProductMigration
+	// checks for a column 7.0's addEnumField no longer adds), so the replay dies on
+	// `The column "testattrmanytoone_id" on table "oro_product" already exists`.
+	cached := strings.Index(script, "echo 'Restoring the cached test database.'")
+	if cached < 0 {
+		t.Fatalf("the cached-dump rung is gone: %s", script)
+	}
+	rung := script[cached:]
+	if next := strings.Index(rung, "echo 'Seeding the test database"); next > 0 {
+		rung = rung[:next]
+	}
+
+	if !strings.Contains(rung, "if regenerate; then") {
+		t.Errorf("the cached-dump rung does not regenerate the caches: %s", rung)
+	}
+	if strings.Index(rung, "if rebuild; then") < strings.Index(rung, "if regenerate; then") {
+		t.Errorf("the cached-dump rung migrates before trying the plain regeneration: %s", rung)
+	}
+}
+
+func TestBottomRungInstallsOnAnEmptySchema(t *testing.T) {
+	script := joined(New(testConf("7.0", true), functionalStage(), "repo").Test.Commands)
+
+	// oro:install gets no --drop-database here, so a rung that restored a dump and then failed
+	// would leave it installing on top of a half-migrated schema.
+	install := strings.Index(script, "php bin/console oro:install --no-interaction --env=test")
+	if install < 0 {
+		t.Fatalf("the install rung is gone: %s", script)
+	}
+	prelude := script[:install]
+	if !strings.Contains(prelude, "\nreset_schema\n") {
+		t.Errorf("the install rung does not empty the schema first: %s", prelude)
 	}
 }
 

@@ -968,11 +968,14 @@ set -e
 apk add --no-cache postgresql%[8]s-client >/dev/null 2>&1 || apk add --no-cache postgresql-client >/dev/null
 export PGPASSWORD=%[6]s
 psql_run() { psql -h %[4]s -U %[5]s -d %[7]s -v ON_ERROR_STOP=1 "$@"; }
-restore_dump() {
+reset_schema() {
   psql_run -c 'DROP SCHEMA IF EXISTS public CASCADE'
   psql_run -c 'CREATE SCHEMA public'
   psql_run -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"'
   psql_run -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm'
+}
+restore_dump() {
+  reset_schema
   gunzip -c "$1" | psql_run
 }
 save_dump() {
@@ -981,17 +984,24 @@ save_dump() {
     printf '%%s' "$fingerprint" > %[2]s
   fi
 }
-rebuild() {
-  # The dump replaced the database wholesale, so everything var/cache/test holds describes the
-  # previous one: the dumped container, the generated extend classes, the compiled Doctrine
-  # metadata. oro:platform:update boots on top of whatever is there, so a cache left over from
-  # another install is not a stale detail but the state it reasons from — on Oro 7.0 that surfaced
-  # as "Circular reference detected for service doctrine.orm.default_entity_manager", a container
-  # error with nothing to do with the database it was handed. var/cache is the mounted directory
-  # and var/cache/test an ordinary one inside it, so this removes a directory and not a mount.
+# The dump replaced the database wholesale, so everything var/cache/test holds describes the
+# previous one: the dumped container, the generated extend classes, the compiled Doctrine
+# metadata. Both functions below boot on top of whatever is there, so a cache left over from
+# another install is not a stale detail but the state they reason from — on Oro 7.0 that surfaced
+# as "Circular reference detected for service doctrine.orm.default_entity_manager", a container
+# error with nothing to do with the database it was handed. var/cache is the mounted directory
+# and var/cache/test an ordinary one inside it, so this removes a directory and not a mount.
+#
+# regenerate is for a dump that is already migrated: it rebuilds the extend entity classes the
+# dump does not carry, and nothing else. rebuild also applies the migrations the restored schema
+# is missing, which is what the seeding rungs need.
+regenerate() {
   rm -rf var/cache/test
-  # Applies whatever migrations the restored schema is missing, and — the part that matters even
-  # when there are none — regenerates the extend entity classes the dump does not carry.
+  php bin/console oro:entity-extend:cache:warmup --env=test
+  php bin/console cache:warmup --env=test
+}
+rebuild() {
+  rm -rf var/cache/test
   php bin/console oro:platform:update --force --env=test --timeout=0 --skip-download-translations --skip-translations
 }
 %[10]s
@@ -1002,27 +1012,52 @@ php bin/console doctrine:database:create --env=test --if-not-exists
 if [ -n "$fingerprint" ] && [ -z "$OROBOX_NO_CACHE" ] && [ "$(cat %[2]s 2>/dev/null)" = "$fingerprint" ] && [ -f %[1]s ]; then
   echo 'Restoring the cached test database.'
   restore_dump %[1]s
-  rebuild
-  exit 0
+  # No migrations here, only the extend classes: the fingerprint this dump was saved under is the
+  # one the sources have now, so there is nothing pending to apply. Running the update anyway is
+  # not merely wasted time, it breaks the suites it is preparing. oro:platform:update replays the
+  # test environment migrations on every run — they carry no version and are never recorded in
+  # oro_migrations — and the dump already holds their result. They guard against that themselves,
+  # but on Oro 7.0 the guard misses: Oro\Bundle\ProductBundle\Tests\Functional\Environment\
+  # AddAttributesToProductMigration returns early only when oro_product has testAttrEnum_id, and
+  # 7.0's addEnumField stopped adding a column for an enum field, so the migration runs a second
+  # time and dies on: The column "testattrmanytoone_id" on table "oro_product" already exists.
+  if regenerate; then
+    exit 0
+  fi
+  echo 'Regenerating the caches over the restored dump failed; falling back to the full rebuild.'
+  if rebuild; then
+    exit 0
+  fi
+  echo 'The rebuild failed too; falling back to a full install.'
 fi
 if [ -z "$OROBOX_NO_CACHE" ] && [ -f %[9]s ]; then
   echo 'Seeding the test database from the base scope dump.'
   restore_dump %[9]s
   echo 'Applying the migrations this scope adds on top of the base dump.'
-  rebuild
-  save_dump
-  exit 0
+  if rebuild; then
+    save_dump
+    exit 0
+  fi
+  echo 'The migrations on top of the base dump failed; falling back to a full install.'
 fi
 if [ -z "$OROBOX_NO_CACHE" ] && [ -f %[11]s ]; then
   echo 'Seeding the test database from the dump the runtime image carries.'
   restore_dump %[11]s
   echo 'Applying the migrations this project adds on top of the image dump.'
-  rebuild
-  save_dump
-  exit 0
+  if rebuild; then
+    save_dump
+    exit 0
+  fi
+  echo 'The migrations on top of the image dump failed; falling back to a full install.'
 fi
 echo 'Installing Oro for the test suites and caching the result. Later runs restore the dump.'
 %[3]s
+# A rung that got as far as restoring a dump and then failed left a half-migrated schema behind,
+# and oro:install has no --drop-database here: it would install on top of it and stop on the first
+# table it cannot create. Emptying the schema first makes the install the clean bottom rung it is
+# meant to be, whether it runs after a failed rung or on a database that was only just created.
+reset_schema
+rm -rf var/cache/test
 php bin/console oro:install --no-interaction --env=test --skip-translations
 save_dump`,
 		testDBDumpFile, testDBStampFile, oroWritableDirsCommand(),
