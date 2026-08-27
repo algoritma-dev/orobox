@@ -244,10 +244,15 @@ every cache starts empty — no longer pays for a full install on every run.
 The dump holds no sample data. When `ORO_SAMPLE_DATA=y` (the default in `.env`) the demo fixtures
 are loaded on top of the restored database.
 
-The dump is only used when the install asks for the administrator, organization and locale the
-image was built with; anything else gets its own `oro:install`. So does an image built without a
-seed, a PostgreSQL major that did not write the dump, and any restore that does not complete.
-Set `ORO_NO_SEED=1` to skip the dump and always install from scratch.
+The dump is only used when it can be reconciled with the project it is restored into:
+
+- the install must ask for the administrator, organization and locale the image was built with;
+- the project's resolved `oro/platform` must not be older than the one the dump was taken from,
+  because migrations do not roll back.
+
+Anything else gets its own `oro:install` — as does an image built without a seed, a PostgreSQL
+major that did not write the dump, and any restore that does not complete. Set `ORO_NO_SEED=1` to
+skip the dump and always install from scratch.
 
 ### 2. Start Environment (`up`)
 Starts Docker containers and configures OroCommerce.

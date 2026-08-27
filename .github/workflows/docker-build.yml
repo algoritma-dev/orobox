@@ -151,7 +151,9 @@ jobs:
           # Only Postgres is up, so the DSNs are the ones orobox renders when Redis, RabbitMQ and
           # Elasticsearch are all off. The install is the same one the pipeline performs for its
           # own database: no sample data, no translations to download.
+          mkdir -p seed-context
           docker run --rm --network seed-net --user root \
+            -v "$PWD/seed-context:/out" \
             -e ORO_ENV=prod -e APP_ENV=prod \
             -e COMPOSER_ALLOW_SUPERUSER=1 -e COMPOSER_PROCESS_TIMEOUT=0 \
             -e COMPOSER_AUTH="{\"github-oauth\":{\"github.com\":\"${GITHUB_TOKEN}\"}}" \
@@ -177,6 +179,17 @@ jobs:
               cp -rf /tmp/oro-app/. .
               rm -rf /tmp/oro-app
               composer install --no-interaction --no-progress
+              # What the entrypoint compares the project against before reusing the dump. The
+              # resolved oro/platform, not the tag asked for: the tag says nothing about a lock
+              # file, and it is the schema the platform version decides.
+              php -r "
+                \$lock = json_decode((string) file_get_contents(\"composer.lock\"), true);
+                foreach (\$lock[\"packages\"] as \$package) {
+                  if (\$package[\"name\"] === \"oro/platform\") {
+                    file_put_contents(\"/out/oro-platform.version\", ltrim(\$package[\"version\"], \"v\"));
+                  }
+                }
+              "
               mkdir -p var/data var/cache var/logs public/uploads public/media/cache
               php bin/console oro:install --no-interaction --sample-data=n --skip-translations \
                 --application-url=http://localhost/ \
@@ -187,7 +200,12 @@ jobs:
                 --language="$ORO_LANGUAGE" --formatting-code="$ORO_FORMATTING_CODE"
             '
 
-          mkdir -p seed-context
+          # The install is worthless without the version the entrypoint gates on: rather than ship
+          # a dump nothing will ever restore, fail here and let the image go out seedless.
+          test -s seed-context/oro-platform.version
+          mv seed-context/oro-platform.version "seed-context/dump-pg${PG_MAJOR}.version"
+          echo "Seeded from OroPlatform $(cat "seed-context/dump-pg${PG_MAJOR}.version")"
+
           docker exec seed-db pg_dump -U oro_db_user --no-owner --no-privileges oro_db \
             | gzip -c > "seed-context/dump-pg${PG_MAJOR}.sql.gz"
 
@@ -219,7 +237,7 @@ jobs:
             # the layers the build cache holds.
             cat > seed-context/Dockerfile <<EOF
           FROM orobox-runtime:local
-          COPY dump-pg${PG_MAJOR}.sql.gz dump-pg${PG_MAJOR}.identity /opt/orobox/seed/
+          COPY dump-pg${PG_MAJOR}.sql.gz dump-pg${PG_MAJOR}.identity dump-pg${PG_MAJOR}.version /opt/orobox/seed/
           EOF
             docker build -t "$TAG" -f seed-context/Dockerfile seed-context
           else

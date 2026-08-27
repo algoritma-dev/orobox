@@ -108,6 +108,7 @@ case "$1" in
         # the failed attempt may have half-written. Set ORO_NO_SEED=1 to skip it outright.
         SEED_DUMP='{{.SeedDumpPath}}'
         SEED_IDENTITY="${SEED_DUMP%.sql.gz}.identity"
+        SEED_VERSION="${SEED_DUMP%.sql.gz}.version"
 
         seed_psql() {
             PGPASSWORD="$ORO_DB_PASSWORD" psql -h "$ORO_DB_HOST" -p "${ORO_DB_PORT:-5432}" \
@@ -132,15 +133,49 @@ case "$1" in
                 "${ORO_LANGUAGE-}" "${ORO_FORMATTING_CODE-}"
         }
 
+        # The oro/platform the project actually resolved, which is what the restored schema has to
+        # be reconcilable with — not the Oro series in .orobox.yaml, and not the tag the clone
+        # asked for, both of which say nothing about a lock file the project may have pinned.
+        seed_project_platform_version() {
+            php -r '
+                $lock = json_decode((string) @file_get_contents("composer.lock"), true);
+                if (!is_array($lock)) { return; }
+                foreach (array_merge($lock["packages"] ?? [], $lock["packages-dev"] ?? []) as $package) {
+                    if (($package["name"] ?? "") === "oro/platform") {
+                        echo ltrim((string) ($package["version"] ?? ""), "v");
+                        return;
+                    }
+                }
+            ' 2>/dev/null
+        }
+
+        # A seed older than the project is the normal case and the safe one: oro:platform:update
+        # applies the migrations in between. The reverse has no answer — migrations do not roll
+        # back — and it is the one case that fails quietly rather than loudly: the extra rows in
+        # oro_migrations are simply never matched, the extra columns stay, and an oro_entity_config
+        # describing bundles the code does not have takes the entity-extend cache down later, far
+        # from anything that looks like the cause. So it does not get a restore at all.
+        seed_is_not_ahead_of_the_project() {
+            baked="$(cat "$SEED_VERSION" 2>/dev/null || true)"
+            project="$(seed_project_platform_version)"
+            if [ -z "$baked" ] || [ -z "$project" ]; then return 1; fi
+            if php -r 'exit(version_compare($argv[1], $argv[2], "<") ? 0 : 1);' "$project" "$baked"; then
+                echo "The image's pre-installed database is OroPlatform $baked and this project is $project; installing from scratch."
+                return 1
+            fi
+            return 0
+        }
+
         seed_install() {
             if [ -n "$ORO_NO_SEED" ]; then return 1; fi
-            if [ ! -f "$SEED_DUMP" ] || [ ! -f "$SEED_IDENTITY" ]; then return 1; fi
+            if [ ! -f "$SEED_DUMP" ] || [ ! -f "$SEED_IDENTITY" ] || [ ! -f "$SEED_VERSION" ]; then return 1; fi
             if [ -z "$ORO_DB_HOST" ] || [ -z "$ORO_DB_NAME" ] || [ -z "$ORO_DB_USER" ]; then return 1; fi
             if ! command -v psql >/dev/null 2>&1; then return 1; fi
             if [ "$(seed_identity)" != "$(cat "$SEED_IDENTITY")" ]; then
                 echo "The image's pre-installed database was built for a different administrator or locale; installing from scratch."
                 return 1
             fi
+            if ! seed_is_not_ahead_of_the_project; then return 1; fi
 
             echo "Restoring the pre-installed database the image carries instead of running oro:install."
             # From here on the schema is being rewritten, so a failure has to be cleaned up before
