@@ -9,6 +9,7 @@ import (
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
+	"github.com/algoritma-dev/orobox/internal/qatools"
 )
 
 func TestProjectNameIsDockerSafe(t *testing.T) {
@@ -357,5 +358,64 @@ func TestTestFilterHoldsNoRegexEscapes(t *testing.T) {
 	}
 	if len(e2eTestSuites) == 0 {
 		t.Fatal("no test suites declared for the test step")
+	}
+}
+
+func TestReadQaOutcomesSeparatesFindingsFromToolsThatCouldNotRun(t *testing.T) {
+	rawDir := t.TempDir()
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(rawDir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// phpstan: found something. rector: clean. php-cs-fixer: exited non-zero with nothing to
+	// show for it, which is how a missing configuration or a broken install looks. twig-cs-fixer:
+	// wrote a PHP fatal where the report belongs.
+	write(qatools.ToolStatusFile("phpstan"), "1")
+	write("phpstan.json", `[{"description":"x","location":{"path":"src/A.php"}}]`)
+	write(qatools.ToolStatusFile("rector"), "0")
+	write("rector.json", "[]")
+	write(qatools.ToolStatusFile("php-cs-fixer"), "255")
+	write("php-cs-fixer.json", "")
+	write(qatools.ToolStatusFile("twig-cs-fixer"), "1")
+	write("twig-cs-fixer.json", "PHP Fatal error: nope")
+	// The aggregate status is not a tool and must not be graded as one.
+	write(qatools.StatusFile, "1")
+
+	outcomes, err := ReadQaOutcomes(rawDir)
+	if err != nil {
+		t.Fatalf("ReadQaOutcomes: %v", err)
+	}
+	if len(outcomes) != 4 {
+		t.Fatalf("got %d outcomes, want 4: %+v", len(outcomes), outcomes)
+	}
+
+	byTool := map[string]qaToolOutcome{}
+	for _, o := range outcomes {
+		byTool[o.Tool] = o
+	}
+
+	for tool, want := range map[string]struct{ lint, broken bool }{
+		"phpstan":       {lint: true},
+		"rector":        {},
+		"php-cs-fixer":  {broken: true},
+		"twig-cs-fixer": {broken: true},
+	} {
+		got := byTool[tool]
+		if got.Lint() != want.lint || got.Broken() != want.broken {
+			t.Errorf("%s: lint=%v broken=%v, want lint=%v broken=%v (%+v)",
+				tool, got.Lint(), got.Broken(), want.lint, want.broken, got)
+		}
+	}
+	if byTool["phpstan"].Findings != 1 {
+		t.Errorf("phpstan findings = %d, want 1", byTool["phpstan"].Findings)
+	}
+}
+
+func TestReadQaOutcomesFailsWhenTheStepWroteNothing(t *testing.T) {
+	if _, err := ReadQaOutcomes(filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Error("a missing raw report directory must be an error: the step never ran")
 	}
 }

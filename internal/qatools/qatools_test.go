@@ -726,3 +726,26 @@ func TestKernelLoadersBootTheEnvironmentBeforeTheKernel(t *testing.T) {
 		t.Error("object-manager.php does not boot the environment it was generated for")
 	}
 }
+
+func TestReportScriptRecordsEachToolsOwnExitCode(t *testing.T) {
+	script := ReportScript([]Tool{
+		{Name: "phpstan", Args: []string{"phpstan", "analyze"}, Setup: "warmup", ReportFile: "/reports/qa/phpstan.json"},
+		{Name: "rector", Args: []string{"rector", "process"}, ReportFile: "/reports/qa/rector.json"},
+	}, "/reports/qa")
+
+	// The per-tool code is what separates "found violations" from "could not run": both exit
+	// non-zero, and only the report next to the code tells them apart.
+	for _, want := range []string{
+		`"$code" > /reports/qa/` + ToolStatusFile("phpstan"),
+		`"$code" > /reports/qa/` + ToolStatusFile("rector"),
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("script is missing %q:\n%s", want, script)
+		}
+	}
+
+	// A tool whose setup failed must still be recorded as failed, not skipped silently.
+	if !strings.Contains(script, "if warmup; then") || !strings.Contains(script, "else false; fi") {
+		t.Errorf("a failed setup must give the line a non-zero code of its own:\n%s", script)
+	}
+}

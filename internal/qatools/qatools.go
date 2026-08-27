@@ -286,6 +286,15 @@ func Script(tools []Tool) string {
 // outcome to: "0" when every tool was clean, "1" when at least one reported violations or failed.
 const StatusFile = ".status"
 
+// ToolStatusFile is the file, inside the report directory, that ReportScript writes one tool's own
+// exit code to.
+//
+// The aggregate StatusFile only says that something went wrong. Read together with that tool's
+// report, a per-tool code separates the two ways a tool exits non-zero: findings — a non-zero code
+// next to a report holding issues — from a tool that could not run at all, which exits non-zero
+// with an empty report. The E2E suite grades the QA step on exactly that distinction.
+func ToolStatusFile(tool string) string { return StatusFile + "-" + tool }
+
 // ReportScript renders a tool list as one shell line that runs every tool, sends each one's report
 // to its own file, and never fails.
 //
@@ -304,6 +313,10 @@ const StatusFile = ".status"
 // Setup lines run undirected because their output is not JSON — PHPStan's cache warmup prints a
 // Symfony console banner that would corrupt the file — and stderr is left alone throughout so
 // warnings still reach the step log.
+//
+// Alongside the aggregate StatusFile, every tool's own exit code is recorded in its
+// ToolStatusFile. The aggregate is what turns back into the command's exit code; the per-tool
+// codes are what let a caller tell a tool that reported findings from one that could not run.
 func ReportScript(tools []Tool, reportDir string) string {
 	var b strings.Builder
 
@@ -319,18 +332,22 @@ func ReportScript(tools []Tool, reportDir string) string {
 
 		// A tool with ReportEnv writes the document itself and prints its usual summary to stdout,
 		// so redirecting would both capture the wrong bytes and hide output worth reading.
-		run := fmt.Sprintf("%s > %s || status=1", cmd, t.ReportFile)
+		run := fmt.Sprintf("%s > %s", cmd, t.ReportFile)
 		if t.ReportEnv != "" {
-			run = fmt.Sprintf("%s=%s %s || status=1", t.ReportEnv, t.ReportFile, cmd)
+			run = fmt.Sprintf("%s=%s %s", t.ReportEnv, t.ReportFile, cmd)
 		}
 
 		if t.Setup != "" {
 			// A failed setup is a failed tool: PHPStan cannot analyse without its warmed cache, and
-			// running it anyway would write a report full of bootstrap errors.
-			fmt.Fprintf(&b, "if %s; then %s; else status=1; fi\n", t.Setup, run)
-			continue
+			// running it anyway would write a report full of bootstrap errors. `false` gives the
+			// line the exit code the tool itself would have had, so the per-tool status still says
+			// "this tool did not pass".
+			run = fmt.Sprintf("if %s; then %s; else false; fi", t.Setup, run)
 		}
-		fmt.Fprintf(&b, "%s\n", run)
+
+		fmt.Fprintf(&b, "%s\ncode=$?\n", run)
+		fmt.Fprintf(&b, "printf '%%s' \"$code\" > %s/%s\n", reportDir, ToolStatusFile(t.Name))
+		b.WriteString("[ \"$code\" = 0 ] || status=1\n")
 	}
 
 	fmt.Fprintf(&b, "printf '%%s' \"$status\" > %s/%s\n", reportDir, StatusFile)

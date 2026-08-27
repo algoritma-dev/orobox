@@ -20,6 +20,10 @@ Design spec: [`docs/superpowers/specs/2026-08-24-e2e-test-suite-design.md`](../d
   suite asserts that orobox refuses them instead of expecting files.
 - `test-init` provisions the test database rather than writing files, so it is
   asserted to complete rather than to generate anything.
+- `qa` runs **after** `qa-init` and in report mode (`--report gitlab`). Report
+  mode is what keeps every tool running: without it the tools are chained with
+  `&&`, so the first one with findings — usually PHPStan — silences Rector,
+  PHP-CS-Fixer and the rest, and the suite learns nothing about them.
 - `test` runs **after** `test-init` (without the test database `orobox test`
   never reaches PHPUnit) and is **narrowed**: one run per suite (`unit`,
   `functional`), each with `--filter UserTest`, so a handful of Oro's own tests
@@ -34,13 +38,19 @@ Design spec: [`docs/superpowers/specs/2026-08-24-e2e-test-suite-design.md`](../d
 - **Hard gate** (failure fails the case): `init`, `up` (must serve HTTP 200 on
   storefront and `/admin`), `run`, `console`, `db backup`, `db restore`, the
   generators, `test-init`, `clear`, `down`.
-- **Best-effort** (logged, never fails the case): `qa`, and a `test` run that
-  could not execute anything at all. A fresh community install of an older
-  version may not support the current QA/PHPUnit tooling; when unsupported the
-  step is logged and skipped, when supported it must run green.
+- **Best-effort** (logged, never fails the case): a `test` run that could not
+  execute anything at all, and QA findings. A fresh community install of an
+  older version may not support the current PHPUnit tooling; when unsupported
+  the step is logged and skipped, when supported it must run green.
 - **Hard gate inside the best-effort step:** once `test` does execute, it must
   execute something and it must pass — a report with zero tests, or with
   failures or errors, fails the case.
+- **Hard gate inside `qa`:** every enabled tool must be installed, configured
+  and actually invoked. What it *finds* does not fail the case — findings are a
+  property of Oro's own code and of the tools' rulesets, not of orobox — but a
+  tool that could not run does. The two are told apart per tool: a non-zero exit
+  next to a report holding findings is lint, while a non-zero exit with an empty
+  or unreadable report is an installation or configuration failure.
 
 ### Intentionally excluded
 

@@ -3,14 +3,18 @@ package e2e
 
 import (
 	"bytes"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"text/template"
 
 	"github.com/algoritma-dev/orobox/internal/config"
+	"github.com/algoritma-dev/orobox/internal/qatools"
 )
 
 // InstallType is an orobox install type exercised by the suite.
@@ -317,4 +321,88 @@ func parseJUnitTotals(data []byte) (junitTotals, error) {
 		totals.Errors += s.Errors
 	}
 	return totals, nil
+}
+
+// qaToolOutcome is what one QA tool's own files in the raw report directory say about it: the
+// exit code ReportScript recorded, and how many findings its Code Quality report holds.
+type qaToolOutcome struct {
+	Tool     string
+	ExitCode int
+	Findings int
+	// ReportErr is set when the tool wrote something that is not a Code Quality document — a PHP
+	// fatal, a configuration error, half a JSON array. It is never a finding.
+	ReportErr error
+}
+
+// Lint reports whether this outcome is a tool that ran and disagreed with the code: the
+// non-zero exit every QA tool uses for "I found something", next to a report that says what.
+//
+// Broken reports whether the tool could not do its job at all: it exited non-zero without
+// producing a single finding, or produced something unreadable. That is an installation or
+// configuration problem — a missing binary, an unparsable phpstan.neon, a failed cache warmup —
+// and not a verdict about the code under analysis.
+func (o qaToolOutcome) Lint() bool { return o.ExitCode != 0 && o.ReportErr == nil && o.Findings > 0 }
+func (o qaToolOutcome) Broken() bool {
+	return o.ExitCode != 0 && (o.ReportErr != nil || o.Findings == 0)
+}
+
+// ReadQaOutcomes reads the per-tool status and report files `orobox qa --report gitlab` leaves in
+// rawDir, one outcome per tool that was actually invoked.
+//
+// The status files are the index rather than the reports: a tool that crashed before writing
+// anything still has a status, while a report file alone cannot say whether the tool succeeded.
+// An empty report is zero findings — that is what a clean tool writes.
+func ReadQaOutcomes(rawDir string) ([]qaToolOutcome, error) {
+	entries, err := os.ReadDir(rawDir)
+	if err != nil {
+		return nil, fmt.Errorf("could not read the raw QA reports in %s: %w", rawDir, err)
+	}
+
+	var outcomes []qaToolOutcome
+	prefix := qatools.StatusFile + "-"
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), prefix) {
+			continue
+		}
+		tool := strings.TrimPrefix(entry.Name(), prefix)
+
+		outcome := qaToolOutcome{Tool: tool}
+		data, err := os.ReadFile(filepath.Join(rawDir, entry.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("could not read the status of %s: %w", tool, err)
+		}
+		code, err := strconv.Atoi(strings.TrimSpace(string(data)))
+		if err != nil {
+			return nil, fmt.Errorf("the status of %s is not an exit code: %q", tool, string(data))
+		}
+		outcome.ExitCode = code
+		outcome.Findings, outcome.ReportErr = qaFindings(filepath.Join(rawDir, tool+".json"))
+
+		outcomes = append(outcomes, outcome)
+	}
+
+	sort.Slice(outcomes, func(i, j int) bool { return outcomes[i].Tool < outcomes[j].Tool })
+	return outcomes, nil
+}
+
+// qaFindings counts the issues in one tool's Code Quality report. A missing or empty file is zero
+// findings: the tools that write the report themselves skip the file when they have nothing to
+// say, and a redirect leaves an empty one.
+func qaFindings(path string) (int, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return 0, nil
+	}
+
+	var issues []map[string]any
+	if err := json.Unmarshal(data, &issues); err != nil {
+		return 0, fmt.Errorf("the report is not GitLab Code Quality JSON: %w", err)
+	}
+	return len(issues), nil
 }

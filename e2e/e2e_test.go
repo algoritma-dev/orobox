@@ -151,7 +151,7 @@ func runGreenPath(t *testing.T, c Case) {
 	// starts disabling one would have to pass that config in as well.
 	assertGeneratedFiles(t, box, "qa-init", scaffoldRelPaths(scaffold.QaStubs(string(c.Type))))
 
-	// 8. qa — deliberately after qa-init, and asserted rather than logged.
+	// 8. qa — deliberately after qa-init, and graded per tool rather than on the exit code.
 	//
 	// The order is what makes the step mean anything for a bundle: `orobox qa` on the compose
 	// engine refuses to run tools that are not installed, so run before qa-init it only ever
@@ -159,10 +159,7 @@ func runGreenPath(t *testing.T, c Case) {
 	// own tools and never needed the ordering — but it did need the assert: qa was best-effort
 	// here, so every version silently failed its Rector step on OroCommerce's generated kernel
 	// while the job stayed green.
-	if res := box.TryRun("qa"); failed(res) {
-		t.Errorf("qa failed for %s %s: exit %d\n%s\n%s",
-			c.Type, c.Version, res.ExitCode, res.Stdout, res.Stderr)
-	}
+	assertQa(t, box, c)
 
 	// 9. test-init is not a generator: it provisions the test database and cache (its only
 	// write to the checkout is .orobox.yaml, and only behind --tmpfs), so counting files
@@ -179,6 +176,69 @@ func runGreenPath(t *testing.T, c Case) {
 	// "clean": it removes every container and volume so the next run starts fresh.
 	box.Run("clear")
 	box.Run("down")
+}
+
+// assertQa drives `orobox qa` in report mode and grades each tool on what it recorded, not on the
+// command's exit code.
+//
+// What the step is here to prove is that every configured tool is installed, configured and
+// actually invoked against a real Oro checkout. Whether that analysis is clean is a property of
+// Oro's own code and of the tools' rulesets — PHPStan has findings on stock OroCommerce in some
+// versions — so findings are logged and tolerated. A tool that could not run is not tolerated:
+// that is the installation or configuration bug this step exists to catch.
+//
+// Report mode is also what keeps the later tools running at all: `orobox qa` without --report
+// chains the tools with &&, so the first one with findings silences every tool after it, and the
+// suite learned nothing about Rector or PHP-CS-Fixer whenever PHPStan had something to say.
+func assertQa(t *testing.T, box *Box, c Case) {
+	t.Helper()
+
+	// The raw directory is the input to the grading, and the tools only overwrite the files they
+	// write themselves, so a leftover status from an earlier step would be graded as this run's.
+	// Best-effort: the container may own the files, and the assertions below still catch a run
+	// that produced nothing.
+	rawDir := filepath.Join(box.Dir(), config.RawReportsRelDir, "qa")
+	if err := os.RemoveAll(rawDir); err != nil {
+		t.Logf("could not clear %s before the qa step: %v", rawDir, err)
+	}
+
+	reportRel := filepath.Join(config.ReportsRelDir, "code-quality.json")
+	res := box.TryRun("qa", "--report", "gitlab", "--report-path", reportRel)
+
+	// In report mode the command exits non-zero for findings too, so the exit code alone cannot
+	// fail the step. What it does mean is that the run has to have got far enough to write the
+	// merged report: a missing binary, an engine that could not start, or a tool whose output was
+	// not a Code Quality document all stop the command before this file exists.
+	if _, err := os.ReadFile(filepath.Join(box.Dir(), reportRel)); err != nil {
+		t.Errorf("qa wrote no code quality report for %s %s: exit %d, %v\n%s\n%s",
+			c.Type, c.Version, res.ExitCode, err, res.Stdout, res.Stderr)
+		return
+	}
+
+	outcomes, err := ReadQaOutcomes(rawDir)
+	if err != nil {
+		t.Errorf("qa left no readable per-tool results for %s %s: %v\n%s\n%s",
+			c.Type, c.Version, err, res.Stdout, res.Stderr)
+		return
+	}
+	if len(outcomes) == 0 {
+		t.Errorf("qa invoked no tool for %s %s: exit %d\n%s\n%s",
+			c.Type, c.Version, res.ExitCode, res.Stdout, res.Stderr)
+		return
+	}
+
+	for _, outcome := range outcomes {
+		switch {
+		case outcome.Broken():
+			t.Errorf("qa tool %s could not run for %s %s: exit %d, %d findings, report error %v\n%s\n%s",
+				outcome.Tool, c.Type, c.Version, outcome.ExitCode, outcome.Findings, outcome.ReportErr,
+				res.Stdout, res.Stderr)
+		case outcome.Lint():
+			t.Logf("qa tool %s reported %d findings (tolerated)", outcome.Tool, outcome.Findings)
+		default:
+			t.Logf("qa tool %s passed", outcome.Tool)
+		}
+	}
 }
 
 // assertNarrowedTests drives `orobox test` once per gated suite, each run narrowed by
