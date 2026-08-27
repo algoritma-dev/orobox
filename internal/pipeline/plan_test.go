@@ -860,6 +860,15 @@ func TestTestDatabaseLadderHasThreeRungs(t *testing.T) {
 	if strings.Contains(script, "gzip -c > /cache/test-db-base") {
 		t.Error("the ladder writes into the base cache directory")
 	}
+
+	// Both restoring rungs replace the database under a cache warmed for another one, so the
+	// rebuild starts by dropping it: on Oro 7.0 the leftover container came back as "Circular
+	// reference detected for service doctrine.orm.default_entity_manager".
+	rm := strings.Index(script, "rm -rf var/cache/test")
+	update := strings.Index(script, "php bin/console oro:platform:update --force --env=test")
+	if rm < 0 || update < 0 || rm > update {
+		t.Errorf("the rebuild does not drop the stale test cache before updating: rm=%d update=%d", rm, update)
+	}
 }
 
 func TestQaWarmupUpdatesInsteadOfReinstallingWhenStale(t *testing.T) {

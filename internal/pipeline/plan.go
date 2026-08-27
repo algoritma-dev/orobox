@@ -916,6 +916,14 @@ save_dump() {
   fi
 }
 rebuild() {
+  # The dump replaced the database wholesale, so everything var/cache/test holds describes the
+  # previous one: the dumped container, the generated extend classes, the compiled Doctrine
+  # metadata. oro:platform:update boots on top of whatever is there, so a cache left over from
+  # another install is not a stale detail but the state it reasons from — on Oro 7.0 that surfaced
+  # as "Circular reference detected for service doctrine.orm.default_entity_manager", a container
+  # error with nothing to do with the database it was handed. var/cache is the mounted directory
+  # and var/cache/test an ordinary one inside it, so this removes a directory and not a mount.
+  rm -rf var/cache/test
   # Applies whatever migrations the restored schema is missing, and — the part that matters even
   # when there are none — regenerates the extend entity classes the dump does not carry.
   php bin/console oro:platform:update --force --env=test --timeout=0 --skip-download-translations --skip-translations

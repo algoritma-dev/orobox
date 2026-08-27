@@ -377,9 +377,9 @@ runs.
 #### The shared vendor tree
 
 The QA tools live in their own Composer tree, `vendor-bin/qa`, so their versions never touch the
-application's. Every package both trees need — `symfony/console`, the Symfony contracts, `psr/log`
-and the rest — is installed **once**, in the application's tree, and reached from the QA tree
-through the bootstrap Orobox writes to `vendor-bin/qa/orobox/oro-autoload.php`.
+application's. Every package both trees need — `symfony/console`, the Symfony contracts, `psr/log`,
+`twig/twig` and the rest — is installed **once**, in the application's tree, and reached from the QA
+tree through the bootstrap Orobox writes to `vendor-bin/qa/orobox/oro-autoload.php`.
 
 That is not a size optimization. A dumped Symfony debug container inline-requires vendor files by
 absolute path, and `include_once` dedupes on the path, not on the class name. With two copies
@@ -389,6 +389,11 @@ QA copy already declared, and the run dies with:
 ```
 Fatal error: Cannot redeclare interface Symfony\Contracts\Service\ResetInterface
 ```
+
+Twig fails the same way through a global function rather than a class — `Cannot redeclare
+twig_var_dump()`, declared by the `Resources/debug.php` that `DebugExtension` requires — which is
+why `twig/twig` is shared too. Twig dropped those functions in 3.9, so only Oro lines still on an
+older Twig reach that particular fatal.
 
 Identical versions in both trees do not help — the paths still differ. So `orobox qa-init` (and the
 deploy pipeline's QA stage) patches `vendor-bin/qa/composer.json` before Composer populates it:
@@ -439,14 +444,21 @@ overwrites a file that is already there.
 | File | How it merges |
 | --- | --- |
 | `phpstan.neon` | NEON `includes`: base first, yours last. Relative paths in either file keep resolving against that file. |
-| `rector.php` | Both configs are applied to the same `RectorConfig`, base first. Either shape works — a `static function (RectorConfig $c)` or a `RectorConfig::configure()` builder. |
-| `.php-cs-fixer.dist.php` | Rules merge key by key, yours winning. Risky rules are allowed when either side allows them. Finder, cache file and indentation come from your config. |
+| `rector.php` | Both configs are applied to the same `RectorConfig`, base first, then Orobox's own skip list. Either shape works — a `static function (RectorConfig $c)` or a `RectorConfig::configure()` builder. |
+| `.php-cs-fixer.dist.php` | Rules merge key by key, yours winning. Risky rules are allowed when either side allows them. Finder, cache file and indentation come from your config, minus the generated sources below. |
 | `.twig-cs-fixer.php` | Rulesets merge rule by rule (keyed by rule class), yours winning. Finder and the remaining `Config` settings come from your config. |
 | `.eslintrc.yml`, `.stylelintrc.yml`, `.stylelintrc-css.yml` | `extends`: base first, yours last. |
 | `.eslintignore`, `.stylelintignore`, `.stylelintignore-css` | **Not merged** — yours replaces the base one. Ignore patterns resolve against the directory of the file holding them, so a merged copy would re-anchor every inherited pattern. |
 
 The merged file is generated into `vendor-bin/qa/merged/` on every run; nothing is written to your
-checkout. When you ship no config of your own, the base one is used directly.
+checkout. When you ship no config of your own, the base one is used directly — except for
+`rector.php`, which always goes through the generated wrapper because Orobox has a skip list of its
+own to add to it (see below).
+
+**Sources OroCommerce generates are excluded.** `src/AppKernel.php` is written by the OroCommerce
+application skeleton and shipped again with every release, so reformatting it is work the next
+update undoes. Rector skips it and PHP-CS-Fixer's finder drops it, on every install type. Nothing
+else is excluded: the skip list is the file OroCommerce owns, not a general opt-out.
 
 A config Orobox cannot merge — a `rector.php` returning neither a closure nor a builder, a
 `.php-cs-fixer.dist.php` returning something that is not a `PhpCsFixer\ConfigInterface` — fails the

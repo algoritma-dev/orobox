@@ -92,13 +92,64 @@ func yamlExtendsMerge(baseFile, projectFile string) string {
 	return fmt.Sprintf("extends:\n  - %s\n  - %s\n", baseFile, projectFile)
 }
 
+// oroGeneratedSources are the files OroCommerce's own application skeleton writes into the tree
+// the PHP tools walk, and that a project is not supposed to hand-maintain.
+//
+// src/AppKernel.php is the whole list today. It ships with `array()` literals, fully qualified
+// bundle names written inline and no return types, so Rector reports it on every single run of
+// every project — the tool's first finding on a brand-new checkout is a file the developer did
+// not write and must not reformat, because the next OroCommerce release ships its own version of
+// it again.
+//
+// The paths are absolute container paths: Rector runs from OroRoot and PHP-CS-Fixer's finder is
+// rooted wherever the project config points it, so a relative path would mean two different files.
+func oroGeneratedSources() []string {
+	return []string{config.OroRootDir + "/src/AppKernel.php"}
+}
+
+// phpList renders paths as a PHP array body, ready to be interpolated between brackets.
+func phpList(paths []string) string {
+	quoted := make([]string, 0, len(paths))
+	for _, path := range paths {
+		quoted = append(quoted, "'"+path+"'")
+	}
+	return strings.Join(quoted, ", ")
+}
+
+// rectorConfigRef resolves Rector's configuration. Unlike the other tools it is always the generated
+// wrapper, never the base or the project file directly, because Orobox has something of its own to
+// contribute to it: the skip list for the sources OroCommerce generates (see oroGeneratedSources).
+// Falling back to either file as-is would drop that skip exactly in the two cases where it matters
+// most — a checkout with no rector.php of its own, which is what a project looks like before
+// `orobox qa-init`, and the pipeline engine, which installs the tools itself and never runs
+// qa-init at all.
+//
+// Both files are therefore optional here, and a missing one is skipped rather than fatal.
+func rectorConfigRef(sourceRoot string) configRef {
+	baseFile := config.QaToolsDir + "/rector.php"
+	projectFile := sourceRoot + "/rector.php"
+	mergedFile := mergedDir + "/rector.php"
+
+	b64 := base64.StdEncoding.EncodeToString([]byte(rectorMerge(baseFile, projectFile)))
+
+	return configRef{
+		Path:  mergedFile,
+		Setup: fmt.Sprintf("mkdir -p %s && printf '%%s' '%s' | base64 -d > %s", mergedDir, b64, mergedFile),
+	}
+}
+
 // rectorMerge wraps both Rector configs in one closure that applies them in turn to the same
-// RectorConfig, so the project's calls land on top of the base's.
+// RectorConfig, so the project's calls land on top of the base's, and adds Orobox's own skip list
+// last.
 //
 // The two shapes a Rector config file can have are both handled: the older `return static
 // function (RectorConfig $c)` and the current `return RectorConfig::configure()->...`, whose
 // builder is invokable with the config. Anything else throws instead of being ignored — a config
 // that was silently skipped is a QA run that reports fewer findings than it should.
+//
+// The skip goes last only for readability: Rector's skip list is additive, so a project cannot
+// take an entry back out whatever the order is. A project that really wants Rector to rewrite the
+// generated kernel has to run the tool on that file itself.
 func rectorMerge(baseFile, projectFile string) string {
 	return fmt.Sprintf(`<?php
 
@@ -108,6 +159,10 @@ use Rector\Config\RectorConfig;
 
 return static function (RectorConfig $rectorConfig): void {
     foreach (['%s', '%s'] as $file) {
+        if (!is_file($file)) {
+            continue;
+        }
+
         $config = require $file;
 
         if (is_callable($config)) {
@@ -122,8 +177,11 @@ return static function (RectorConfig $rectorConfig): void {
             get_debug_type($config)
         ));
     }
+
+    // Written by OroCommerce, not by the project. See oroGeneratedSources.
+    $rectorConfig->skip([%s]);
 };
-`, baseFile, projectFile)
+`, baseFile, projectFile, phpList(oroGeneratedSources()))
 }
 
 // phpCSFixerMerge merges the two PHP-CS-Fixer configs rule by rule, the project's winning on the
@@ -134,12 +192,20 @@ return static function (RectorConfig $rectorConfig): void {
 // finder" is therefore not detectable. Risky rules are allowed when either side allows them: the
 // merged rule set contains both sides' rules, so the stricter flag would make the tool refuse the
 // other side's.
+//
+// The finder is then narrowed by the same exclusion Rector gets (see oroGeneratedSources): the
+// project finder is what points the tool at src/, so it is also what walks into the kernel
+// OroCommerce generated. The narrowing is a filter on absolute paths rather than a notPath()
+// pattern because notPath() is relative to the finder's roots, and those are the project's to
+// choose. It is guarded by the instanceof: a Config may answer with any iterable, and one that is
+// not a Finder has no filter() to call.
 func phpCSFixerMerge(baseFile, projectFile string) string {
 	return fmt.Sprintf(`<?php
 
 declare(strict_types=1);
 
 use PhpCsFixer\ConfigInterface;
+use Symfony\Component\Finder\Finder;
 
 $load = static function (string $file): ConfigInterface {
     $config = require $file;
@@ -162,8 +228,19 @@ $project = $load('%s');
 $project->setRules(array_merge($base->getRules(), $project->getRules()));
 $project->setRiskyAllowed($base->getRiskyAllowed() || $project->getRiskyAllowed());
 
+$finder = $project->getFinder();
+if ($finder instanceof Finder) {
+    $generated = [%s];
+
+    $finder->filter(static function (\SplFileInfo $file) use ($generated): bool {
+        return !in_array((string) $file->getRealPath(), $generated, true);
+    });
+
+    $project->setFinder($finder);
+}
+
 return $project;
-`, baseFile, projectFile)
+`, baseFile, projectFile, phpList(oroGeneratedSources()))
 }
 
 // twigCSFixerMerge merges the two Twig-CS-Fixer rulesets into a fresh one, the project's rules

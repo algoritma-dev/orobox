@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/algoritma-dev/orobox/internal/docker"
 	"github.com/algoritma-dev/orobox/internal/utils"
@@ -81,13 +82,60 @@ var dbRestoreCmd = &cobra.Command{
 // cacheClearScript empties var/cache/dev without racing the processes that write into it: it
 // detaches the directory with a rename and only then deletes it. Left as a shell snippet
 // because both steps have to happen in the container, in that order, in one exec.
+//
+// The fresh directory is recreated by the same exec rather than left to whoever gets there first.
+// var/cache is a volume every Oro container shares, so the directory's mode is whatever the
+// winning process's umask made it; creating it here means it is always the application container's.
 const cacheClearScript = `set -e
 dir=var/cache/dev
 if [ -d "$dir" ]; then
   old="$dir.orobox-old.$$"
   mv "$dir" "$old"
+  mkdir -p "$dir"
   rm -rf "$old"
 fi`
+
+// oroKernelServices are the long-running services that boot an Oro kernel of their own against
+// the same var/cache volume the application container writes to.
+//
+// They are stopped for the duration of a restore, and that is not only about the cache. A restore
+// drops and recreates the database under them: a consumer mid-message, a cron job mid-run or a
+// request being served against the schema that is being replaced has nothing valid to do, and web
+// is in the list for the same reason as the rest — its health probe alone is enough to boot a
+// kernel every few seconds.
+//
+// The cache is what turns that from untidy into a failure. Once cacheClearScript has detached
+// var/cache/dev, every one of these processes starts rebuilding it concurrently with
+// oro:platform:update, and Oro's extend-class writer creates its directories without tolerating
+// the EEXIST a second creator hands it: "Could not create cache directory
+// .../var/cache/dev/oro_entities/Extend/Entity", and the restore fails on a race rather than on
+// anything about the dump.
+var oroKernelServices = []string{"web", "php-fpm-app", "ws", "consumer", "cron"}
+
+// quiesceOroKernels stops the services in oroKernelServices that are currently running and returns
+// the function that starts exactly those back up.
+//
+// Only the running ones are touched, so a restore never leaves a stack with more services up than
+// it found — a developer who deliberately keeps the consumer down gets it back down afterwards.
+// Both halves are best-effort: failing a restore because a background service could not be paused
+// would trade a rare race for a certain outage.
+func quiesceOroKernels() func() {
+	running := docker.RunningServices(oroKernelServices)
+	if len(running) == 0 {
+		return func() {}
+	}
+
+	if err := docker.RunComposeCommandSilently("", append([]string{"stop"}, running...)...); err != nil {
+		utils.PrintWarning(fmt.Sprintf("Could not pause %s during the restore: %v", strings.Join(running, ", "), err))
+		return func() {}
+	}
+
+	return func() {
+		if err := docker.RunComposeCommandSilently("", append([]string{"start"}, running...)...); err != nil {
+			utils.PrintWarning(fmt.Sprintf("Could not start %s back up: %v. Run 'orobox up'.", strings.Join(running, ", "), err))
+		}
+	}
+}
 
 func init() {
 	rootCmd.AddCommand(dbCmd)
@@ -150,6 +198,12 @@ func restoreDatabase(file string) error {
 		utils.PrintError(err.Error())
 		return err
 	}
+
+	// Nothing else may hold a kernel open while the database and the cache underneath it are
+	// replaced; see oroKernelServices. Deferred, so a restore that fails halfway still hands the
+	// stack back in the shape it found it.
+	resume := quiesceOroKernels()
+	defer resume()
 
 	// 1. Restore the database
 	utils.StartLoader("Restoring database...")

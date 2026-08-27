@@ -117,13 +117,7 @@ func runGreenPath(t *testing.T, c Case) {
 	}
 	box.Run("db", "restore", dump)
 
-	// 6. qa — best-effort.
-	if res := box.TryRun("qa"); failed(res) {
-		t.Logf("qa skipped/failed (best-effort) for %s %s: exit %d\n%s\n%s",
-			c.Type, c.Version, res.ExitCode, res.Stdout, res.Stderr)
-	}
-
-	// 7. logs (follow-mode: bounded by timeout, kill is expected), xdebug lifecycle.
+	// 6. logs (follow-mode: bounded by timeout, kill is expected), xdebug lifecycle.
 	if res := box.RunTimeout(5*time.Second, "logs", "--nginx"); res.Stdout == "" && res.Stderr == "" {
 		t.Logf("logs produced no output for %s %s", c.Type, c.Version)
 	}
@@ -131,7 +125,7 @@ func runGreenPath(t *testing.T, c Case) {
 	box.Run("xdebug", "on")
 	box.Run("xdebug", "off")
 
-	// 8. generators — assert they wrote something into the checkout.
+	// 7. generators — assert they wrote something into the checkout.
 	//
 	// deploy-init and ci-init are project-only by design: a bundle checkout is not a
 	// deployable application, and its CI would have to stand up a full development stack per
@@ -157,18 +151,31 @@ func runGreenPath(t *testing.T, c Case) {
 	// starts disabling one would have to pass that config in as well.
 	assertGeneratedFiles(t, box, "qa-init", scaffoldRelPaths(scaffold.QaStubs(string(c.Type))))
 
-	// test-init is not a generator: it provisions the test database and cache (its only
+	// 8. qa — deliberately after qa-init, and asserted rather than logged.
+	//
+	// The order is what makes the step mean anything for a bundle: `orobox qa` on the compose
+	// engine refuses to run tools that are not installed, so run before qa-init it only ever
+	// exercised that refusal. The project matrix takes the pipeline engine, which installs its
+	// own tools and never needed the ordering — but it did need the assert: qa was best-effort
+	// here, so every version silently failed its Rector step on OroCommerce's generated kernel
+	// while the job stayed green.
+	if res := box.TryRun("qa"); failed(res) {
+		t.Errorf("qa failed for %s %s: exit %d\n%s\n%s",
+			c.Type, c.Version, res.ExitCode, res.Stdout, res.Stderr)
+	}
+
+	// 9. test-init is not a generator: it provisions the test database and cache (its only
 	// write to the checkout is .orobox.yaml, and only behind --tmpfs), so counting files
 	// would always report "created no new files". Assert that it completes instead. It runs
 	// a full oro:install --env=test, so this is one of the slower steps.
 	box.Run("test-init")
 
-	// 9. test — narrowed, and deliberately after test-init: while the test database is
+	// 10. test — narrowed, and deliberately after test-init: while the test database is
 	// missing, `orobox test` prints "run 'orobox test-init'" and returns without ever
 	// invoking PHPUnit, so run any earlier the step asserts nothing.
 	assertNarrowedTests(t, box, c)
 
-	// 10. clear + down (teardown also runs in cleanup). The command is "clear", not
+	// 11. clear + down (teardown also runs in cleanup). The command is "clear", not
 	// "clean": it removes every container and volume so the next run starts fresh.
 	box.Run("clear")
 	box.Run("down")

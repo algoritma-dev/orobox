@@ -143,7 +143,7 @@ func Tools(opts ToolsOptions) []Tool {
 	// A project's own config layers on top of the base one rather than replacing it; see
 	// mergedConfig. The ignore files are the exception, and the one there explains why.
 	phpstanConfig := mergedConfig(sourceRoot, qaDir, "phpstan.neon", neonMerge)
-	rectorConfig := mergedConfig(sourceRoot, qaDir, "rector.php", rectorMerge)
+	rectorConfig := rectorConfigRef(sourceRoot)
 	phpCSFixerConfig := mergedConfig(sourceRoot, qaDir, ".php-cs-fixer.dist.php", phpCSFixerMerge)
 	twigCSFixerConfig := mergedConfig(sourceRoot, qaDir, ".twig-cs-fixer.php", twigCSFixerMerge)
 	eslintConfig := mergedConfig(sourceRoot, oroRoot, ".eslintrc.yml", yamlExtendsMerge)

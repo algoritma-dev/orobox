@@ -1035,6 +1035,54 @@ type ServiceStatus struct {
 	Health  string `json:"Health"`
 }
 
+// ServiceStatuses asks compose for the state of the named services, keyed by service name. A
+// service compose knows nothing about — never created, or already removed — is simply absent from
+// the map, and so is every service when the query itself fails: callers treat "no status" as "not
+// running", which is the safe reading for both.
+func ServiceStatuses(serviceNames []string) map[string]ServiceStatus {
+	statusMap := make(map[string]ServiceStatus)
+
+	args := append([]string{"ps", "--format", "json"}, serviceNames...)
+	output, err := RunComposeCommandWithOutput(args...)
+	if err != nil {
+		return statusMap
+	}
+
+	// Compose has emitted both shapes across its 2.x line: a JSON array, and one object per line.
+	var statuses []ServiceStatus
+	if jsonErr := json.Unmarshal(output, &statuses); jsonErr == nil {
+		for _, s := range statuses {
+			statusMap[s.Service] = s
+		}
+		return statusMap
+	}
+
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if line == "" {
+			continue
+		}
+		var s ServiceStatus
+		if jsonErr := json.Unmarshal([]byte(line), &s); jsonErr == nil {
+			statusMap[s.Service] = s
+		}
+	}
+	return statusMap
+}
+
+// RunningServices filters serviceNames down to the ones compose reports as running, keeping the
+// caller's order so a stop/start pair is symmetric.
+func RunningServices(serviceNames []string) []string {
+	statuses := ServiceStatuses(serviceNames)
+
+	running := make([]string, 0, len(serviceNames))
+	for _, name := range serviceNames {
+		if status, ok := statuses[name]; ok && status.State == "running" {
+			running = append(running, name)
+		}
+	}
+	return running
+}
+
 var (
 	ensuredServices      = make(map[string]bool)
 	ensuredServicesMu    sync.Mutex
@@ -1078,32 +1126,7 @@ func EnsureServicesRunning(serviceNames []string) error {
 		return nil
 	}
 
-	// Use docker compose ps --format json to check status of all services at once
-	args := append([]string{"ps", "--format", "json"}, servicesToCheck...)
-	output, err := RunComposeCommandWithOutput(args...)
-
-	statusMap := make(map[string]ServiceStatus)
-	if err == nil {
-		// try to parse as array
-		var statuses []ServiceStatus
-		if jsonErr := json.Unmarshal(output, &statuses); jsonErr == nil {
-			for _, s := range statuses {
-				statusMap[s.Service] = s
-			}
-		} else {
-			// Fallback for line-delimited or single object
-			lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-			for _, line := range lines {
-				if line == "" {
-					continue
-				}
-				var s ServiceStatus
-				if jsonErr := json.Unmarshal([]byte(line), &s); jsonErr == nil {
-					statusMap[s.Service] = s
-				}
-			}
-		}
-	}
+	statusMap := ServiceStatuses(servicesToCheck)
 
 	// "starting" is deliberately not accepted here. A container in that state is running but
 	// has not passed a single probe yet — Postgres is not accepting connections, RabbitMQ is

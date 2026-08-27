@@ -241,3 +241,50 @@ func TestMergedPHPWrappersAreValidPHP(t *testing.T) {
 		}
 	}
 }
+
+// TestRectorAlwaysUsesTheGeneratedWrapper covers the regression the skip list exists for: with the
+// older project-or-base fallback, a checkout without its own rector.php ran the base config
+// directly and Rector reported OroCommerce's generated kernel on every run — which is exactly what
+// a project looks like before `orobox qa-init`, and what the pipeline engine always looks like.
+func TestRectorAlwaysUsesTheGeneratedWrapper(t *testing.T) {
+	ref := rectorConfigRef(bundleRoot)
+
+	if ref.Path != mergedDir+"/rector.php" {
+		t.Errorf("rector config = %q, want the generated wrapper at %q", ref.Path, mergedDir+"/rector.php")
+	}
+	// Unconditional: no `if [ -f ... ]` guard may gate the write, or the fallback is back.
+	if strings.Contains(ref.Setup, "if [ -f ") {
+		t.Errorf("the wrapper must be written unconditionally: %s", ref.Setup)
+	}
+	if !strings.Contains(ref.Setup, "> "+mergedDir+"/rector.php") {
+		t.Errorf("setup line does not write the wrapper: %s", ref.Setup)
+	}
+
+	doc := decodeMerged(t, ref.Setup)
+	// Either half may be absent — the base one before the tools are installed, the project one in
+	// a checkout that never ran qa-init — so neither may be required.
+	if !strings.Contains(doc, "if (!is_file($file)) {") {
+		t.Errorf("the wrapper requires both halves to exist:\n%s", doc)
+	}
+	for _, want := range oroGeneratedSources() {
+		if !strings.Contains(doc, "$rectorConfig->skip([") || !strings.Contains(doc, "'"+want+"'") {
+			t.Errorf("the wrapper does not skip %s:\n%s", want, doc)
+		}
+	}
+}
+
+// TestPhpCSFixerMergeExcludesTheGeneratedSources is the PHP-CS-Fixer half of the same exclusion:
+// the project config is what points the finder at src/, so it is also what walks into the kernel
+// OroCommerce generated.
+func TestPhpCSFixerMergeExcludesTheGeneratedSources(t *testing.T) {
+	doc := phpCSFixerMerge(config.QaToolsDir+"/.php-cs-fixer.dist.php", bundleRoot+"/.php-cs-fixer.dist.php")
+
+	if !strings.Contains(doc, "$finder instanceof Finder") {
+		t.Errorf("the finder narrowing is not guarded by its type:\n%s", doc)
+	}
+	for _, want := range oroGeneratedSources() {
+		if !strings.Contains(doc, "'"+want+"'") {
+			t.Errorf("the merged config does not exclude %s:\n%s", want, doc)
+		}
+	}
+}

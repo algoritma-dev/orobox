@@ -314,6 +314,15 @@ var qaSharedPackages = []string{
 	"symfony/filesystem", "symfony/process", "symfony/options-resolver", "symfony/stopwatch",
 	"symfony/service-contracts", "symfony/event-dispatcher-contracts",
 	"psr/container", "psr/log",
+	// twig/twig is shared for the same reason as the Symfony components, but it fails in a way
+	// of its own: Twig's DebugExtension require_once's Resources/debug.php, which declares the
+	// global function twig_var_dump(). The QA tree's copy sits under another path, so
+	// include_once cannot dedupe it, and PHPStan — the one tool that boots the kernel with the
+	// application's autoloader first — dies with "Cannot redeclare twig_var_dump()" as soon as
+	// both copies are loaded. Twig dropped those global functions in 3.9, so only the Oro lines
+	// still on an older Twig (5.1) reach the fatal; sharing the package removes the second copy
+	// on every line instead of on the ones that happen to fail today.
+	"twig/twig",
 }
 
 // QaSharedPackages returns the names of the packages both trees need, for the manifest patch
@@ -363,6 +372,12 @@ func GetQaSymfonyConstraints(oroVersion string) []string {
 			if log != "" {
 				constraints = append(constraints, name+":"+log)
 			}
+		case "twig/twig":
+			// Twig versions independently of Symfony, so the Symfony line says nothing about it.
+			// The constraint is only the fallback for a tree that does not ship Twig at all; an
+			// Oro application always does, and the manifest patch then replaces it with the exact
+			// line the application installed.
+			constraints = append(constraints, name+":^3.0")
 		default:
 			constraints = append(constraints, name+":^"+sf)
 		}
