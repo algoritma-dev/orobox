@@ -267,7 +267,7 @@ func assertNarrowedTests(t *testing.T, box *Box, c Case) {
 
 		res := box.TryRun("test",
 			"--testsuite", suite,
-			"--filter", e2eTestFilter,
+			"--filter", c.TestFilter(),
 			"--report", "gitlab",
 			"--report-path", reportRel)
 
@@ -293,7 +293,7 @@ func assertNarrowedTests(t *testing.T, box *Box, c Case) {
 				suite, c.Type, c.Version, res.ExitCode, res.Stdout, res.Stderr)
 		case totals.Tests == 0:
 			t.Errorf("test --testsuite %s executed no test: filter %q matched nothing in %s %s",
-				suite, e2eTestFilter, c.Type, c.Version)
+				suite, c.TestFilter(), c.Type, c.Version)
 		case totals.Failures+totals.Errors > 0:
 			t.Errorf("test --testsuite %s ran %d tests with %d failures and %d errors\n%s\n%s",
 				suite, totals.Tests, totals.Failures, totals.Errors, res.Stdout, res.Stderr)

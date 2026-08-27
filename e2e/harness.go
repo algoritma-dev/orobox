@@ -102,6 +102,19 @@ func fixtureFor(c Case) string {
 	return filepath.Join("fixtures", string(c.Type)+".orobox.yaml")
 }
 
+// seedCheckout copies the install type's checkout fixture into dir.
+func seedCheckout(t *testing.T, c Case, dir string) {
+	t.Helper()
+
+	source := checkoutFixtureDir(c)
+	if source == "" {
+		return
+	}
+	if err := os.CopyFS(dir, os.DirFS(source)); err != nil {
+		t.Fatalf("seed the %s checkout from %s: %v", c.Type, source, err)
+	}
+}
+
 // NewBox creates an isolated workdir, writes the rendered .orobox.yaml, resolves the binary,
 // and registers teardown.
 func NewBox(t *testing.T, c Case) *Box {
@@ -115,6 +128,8 @@ func NewBox(t *testing.T, c Case) *Box {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("create workdir: %v", err)
 	}
+
+	seedCheckout(t, c, dir)
 
 	raw, err := os.ReadFile(fixtureFor(c))
 	if err != nil {
@@ -302,6 +317,9 @@ func (b *Box) captureGeneratedConfig() {
 	}
 	if err := CaptureGeneratedConfig(b.dir, b.logDir); err != nil {
 		b.t.Logf("could not capture the generated configuration: %v", err)
+	}
+	if err := CaptureRawReports(b.dir, b.logDir); err != nil {
+		b.t.Logf("could not capture the raw reports: %v", err)
 	}
 }
 

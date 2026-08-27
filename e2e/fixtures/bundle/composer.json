@@ -1,0 +1,17 @@
+{
+    "name": "orobox/e2e-test-bundle",
+    "description": "Fixture bundle for the orobox end-to-end suite.",
+    "license": "MIT",
+    "type": "library",
+    "require": {
+        "php": ">=8.2"
+    },
+    "autoload": {
+        "psr-4": {
+            "Orobox\\Bundle\\E2ETestBundle\\": ""
+        },
+        "exclude-from-classmap": [
+            "Tests/"
+        ]
+    }
+}

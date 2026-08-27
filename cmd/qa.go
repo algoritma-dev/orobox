@@ -216,6 +216,7 @@ func runQaOnCompose(format qatools.Report, baseline string) {
 		Report:      format,
 		ReportDir:   containerReportDir,
 		Baseline:    baseline,
+		OroVersion:  viper.GetString("oro_version"),
 	})
 
 	anyEnabled := false

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -318,7 +319,12 @@ func TestToolsReportModeAddsTheGitLabFlag(t *testing.T) {
 		Mode:        ModeCheck,
 		Report:      ReportGitLab,
 		ReportDir:   "/reports/qa",
+		OroVersion:  "6.0",
 	})
+
+	// Stylelint's formatter is named down to the module file: stylelint 16 imports it as an ES
+	// module, and a directory import fails with ERR_UNSUPPORTED_DIR_IMPORT.
+	stylelintFormatter := "--custom-formatter=" + config.QaToolsDir + "/node_modules/stylelint-formatter-gitlab/index.js"
 
 	want := map[string]string{
 		"phpstan":       "--error-format=gitlab",
@@ -328,8 +334,8 @@ func TestToolsReportModeAddsTheGitLabFlag(t *testing.T) {
 		// ESLint 8 resolves a bare --format=gitlab against its own installation and fails, so the
 		// formatter is addressed by absolute path.
 		"eslint":        "--format=" + config.QaToolsDir + "/node_modules/eslint-formatter-gitlab",
-		"stylelint":     "--custom-formatter=" + config.QaToolsDir + "/node_modules/stylelint-formatter-gitlab",
-		"stylelint-css": "--custom-formatter=" + config.QaToolsDir + "/node_modules/stylelint-formatter-gitlab",
+		"stylelint":     stylelintFormatter,
+		"stylelint-css": stylelintFormatter,
 	}
 
 	for name, flag := range want {
@@ -421,10 +427,38 @@ func TestInstallPlanAlwaysCarriesTheGitLabFormatters(t *testing.T) {
 	plan := NewInstallPlan("6.1")
 	packages := strings.Join(plan.JSPackages, " ")
 
-	for _, pkg := range []string{"eslint-formatter-gitlab@^5.1.0", "stylelint-formatter-gitlab"} {
+	for _, pkg := range []string{"eslint-formatter-gitlab@^5.1.0", "@studiometa/stylelint-formatter-gitlab@^1.1.1"} {
 		if !strings.Contains(packages, pkg) {
 			t.Errorf("%s is missing from the JS packages: %s", pkg, packages)
 		}
+	}
+}
+
+// TestInstallPlanPinsStylelintToTheLineItsSharedConfigNeeds covers the combination that made
+// `orobox qa` report stylelint and stylelint-css as tools that could not run at all:
+// @oroinc/oro-stylelint-config carries its own stylelint dependency, and installing it next to a
+// stylelint from another major exits non-zero with an empty report instead of findings.
+func TestInstallPlanPinsStylelintToTheLineItsSharedConfigNeeds(t *testing.T) {
+	viper.Set("test.qa.stylelint", true)
+	defer viper.Set("test.qa.stylelint", nil)
+
+	for _, tc := range []struct {
+		version  string
+		packages []string
+	}{
+		{version: "7.0", packages: []string{"stylelint@^16.26.1", "@oroinc/oro-stylelint-config@7.0.1", "@studiometa/stylelint-formatter-gitlab@^1.1.1"}},
+		{version: "6.1", packages: []string{"stylelint@^16.17.0", "@oroinc/oro-stylelint-config@6.1.0-lts001", "@studiometa/stylelint-formatter-gitlab@^1.1.1"}},
+		{version: "6.0", packages: []string{"stylelint@^15.11.0", "@oroinc/oro-stylelint-config@6.0.0-lts1", "stylelint-formatter-gitlab"}},
+		{version: "5.1", packages: []string{"stylelint@^15.11.0", "@oroinc/oro-stylelint-config@5.1.0-lts002", "stylelint-formatter-gitlab"}},
+	} {
+		t.Run(tc.version, func(t *testing.T) {
+			packages := NewInstallPlan(tc.version).JSPackages
+			for _, want := range tc.packages {
+				if !slices.Contains(packages, want) {
+					t.Errorf("Oro %s installs %v, want %s among them", tc.version, packages, want)
+				}
+			}
+		})
 	}
 }
 

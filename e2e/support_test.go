@@ -353,11 +353,38 @@ func TestParseJUnitTotalsRejectsGarbage(t *testing.T) {
 // The filter has to be usable as a PHPUnit regex over "Class::method": a namespace-shaped value
 // would have its backslashes read as regex escapes (\B is a word-boundary assertion).
 func TestTestFilterHoldsNoRegexEscapes(t *testing.T) {
-	if strings.ContainsAny(e2eTestFilter, `\/`) {
-		t.Fatalf("e2eTestFilter %q must not contain path or escape characters", e2eTestFilter)
+	for _, c := range []Case{{Type: TypeProject, Version: "7.0"}, {Type: TypeBundle, Version: "7.0"}} {
+		filter := c.TestFilter()
+		if strings.ContainsAny(filter, `\/`) {
+			t.Errorf("the %s filter %q must not contain path or escape characters", c.Type, filter)
+		}
 	}
 	if len(e2eTestSuites) == 0 {
 		t.Fatal("no test suites declared for the test step")
+	}
+}
+
+// TestBundleFilterMatchesTheCheckoutFixture keeps the filter and the fixture's class names from
+// drifting apart: a filter that matches nothing grades as "executed no test", which reads as a
+// broken `orobox test` rather than as a stale fixture.
+func TestBundleFilterMatchesTheCheckoutFixture(t *testing.T) {
+	dir := checkoutFixtureDir(Case{Type: TypeBundle, Version: "7.0"})
+	filter := bundleTestFilter
+
+	for _, suite := range e2eTestSuites {
+		entries, err := os.ReadDir(filepath.Join(dir, "Tests", strings.ToUpper(suite[:1])+suite[1:]))
+		if err != nil {
+			t.Fatalf("read the %s suite of the bundle fixture: %v", suite, err)
+		}
+		matched := false
+		for _, entry := range entries {
+			if strings.Contains(entry.Name(), filter) {
+				matched = true
+			}
+		}
+		if !matched {
+			t.Errorf("no test in the bundle fixture's %s suite matches the filter %q", suite, filter)
+		}
 	}
 }
 

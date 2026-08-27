@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    `orobox test` points PHPUnit at the bundle's own source root
+    (./bin/simple-phpunit --configuration=<bundle root>), so without this file PHPUnit exits
+    before running anything and the JUnit log it was asked for is never written.
+
+    The bootstrap is the application's autoloader by absolute container path
+    (config.OroRootDir): the bundle is installed into the prebuilt application through a path
+    repository, so its own classes are registered there and it has no vendor tree of its own.
+-->
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/9.6/phpunit.xsd"
+         bootstrap="/var/www/oro/vendor/autoload.php"
+         cacheResultFile="/tmp/.phpunit.result.cache"
+         colors="false">
+    <testsuites>
+        <testsuite name="unit">
+            <directory>Tests/Unit</directory>
+        </testsuite>
+        <testsuite name="functional">
+            <directory>Tests/Functional</directory>
+        </testsuite>
+    </testsuites>
+</phpunit>

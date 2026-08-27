@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/algoritma-dev/orobox/internal/config"
+	"github.com/algoritma-dev/orobox/internal/docker"
 	"github.com/algoritma-dev/orobox/internal/qatools"
 	"github.com/algoritma-dev/orobox/internal/utils"
 
@@ -65,21 +66,41 @@ func resolveEngine(flag string) (string, error) {
 	}
 }
 
+// qaTestEnvInstalled reports whether the test database this stack would analyse against is
+// actually installed. It is a variable so the environment resolution can be tested without a
+// running stack.
+var qaTestEnvInstalled = func() bool {
+	installed, err := docker.IsDatabaseInitialized(true)
+	// An error here is the db-test service not being up at all, which is exactly the state that
+	// must not resolve to the test environment.
+	return err == nil && installed
+}
+
 // resolveQaEnv picks the Symfony environment the QA tools boot on the compose engine.
 //
-// CI gets test: a job installs Oro in test, the same install the pipeline's own test step uses, so
-// PHPStan reads a cache that is there and no second install is paid for. A developer's machine
-// gets dev, because that is what `orobox install` leaves running; asking for test there would warm
-// a cache against a database that only exists after `orobox test-init` and would compete with the
-// functional tests for it.
+// A developer's machine gets dev, because that is what `orobox install` leaves running; asking for
+// test there would warm a cache against a database that only exists after `orobox test-init` and
+// would compete with the functional tests for it.
+//
+// CI gets test *if the test database is installed*, which is the state a CI job reaches by running
+// `orobox test-init` before the checks. The env var alone is not enough: PHPStan's setup warms the
+// cache of whichever environment it is given, and warming test queries Oro's config tables, so
+// pointing it at an environment that was never installed fails the tool with "could not translate
+// host name db-test to address" — a broken tool rather than a verdict about the code. The check
+// runs for both `orobox qa-init` (which bakes the environment into the generated phpstan.neon) and
+// `orobox qa`, so the two cannot disagree about which cache is being read.
 //
 // The Dagger engine is not routed through here: it installs its own test database whether or not
 // it was started from CI, so pipeline.NewChecks stays on qatools.EnvTest.
 func resolveQaEnv() qatools.Env {
-	if os.Getenv("CI") != "" {
-		return qatools.EnvTest
+	if os.Getenv("CI") == "" {
+		return qatools.EnvDev
 	}
-	return qatools.EnvDev
+	if !qaTestEnvInstalled() {
+		utils.PrintWarning("The test database is not installed, so the QA tools run in the dev environment. Run 'orobox test-init' first to analyse against test.")
+		return qatools.EnvDev
+	}
+	return qatools.EnvTest
 }
 
 // resolveReport parses the --report value. Only GitLab's format is implemented; the flag exists as

@@ -246,6 +246,27 @@ func CaptureGeneratedConfig(caseDir, logDir string) error {
 	return nil
 }
 
+// CaptureRawReports copies the per-tool files the QA and test steps left in the checkout — one
+// status and one report per tool — from caseDir into logDir.
+//
+// They are the only record of what a single tool concluded. The step log carries the command's
+// output, but the Dagger engine renders its steps through a progress pane that keeps a bounded
+// number of lines, so the tail of a QA step that ran seven tools is routinely not in the log at
+// all — which is how "stylelint could not run" arrived in CI with no reason attached. A case that
+// failed before any tool ran has nothing to copy, which is not an error.
+func CaptureRawReports(caseDir, logDir string) error {
+	src := filepath.Join(caseDir, config.RawReportsRelDir)
+	if _, err := os.Stat(src); err != nil {
+		return nil
+	}
+
+	dst := filepath.Join(logDir, "reports-raw")
+	if err := os.RemoveAll(dst); err != nil {
+		return err
+	}
+	return os.CopyFS(dst, os.DirFS(src))
+}
+
 // ResolveBinary returns the orobox binary path from OROBOX_BIN, or signals that one must be built.
 func ResolveBinary(getenv func(string) string) (string, bool) {
 	if p := getenv("OROBOX_BIN"); p != "" {
@@ -274,6 +295,38 @@ var e2eTestSuites = []string{"unit", "functional"}
 // verified for 5.1, 6.0, 6.1 and 7.0), and because it holds no backslash: PHPUnit treats the
 // filter as a regex, so a namespace-shaped filter would have its separators read as escapes.
 const e2eTestFilter = "UserTest"
+
+// bundleTestFilter narrows the bundle case, where the project filter cannot apply: `orobox test`
+// points PHPUnit at the bundle's own configuration, so the only suites that exist are the
+// bundle's and OroPlatform's UserTest is not in them. It matches the fixture checkout's classes
+// under fixtures/bundle/Tests, and holds no backslash for the same reason.
+const bundleTestFilter = "E2ETest"
+
+// checkoutFixtureDir is the tree copied into a case's working directory alongside the rendered
+// .orobox.yaml, or "" when the install type has none.
+//
+// Only the bundle case has one, and that is what the install types are: a project install
+// scaffolds the whole OroCommerce application into the checkout, so anything placed there first
+// would be overwritten. A bundle checkout is the developer's own repository and orobox never
+// writes its sources — so a suite that created only .orobox.yaml was exercising a bundle that no
+// developer could have. The consequences were not subtle: without composer.json `orobox init`
+// skipped the `composer require` that installs the bundle into the application, PHP-CS-Fixer
+// aborted with "Unable to find composer.json", and PHPUnit found no configuration and wrote an
+// empty JUnit log for every suite.
+func checkoutFixtureDir(c Case) string {
+	if c.Type != TypeBundle {
+		return ""
+	}
+	return filepath.Join("fixtures", string(c.Type))
+}
+
+// TestFilter is the PHPUnit filter for this case.
+func (c Case) TestFilter() string {
+	if c.Type == TypeBundle {
+		return bundleTestFilter
+	}
+	return e2eTestFilter
+}
 
 // junitTotals is the part of a JUnit report the suite gates on.
 type junitTotals struct {
@@ -343,7 +396,10 @@ func (o QaToolOutcome) Lint() bool { return o.ExitCode != 0 && o.ReportErr == ni
 // configuration problem — a missing binary, an unparsable phpstan.neon, a failed cache warmup —
 // and not a verdict about the code under analysis.
 func (o QaToolOutcome) Broken() bool {
-	return o.ExitCode != 0 && (o.ReportErr != nil || o.Findings == 0)
+	// A missing or unreadable report counts whatever the exit code says. Report mode is the whole
+	// contract of the step: a tool that exits 0 without writing the document it was asked for has
+	// not reported a clean tree, it has reported nothing.
+	return o.ReportErr != nil || (o.ExitCode != 0 && o.Findings == 0)
 }
 
 // ReadQaOutcomes reads the per-tool status and report files `orobox qa --report gitlab` leaves in
@@ -351,7 +407,8 @@ func (o QaToolOutcome) Broken() bool {
 //
 // The status files are the index rather than the reports: a tool that crashed before writing
 // anything still has a status, while a report file alone cannot say whether the tool succeeded.
-// An empty report is zero findings — that is what a clean tool writes.
+// An empty report is zero findings — that is what a clean tool writes; a report file that is not
+// there at all is a tool that never wrote one, which qaFindings reports as an error.
 func ReadQaOutcomes(rawDir string) ([]QaToolOutcome, error) {
 	entries, err := os.ReadDir(rawDir)
 	if err != nil {
@@ -391,7 +448,10 @@ func ReadQaOutcomes(rawDir string) ([]QaToolOutcome, error) {
 func qaFindings(path string) (int, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return 0, nil
+		// Not the same as an empty report, and worth saying so: a tool that was asked for a
+		// GitLab document and left none behind did not get far enough to write one, so
+		// "0 findings" would read as a clean run of a tool that never analysed anything.
+		return 0, fmt.Errorf("the tool wrote no report at %s", path)
 	}
 	if err != nil {
 		return 0, err

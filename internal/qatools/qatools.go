@@ -79,6 +79,10 @@ type ToolsOptions struct {
 	Mode        Mode
 	Report      Report
 	ReportDir   string
+	// OroVersion is the line the tools run against. It decides which stylelint packages were
+	// installed, and therefore which formatter module stylelint is pointed at; see
+	// config.GetQaStylelint. An empty value resolves to the same default GetVersionsForOro uses.
+	OroVersion string
 	// Baseline is the container path PHPStan writes a generated baseline to. Empty for a normal
 	// analysis; when set, PHPStan records what it finds instead of failing on it, so the only tool
 	// the caller should keep in the list is PHPStan itself — the others have no baseline.
@@ -211,7 +215,11 @@ func Tools(opts ToolsOptions) []Tool {
 		// against lib/cli-engine/formatters inside its own installation and dies with
 		// "Cannot find module".
 		eslintArgs = append(eslintArgs, "--format="+qaDir+"/node_modules/eslint-formatter-gitlab")
-		stylelintFormatter := "--custom-formatter=" + qaDir + "/node_modules/stylelint-formatter-gitlab"
+		// Stylelint's formatter is named down to the module file rather than by package
+		// directory, because stylelint 16 imports it as an ES module and a directory import
+		// fails with ERR_UNSUPPORTED_DIR_IMPORT. Which package that is depends on the Oro
+		// version; see config.GetQaStylelint.
+		stylelintFormatter := "--custom-formatter=" + config.GetQaStylelint(opts.OroVersion).FormatterModule()
 		stylelintArgs = append(stylelintArgs, stylelintFormatter)
 		stylelintCSSArgs = append(stylelintCSSArgs, stylelintFormatter)
 	}
@@ -435,8 +443,15 @@ func NewInstallPlan(oroVersion string) InstallPlan {
 			"eslint@^8.57.0", "eslint-config-google@~0.14.0", "eslint-plugin-oro@~0.0.3",
 			"eslint-plugin-no-jquery", "eslint-plugin-import", "eslint-formatter-gitlab@^5.1.0")
 	}
+	// Stylelint, its shareable config and its formatter are pinned together per Oro line: the
+	// config declares the stylelint major it works with, and the formatter is the one that
+	// supports that major. See config.GetQaStylelint for what breaks when they disagree.
 	if needsStylelint {
-		plan.JSPackages = append(plan.JSPackages, "stylelint@^15.11.0", "@oroinc/oro-stylelint-config", "stylelint-formatter-gitlab")
+		stylelint := config.GetQaStylelint(oroVersion)
+		plan.JSPackages = append(plan.JSPackages,
+			"stylelint@"+stylelint.Stylelint,
+			"@oroinc/oro-stylelint-config@"+stylelint.Config,
+			stylelint.FormatterRequirement())
 	}
 
 	return plan

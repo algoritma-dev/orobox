@@ -831,6 +831,7 @@ func (p *Plan) qaCommands(oroVersion string) []string {
 		Mode:        qatools.ModeCheck,
 		Report:      p.Report,
 		ReportDir:   QAReportDir(),
+		OroVersion:  oroVersion,
 	}) {
 		if config.IsQaToolEnabled(tool.Name) {
 			enabled = append(enabled, tool)

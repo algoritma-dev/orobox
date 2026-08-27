@@ -12,18 +12,25 @@ import (
 
 func TestResolveQaEnv(t *testing.T) {
 	// A developer's stack has dev installed and the test database only after `orobox test-init`,
-	// so only CI — which installs test itself — analyses against test.
+	// so only CI analyses against test — and only once that install actually happened. Warming
+	// PHPStan's cache in an environment that was never installed fails the tool outright, which
+	// grades as "phpstan could not run" rather than as a finding.
 	for _, tc := range []struct {
-		name string
-		ci   string
-		want qatools.Env
+		name        string
+		ci          string
+		testInstall bool
+		want        qatools.Env
 	}{
-		{name: "outside CI the tools run in dev", want: qatools.EnvDev},
-		{name: "in CI they run in test", ci: "true", want: qatools.EnvTest},
+		{name: "outside CI the tools run in dev", testInstall: true, want: qatools.EnvDev},
+		{name: "in CI with test installed they run in test", ci: "true", testInstall: true, want: qatools.EnvTest},
+		{name: "in CI without a test install they fall back to dev", ci: "true", want: qatools.EnvDev},
 		{name: "an empty CI variable is not CI", ci: "", want: qatools.EnvDev},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("CI", tc.ci)
+			original := qaTestEnvInstalled
+			qaTestEnvInstalled = func() bool { return tc.testInstall }
+			defer func() { qaTestEnvInstalled = original }()
 
 			if got := resolveQaEnv(); got != tc.want {
 				t.Errorf("resolveQaEnv() = %q, want %q", got, tc.want)
