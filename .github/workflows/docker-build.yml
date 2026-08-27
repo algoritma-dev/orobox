@@ -11,6 +11,18 @@ on:
       - 'templates/docker/docker-compose.yml'
       - '.github/workflows/docker-build.yml'
   workflow_dispatch:
+    # Narrowing the matrix by hand is what makes one image reproducible on its own: the full
+    # matrix is twelve cells that each install OroCommerce, which is not what verifying a change
+    # to one version needs.
+    inputs:
+      oro-versions:
+        description: 'JSON array of Oro versions to build'
+        required: false
+        default: '["5.1", "6.0", "6.1", "7.0"]'
+      types:
+        description: 'JSON array of install types to build'
+        required: false
+        default: '["bundle", "project", "demo"]'
 
 jobs:
   build:
@@ -18,8 +30,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        oro-version: ["5.1", "6.0", "6.1", "7.0"]
-        type: ["bundle", "project", "demo"]
+        # `inputs` is empty on push, so each side falls back to the whole list rather than to an
+        # unparseable empty string.
+        oro-version: ${{ fromJSON(inputs.oro-versions || '["5.1", "6.0", "6.1", "7.0"]') }}
+        type: ${{ fromJSON(inputs.types || '["bundle", "project", "demo"]') }}
 
     steps:
       - name: Checkout code
