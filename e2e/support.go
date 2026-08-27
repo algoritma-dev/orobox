@@ -323,9 +323,9 @@ func parseJUnitTotals(data []byte) (junitTotals, error) {
 	return totals, nil
 }
 
-// qaToolOutcome is what one QA tool's own files in the raw report directory say about it: the
+// QaToolOutcome is what one QA tool's own files in the raw report directory say about it: the
 // exit code ReportScript recorded, and how many findings its Code Quality report holds.
-type qaToolOutcome struct {
+type QaToolOutcome struct {
 	Tool     string
 	ExitCode int
 	Findings int
@@ -334,15 +334,15 @@ type qaToolOutcome struct {
 	ReportErr error
 }
 
-// Lint reports whether this outcome is a tool that ran and disagreed with the code: the
-// non-zero exit every QA tool uses for "I found something", next to a report that says what.
-//
+// Lint reports whether this outcome is a tool that ran and disagreed with the code: the non-zero
+// exit every QA tool uses for "I found something", next to a report that says what.
+func (o QaToolOutcome) Lint() bool { return o.ExitCode != 0 && o.ReportErr == nil && o.Findings > 0 }
+
 // Broken reports whether the tool could not do its job at all: it exited non-zero without
 // producing a single finding, or produced something unreadable. That is an installation or
 // configuration problem — a missing binary, an unparsable phpstan.neon, a failed cache warmup —
 // and not a verdict about the code under analysis.
-func (o qaToolOutcome) Lint() bool { return o.ExitCode != 0 && o.ReportErr == nil && o.Findings > 0 }
-func (o qaToolOutcome) Broken() bool {
+func (o QaToolOutcome) Broken() bool {
 	return o.ExitCode != 0 && (o.ReportErr != nil || o.Findings == 0)
 }
 
@@ -352,13 +352,13 @@ func (o qaToolOutcome) Broken() bool {
 // The status files are the index rather than the reports: a tool that crashed before writing
 // anything still has a status, while a report file alone cannot say whether the tool succeeded.
 // An empty report is zero findings — that is what a clean tool writes.
-func ReadQaOutcomes(rawDir string) ([]qaToolOutcome, error) {
+func ReadQaOutcomes(rawDir string) ([]QaToolOutcome, error) {
 	entries, err := os.ReadDir(rawDir)
 	if err != nil {
 		return nil, fmt.Errorf("could not read the raw QA reports in %s: %w", rawDir, err)
 	}
 
-	var outcomes []qaToolOutcome
+	var outcomes []QaToolOutcome
 	prefix := qatools.StatusFile + "-"
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasPrefix(entry.Name(), prefix) {
@@ -366,7 +366,7 @@ func ReadQaOutcomes(rawDir string) ([]qaToolOutcome, error) {
 		}
 		tool := strings.TrimPrefix(entry.Name(), prefix)
 
-		outcome := qaToolOutcome{Tool: tool}
+		outcome := QaToolOutcome{Tool: tool}
 		data, err := os.ReadFile(filepath.Join(rawDir, entry.Name()))
 		if err != nil {
 			return nil, fmt.Errorf("could not read the status of %s: %w", tool, err)

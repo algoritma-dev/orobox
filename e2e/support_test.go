@@ -392,7 +392,7 @@ func TestReadQaOutcomesSeparatesFindingsFromToolsThatCouldNotRun(t *testing.T) {
 		t.Fatalf("got %d outcomes, want 4: %+v", len(outcomes), outcomes)
 	}
 
-	byTool := map[string]qaToolOutcome{}
+	byTool := map[string]QaToolOutcome{}
 	for _, o := range outcomes {
 		byTool[o.Tool] = o
 	}
