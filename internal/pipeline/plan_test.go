@@ -871,6 +871,70 @@ func TestTestDatabaseLadderHasThreeRungs(t *testing.T) {
 	}
 }
 
+// The two cache rungs above it are volumes a GitHub runner creates empty with the job, so on CI
+// the seed the runtime image carries is the only one that can ever hit. Without this rung every
+// run paid for a full oro:install.
+func TestTestDatabaseLadderSeedsFromTheImageDump(t *testing.T) {
+	script := joined(New(testConf("7.0", true), functionalStage(), "repo").Test.Commands)
+
+	seed := config.SeedDumpPath(config.PostgresMajor(config.GetVersionsForOro("7.0").Postgres))
+	if !strings.Contains(script, "restore_dump "+seed) {
+		t.Fatalf("the ladder never restores the image seed %q: %s", seed, script)
+	}
+
+	// Last resort but one: an install is what a run falls back to, never what it prefers.
+	seedIndex := strings.Index(script, "restore_dump "+seed)
+	installIndex := strings.Index(script, "oro:install")
+	if installIndex < 0 || seedIndex > installIndex {
+		t.Errorf("the image seed is tried after the install: seed=%d install=%d", seedIndex, installIndex)
+	}
+
+	// The dump is read from the image and never written back to it.
+	if strings.Contains(script, "gzip -c > "+config.SeedDir) {
+		t.Error("the ladder writes into the image seed directory")
+	}
+}
+
+// The dump the image carries is named after the Postgres major that wrote it, and the step talks
+// to the service pinned for its Oro version. Reading the two from different places is how a run
+// ends up restoring a dump its server cannot read.
+func TestTestDatabaseSeedMatchesTheServiceMajor(t *testing.T) {
+	for _, oroVersion := range config.SupportedOroVersions {
+		major := config.PostgresMajor(config.GetVersionsForOro(oroVersion).Postgres)
+		script := joined(New(testConf(oroVersion, true), functionalStage(), "repo").Test.Commands)
+
+		if want := config.SeedDumpPath(major); !strings.Contains(script, want) {
+			t.Errorf("Oro %s runs Postgres %s but does not look for %q", oroVersion, major, want)
+		}
+	}
+}
+
+// The QA database is a cache volume too, so on CI it is empty on every run and "rebuild" is the
+// path CI always takes. Restoring the image dump there replaces the same six-minute install.
+func TestQaWarmupSeedsFromTheImageDump(t *testing.T) {
+	qa := joined(New(testConf("7.0", true), testStage(), "repo").QA.Commands)
+
+	seed := config.SeedDumpPath(config.PostgresMajor(config.GetVersionsForOro("7.0").Postgres))
+	for _, want := range []string{
+		"gunzip -c " + seed,
+		"psql -h " + qaDBService,
+		"oro:platform:update --force --env=test",
+	} {
+		if !strings.Contains(qa, want) {
+			t.Errorf("QA script is missing %q: %s", want, qa)
+		}
+	}
+
+	// Every way the seed can fail has to end in the install that was there before it, or a
+	// missing dump turns a slow run into a broken one.
+	if !strings.Contains(qa, "if ! seed_install; then") {
+		t.Errorf("the QA seed has no fallback to oro:install: %s", qa)
+	}
+	if !strings.Contains(qa, "php bin/console oro:install --env=test --no-interaction --drop-database --skip-translations") {
+		t.Errorf("the QA fallback install is gone: %s", qa)
+	}
+}
+
 func TestQaWarmupUpdatesInsteadOfReinstallingWhenStale(t *testing.T) {
 	qa := joined(New(testConf("6.1", true), testStage(), "repo").QA.Commands)
 

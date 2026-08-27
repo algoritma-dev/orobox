@@ -273,6 +273,7 @@ func EnsureDockerCompose() bool {
 		WebsocketBackendPort    string
 		WebsocketFrontendPort   string
 		SSHAgentSocket          string
+		SeedDumpPath            string
 	}{
 		Type:                    viper.GetString("type"),
 		InternalDir:             internalDir,
@@ -364,6 +365,10 @@ func EnsureDockerCompose() bool {
 	data.PnpmVersion = versions.PNPM
 	data.PostgresVersion = versions.Postgres
 	data.Postgres = true
+	// Rendered into the entrypoint so the install step knows where to look for the dump the
+	// image was built with. The name carries the Postgres major, so an image whose seed was
+	// dumped by another server simply has no file at this path and the install runs as before.
+	data.SeedDumpPath = config.SeedDumpPath(config.PostgresMajor(versions.Postgres))
 
 	data.RabbitMQ = viper.GetBool("services.rabbitmq")
 	if data.RabbitMQ {

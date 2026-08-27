@@ -612,16 +612,42 @@ func qaCaches(suffix string) []Cache {
 // update fails, which is not the same judgement the test step makes: there the database was
 // restored from a dump, so a failure is the branch's migrations being wrong, while here it comes
 // from a Postgres data volume that can have drifted from the var/cache volume holding the stamp.
-func qaWarmupCommand() string {
+//
+// The full install itself has a cheaper form: when the runtime image carries a dump of an already
+// installed Oro, the database is restored from it and reconciled with oro:platform:update instead
+// of being built by oro:install. It is the same substitution the test step's third rung makes, and
+// it matters for the same reason — the QA database lives on a cache volume that a CI runner
+// creates empty on every run, so "rebuild" is what CI does every time rather than rarely.
+//
+// Every way the seed can fail — no dump for this Postgres major, no client package, a dump that
+// does not restore, an update that does not reconcile — falls back to the install that was there
+// before, after emptying the schema the failed attempt may have half-written. A seed that does not
+// work costs time; it must not cost a run.
+func qaWarmupCommand(postgresVersion string) string {
+	major := postgresMajor(postgresVersion)
 	return fmt.Sprintf(`# Preparing the QA cache: Oro install and warmed test cache
 set -e
 stamp=%[1]s/.orobox-qa-fingerprint
 %[7]s
+seed_install() {
+  if [ -n "$OROBOX_NO_CACHE" ]; then return 1; fi
+  if [ ! -f %[8]s ]; then return 1; fi
+  if ! command -v psql >/dev/null 2>&1; then
+    apk add --no-cache postgresql%[9]s-client >/dev/null 2>&1 || apk add --no-cache postgresql-client >/dev/null 2>&1 || return 1
+  fi
+  echo 'Seeding the QA database from the dump the runtime image carries.'
+  %[6]s
+  export PGPASSWORD=%[12]s
+  gunzip -c %[8]s | psql -h %[10]s -U %[11]s -d %[13]s -v ON_ERROR_STOP=1 >/dev/null || return 1
+  php bin/console oro:platform:update --force --env=test --timeout=0 --skip-download-translations --skip-translations || return 1
+}
 full_install() {
   rm -rf %[4]s "$stamp"
   %[5]s
-  %[6]s
-  php bin/console oro:install --env=test --no-interaction --drop-database --skip-translations
+  if ! seed_install; then
+    %[6]s
+    php bin/console oro:install --env=test --no-interaction --drop-database --skip-translations
+  fi
   php bin/console cache:warmup --env=test
   if [ -n "$fingerprint" ]; then
     printf '%%s' "$fingerprint" > "$stamp"
@@ -645,7 +671,9 @@ echo 'Rebuilding the QA cache: installing Oro and warming the test cache. Later 
 full_install`,
 		qatools.CacheVolumeDir(), qatools.ContainerXMLPath(qatools.EnvTest), qatools.SymfonyConfigDir(qatools.EnvTest),
 		qatools.CacheDir(qatools.EnvTest), oroWritableDirsCommand(), qaDatabaseResetCommand(),
-		sourceFingerprintCommand("the QA cache will be rebuilt and not cached"))
+		sourceFingerprintCommand("the QA cache will be rebuilt and not cached"),
+		config.SeedDumpPath(major), major,
+		qaDBService, testDBUser, testDBPassword, qaDBName)
 }
 
 // sourceFingerprintCommand computes the fingerprint the QA and test caches are keyed on —
@@ -770,7 +798,7 @@ func (p *Plan) qaCommands(oroVersion string) []string {
 		commands = append(commands, qatools.TwigConfigScript())
 	}
 	if plan.NeedsPhpstan {
-		commands = append(commands, qaWarmupCommand())
+		commands = append(commands, qaWarmupCommand(config.GetVersionsForOro(oroVersion).Postgres))
 	}
 
 	var enabled []qatools.Tool
@@ -840,6 +868,15 @@ const (
 	testDBBaseDumpFile = testDBBaseCacheDir + "/dump.sql.gz"
 )
 
+// testDBSeedDumpFile is the dump the runtime image was built with: an OroCommerce installed for
+// this image's Oro version and nothing else. It is the last rung before a full install, and the
+// only one that is there on a runner with no history at all, which is what every GitHub-hosted
+// job is: the Dagger engine and its cache volumes are created and destroyed with the job, so both
+// cache rungs above miss on every single CI run.
+func testDBSeedDumpFile(postgresVersion string) string {
+	return config.SeedDumpPath(postgresMajor(postgresVersion))
+}
+
 // testCaches mounts the database dump for a plan that installs Oro. A run that never touches a
 // schema mounts nothing and pays nothing. When a base scope is given, its dump is mounted
 // alongside so a scope with no dump of its own can start from it instead of from a full install.
@@ -860,8 +897,8 @@ func testCaches(preparesDatabase bool, suffix, baseSuffix string) []Cache {
 	return caches
 }
 
-// testDatabaseCommand restores the cached Oro install, seeds one from the base scope, or performs
-// one and caches it — in that order.
+// testDatabaseCommand restores the cached Oro install, seeds one from the base scope, seeds one
+// from the dump the runtime image carries, or performs one and caches it — in that order.
 //
 // The fingerprint covers composer.lock and every migration file, which is what decides the schema,
 // so a normal commit restores and only a dependency or migration change pays for anything more.
@@ -874,6 +911,13 @@ func testCaches(preparesDatabase bool, suffix, baseSuffix string) []Cache {
 // migrations, because the database it runs against came from a dump and not from a volume of
 // unknown provenance. The result is cached under the branch's own key, so the second pipeline on
 // that branch takes the first rung.
+//
+// The third rung is what makes a runner with no history cheap, which on GitHub is every runner:
+// both cache volumes above are created empty with the job, so before this rung existed every CI
+// run paid for a full oro:install. The image dump is an install of the same Oro version with
+// nothing on top, so what oro:platform:update applies here is the whole project — its own
+// migrations and whatever its dependencies add — rather than one branch's delta. That is still
+// far less work than installing, and it is the same reconciliation the two rungs above run.
 //
 // Both restoring rungs end with oro:platform:update, and that is not only about migrations. A dump
 // carries the schema and the oro_entity_config rows that describe the extend fields, but none of
@@ -947,6 +991,14 @@ if [ -z "$OROBOX_NO_CACHE" ] && [ -f %[9]s ]; then
   save_dump
   exit 0
 fi
+if [ -z "$OROBOX_NO_CACHE" ] && [ -f %[11]s ]; then
+  echo 'Seeding the test database from the dump the runtime image carries.'
+  restore_dump %[11]s
+  echo 'Applying the migrations this project adds on top of the image dump.'
+  rebuild
+  save_dump
+  exit 0
+fi
 echo 'Installing Oro for the test suites and caching the result. Later runs restore the dump.'
 %[3]s
 php bin/console oro:install --no-interaction --env=test --skip-translations
@@ -954,16 +1006,17 @@ save_dump`,
 		testDBDumpFile, testDBStampFile, oroWritableDirsCommand(),
 		testDBService, testDBUser, testDBPassword, testDBName, major,
 		testDBBaseDumpFile,
-		sourceFingerprintCommand("the cached test database will be rebuilt and not cached"))
+		sourceFingerprintCommand("the cached test database will be rebuilt and not cached"),
+		testDBSeedDumpFile(postgresVersion))
 }
 
 // postgresMajor is the major version of a pinned image tag: "16.1-alpine" is 16. It names the
 // Alpine client package, and the client must not be newer than the server it talks to.
+//
+// The same major also names the seed dump the runtime image carries, so the two readings must
+// agree: they share config.PostgresMajor rather than each keeping a copy of the rule.
 func postgresMajor(version string) string {
-	if idx := strings.IndexAny(version, ".-"); idx >= 0 {
-		return version[:idx]
-	}
-	return version
+	return config.PostgresMajor(version)
 }
 
 // dsn builds the Doctrine URL for one of the pipeline's Postgres services. Both databases use

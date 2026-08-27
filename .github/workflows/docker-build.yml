@@ -70,14 +70,145 @@ jobs:
           cp .orobox/docker-entrypoint.sh build-context/
           cp .orobox/init-db.sql build-context/
 
-      - name: Build and push
+      # Built into the local daemon rather than pushed: the seed bake below has to run *this*
+      # image, and the push happens afterwards from the thin layer that adds the dump.
+      - name: Build runtime image
         uses: docker/build-push-action@v5
         with:
           context: build-context
           file: build-context/Dockerfile
-          push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/orobox:${{ matrix.oro-version }}-${{ matrix.type }}-latest
+          load: true
+          tags: orobox-runtime:local
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
             MEMORY_LIMIT=2048M
+
+      # Installs OroCommerce once, here, and keeps the resulting database as a dump inside the
+      # image. Every consumer — `orobox init`, the QA cache, the functional test database —
+      # restores it and reconciles the schema with oro:platform:update instead of paying for an
+      # oro:install of its own. On the e2e matrix that install costs about five minutes in init
+      # and six in each of the two pipeline steps, on every run, because a GitHub runner starts
+      # with every cache empty.
+      #
+      # Best effort on purpose: a bake that fails must not stop the image from being published.
+      # It leaves no dump behind, every consumer finds no file at the seed path, and the run
+      # costs exactly what it cost before this step existed. The warning is what makes that
+      # visible instead of silent.
+      - name: Bake the installed database into the image
+        id: seed
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Read from the rendered .env rather than restated here, so the identity below and the
+          # options the entrypoint would have passed to oro:install cannot drift apart.
+          env_val() { grep -E "^$1=" .orobox/.env | head -1 | cut -d= -f2- | tr -d '"'; }
+
+          PG_VER="$(env_val ORO_PG_VER)"
+          PG_MAJOR="${PG_VER%%.*}"
+          echo "Postgres $PG_VER (major $PG_MAJOR)"
+
+          # Same resolution `orobox init` performs: the newest release tag under the X.Y series,
+          # ignoring pre-releases, falling back to the series itself when there is no tag.
+          ORO_REPO=https://github.com/oroinc/orocommerce-application.git
+          ORO_TAG="$(git ls-remote --tags --refs "$ORO_REPO" \
+            | sed 's#.*refs/tags/##' \
+            | grep -E "^${{ matrix.oro-version }}(\.[0-9]+)*$" \
+            | sort -V | tail -1)"
+          ORO_TAG="${ORO_TAG:-${{ matrix.oro-version }}}"
+          echo "Installing OroCommerce $ORO_TAG"
+
+          docker network create seed-net
+          docker run -d --name seed-db --network seed-net \
+            -e POSTGRES_DB=oro_db -e POSTGRES_USER=oro_db_user -e POSTGRES_PASSWORD=oro_db_pass \
+            "postgres:${PG_VER}"
+
+          for _ in $(seq 1 60); do
+            if docker exec seed-db pg_isready -U oro_db_user -d oro_db >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          docker exec seed-db psql -U oro_db_user -d oro_db -v ON_ERROR_STOP=1 \
+            -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"' \
+            -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm'
+
+          # Only Postgres is up, so the DSNs are the ones orobox renders when Redis, RabbitMQ and
+          # Elasticsearch are all off. The install is the same one the pipeline performs for its
+          # own database: no sample data, no translations to download.
+          docker run --rm --network seed-net --user root \
+            -e ORO_ENV=prod -e APP_ENV=prod \
+            -e COMPOSER_ALLOW_SUPERUSER=1 -e COMPOSER_PROCESS_TIMEOUT=0 \
+            -e COMPOSER_AUTH="{\"github-oauth\":{\"github.com\":\"${GITHUB_TOKEN}\"}}" \
+            -e ORO_DB_HOST=seed-db -e ORO_DB_PORT=5432 -e ORO_DB_NAME=oro_db \
+            -e ORO_DB_USER=oro_db_user -e ORO_DB_PASSWORD=oro_db_pass \
+            -e ORO_DB_DSN="postgres://oro_db_user:oro_db_pass@seed-db:5432/oro_db?sslmode=disable&charset=utf8&serverVersion=${PG_VER}" \
+            -e ORO_APP_PROTOCOL=http -e ORO_APP_DOMAIN=localhost -e ORO_APP_URL=http://localhost/ \
+            -e ORO_MQ_DSN=dbal: -e ORO_SESSION_DSN=native: \
+            -e ORO_SEARCH_ENGINE_DSN='orm:?prefix=oro_search' \
+            -e ORO_WEBSITE_SEARCH_ENGINE_DSN='orm:?prefix=oro_website_search' \
+            -e ORO_TAG="$ORO_TAG" -e ORO_REPO="$ORO_REPO" \
+            -e ORO_USER_NAME="$(env_val ORO_USER_NAME)" \
+            -e ORO_USER_PASSWORD="$(env_val ORO_USER_PASSWORD)" \
+            -e ORO_USER_EMAIL="$(env_val ORO_USER_EMAIL)" \
+            -e ORO_USER_FIRSTNAME="$(env_val ORO_USER_FIRSTNAME)" \
+            -e ORO_USER_LASTNAME="$(env_val ORO_USER_LASTNAME)" \
+            -e ORO_ORGANIZATION_NAME="$(env_val ORO_ORGANIZATION_NAME)" \
+            -e ORO_LANGUAGE="$(env_val ORO_LANGUAGE)" \
+            -e ORO_FORMATTING_CODE="$(env_val ORO_FORMATTING_CODE)" \
+            orobox-runtime:local bash -c '
+              set -e
+              git clone -b "$ORO_TAG" --depth 1 "$ORO_REPO" /tmp/oro-app
+              cp -rf /tmp/oro-app/. .
+              rm -rf /tmp/oro-app
+              composer install --no-interaction --no-progress
+              mkdir -p var/data var/cache var/logs public/uploads public/media/cache
+              php bin/console oro:install --no-interaction --sample-data=n --skip-translations \
+                --application-url=http://localhost/ \
+                --organization-name="$ORO_ORGANIZATION_NAME" \
+                --user-name="$ORO_USER_NAME" --user-email="$ORO_USER_EMAIL" \
+                --user-firstname="$ORO_USER_FIRSTNAME" --user-lastname="$ORO_USER_LASTNAME" \
+                --user-password="$ORO_USER_PASSWORD" \
+                --language="$ORO_LANGUAGE" --formatting-code="$ORO_FORMATTING_CODE"
+            '
+
+          mkdir -p seed-context
+          docker exec seed-db pg_dump -U oro_db_user --no-owner --no-privileges oro_db \
+            | gzip -c > "seed-context/dump-pg${PG_MAJOR}.sql.gz"
+
+          # The identity the entrypoint compares against before reusing the dump: an install that
+          # asks for a different administrator or locale gets its own oro:install instead of a
+          # database that quietly disagrees with the options it was given. Field order must match
+          # seed_identity() in docker-entrypoint.sh.
+          printf '%s|%s|%s|%s|%s|%s|%s|%s' \
+            "$(env_val ORO_USER_NAME)" "$(env_val ORO_USER_PASSWORD)" "$(env_val ORO_USER_EMAIL)" \
+            "$(env_val ORO_USER_FIRSTNAME)" "$(env_val ORO_USER_LASTNAME)" \
+            "$(env_val ORO_ORGANIZATION_NAME)" "$(env_val ORO_LANGUAGE)" "$(env_val ORO_FORMATTING_CODE)" \
+            > "seed-context/dump-pg${PG_MAJOR}.identity"
+
+          ls -lh seed-context
+          echo "pg_major=${PG_MAJOR}" >> "$GITHUB_OUTPUT"
+
+      - name: Report a missing seed
+        if: steps.seed.outcome == 'failure'
+        run: echo "::warning::The database bake failed for ${{ matrix.oro-version }}-${{ matrix.type }}; the image is published without a seed and every install will run oro:install from scratch."
+
+      - name: Push
+        env:
+          TAG: ${{ secrets.DOCKERHUB_USERNAME }}/orobox:${{ matrix.oro-version }}-${{ matrix.type }}-latest
+          PG_MAJOR: ${{ steps.seed.outputs.pg_major }}
+        run: |
+          set -euo pipefail
+          if [ -n "${PG_MAJOR:-}" ] && [ -f "seed-context/dump-pg${PG_MAJOR}.sql.gz" ]; then
+            # Two instructions on top of the runtime image, so the seed never invalidates any of
+            # the layers the build cache holds.
+            cat > seed-context/Dockerfile <<EOF
+          FROM orobox-runtime:local
+          COPY dump-pg${PG_MAJOR}.sql.gz dump-pg${PG_MAJOR}.identity /opt/orobox/seed/
+          EOF
+            docker build -t "$TAG" -f seed-context/Dockerfile seed-context
+          else
+            docker tag orobox-runtime:local "$TAG"
+          fi
+          docker push "$TAG"

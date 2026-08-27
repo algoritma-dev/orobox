@@ -34,6 +34,12 @@ e2e: build
 # from GetVersionsForOro(oro), so this is how to publish a PHP-version change.
 # Rendering runs in a throwaway dir so the repo working tree stays clean.
 # Requires `docker login` beforehand when push=true (the default).
+#
+# This builds no seed database: that bake lives in docker-build.yml, because it installs
+# OroCommerce against a throwaway Postgres and takes minutes. An image pushed from here is
+# therefore seedless, and every install against it runs oro:install from scratch — fine for
+# testing a Dockerfile change, not what should stay on a `-latest` tag. Re-run the CI workflow
+# afterwards to put the seed back.
 docker-image: build
 	@ORO="$(oro)"; TYPE="$(type)"; TAG="$(DOCKER_REPO):$$ORO-$$TYPE-latest"; \
 	CTX="$$(mktemp -d)"; trap 'rm -rf "$$CTX"' EXIT; \

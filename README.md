@@ -233,6 +233,22 @@ Options:
 - `--bundle-namespace`, `-n`: Bundle namespace (e.g., "MyVendor/Bundle/MyBundle").
 - `--type`, `-t`: Installation type — `bundle`, `project` or `demo`. If omitted, `init` prompts interactively (default `bundle`).
 
+#### Pre-installed database
+
+Published Orobox images carry a dump of an OroCommerce already installed for their own version.
+Instead of running `oro:install`, `init` restores that dump and reconciles the schema with
+`oro:platform:update`, which reaches the same database in roughly a third of the time. The same
+dump is the last resort of the QA cache and of the functional test database, so a CI runner — where
+every cache starts empty — no longer pays for a full install on every run.
+
+The dump holds no sample data. When `ORO_SAMPLE_DATA=y` (the default in `.env`) the demo fixtures
+are loaded on top of the restored database.
+
+The dump is only used when the install asks for the administrator, organization and locale the
+image was built with; anything else gets its own `oro:install`. So does an image built without a
+seed, a PostgreSQL major that did not write the dump, and any restore that does not complete.
+Set `ORO_NO_SEED=1` to skip the dump and always install from scratch.
+
 ### 2. Start Environment (`up`)
 Starts Docker containers and configures OroCommerce.
 ```bash
