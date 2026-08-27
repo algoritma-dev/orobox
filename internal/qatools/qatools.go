@@ -104,6 +104,12 @@ type Tool struct {
 	// ReportEnv names the environment variable that tells the tool where to write its report, for
 	// the tools that write it themselves rather than to stdout. Empty for the rest.
 	ReportEnv string
+	// SkipUnless is an optional shell test guarding the whole invocation. When it fails the tool
+	// is not run and is recorded as a pass with an empty report, because there is nothing for it
+	// to check: the tools it guards are configured by a file OroCommerce ships, and not every Oro
+	// version ships every one of them. Only knowable inside the container, which is why it is a
+	// shell test and not a bool.
+	SkipUnless string
 }
 
 // reportEnvByTool lists the tools whose GitLab formatter writes the document itself, to the file
@@ -263,9 +269,15 @@ func Tools(opts ToolsOptions) []Tool {
 		{Name: "rector", Args: rectorArgs, WorkDir: oroRoot, Setup: rectorConfig.Setup},
 		{Name: "php-cs-fixer", Args: phpCSFixerArgs, Setup: phpCSFixerConfig.Setup},
 		{Name: "twig-cs-fixer", Args: twigArgs, Setup: twigCSFixerConfig.Setup},
-		{Name: "eslint", Args: eslintArgs, Setup: eslintConfig.Setup},
-		{Name: "stylelint", Args: stylelintArgs, Setup: stylelintConfig.Setup},
-		{Name: "stylelint-css", Args: stylelintCSSArgs, Setup: stylelintCSSConfig.Setup},
+		// The three JS tools are guarded on their configuration existing. OroCommerce generates
+		// those files at the application root and does not ship the same set in every version —
+		// .stylelintrc-css.yml arrived in 7.0 — and a project install has no stub to fall back
+		// on, since a stub written there would overwrite Oro's own file (see scaffold.QaStubs).
+		// Without the guard stylelint is handed a --config that names nothing, dies with an
+		// uncaught error and writes no report, which grades as a tool that could not run.
+		{Name: "eslint", Args: eslintArgs, Setup: eslintConfig.Setup, SkipUnless: configExists(eslintConfig)},
+		{Name: "stylelint", Args: stylelintArgs, Setup: stylelintConfig.Setup, SkipUnless: configExists(stylelintConfig)},
+		{Name: "stylelint-css", Args: stylelintCSSArgs, Setup: stylelintCSSConfig.Setup, SkipUnless: configExists(stylelintCSSConfig)},
 	}
 
 	if opts.Report != ReportNone {
@@ -276,6 +288,12 @@ func Tools(opts ToolsOptions) []Tool {
 	}
 
 	return tools
+}
+
+// configExists is the shell test behind Tool.SkipUnless: the resolved configuration is a path
+// expression, so whether the file is there is a question only the container can answer.
+func configExists(ref configRef) string {
+	return fmt.Sprintf(`[ -f "%s" ]`, ref.Path)
 }
 
 // insertAfter splits args at index and inserts extra, keeping a fresh backing array so the
@@ -301,6 +319,10 @@ func Script(tools []Tool) string {
 		cmd := strings.Join(t.Args, " ")
 		if t.WorkDir != "" {
 			cmd = fmt.Sprintf("(cd %s && %s)", t.WorkDir, cmd)
+		}
+		if t.SkipUnless != "" {
+			cmd = fmt.Sprintf("{ if %s; then %s; else echo 'skipped: %s has no configuration in this OroCommerce version'; fi; }",
+				t.SkipUnless, cmd, t.Name)
 		}
 		b.WriteString(cmd)
 	}
@@ -368,6 +390,13 @@ func ReportScript(tools []Tool, reportDir string) string {
 			// line the exit code the tool itself would have had, so the per-tool status still says
 			// "this tool did not pass".
 			run = fmt.Sprintf("if %s; then %s; else false; fi", t.Setup, run)
+		}
+
+		// A skipped tool still writes the empty document the caller expects, because a missing
+		// report file is how a tool that could not run at all is told apart from a clean one.
+		if t.SkipUnless != "" {
+			run = fmt.Sprintf("if %s; then %s; else echo 'skipped: %s has no configuration in this OroCommerce version'; printf '[]' > %s; fi",
+				t.SkipUnless, run, t.Name, t.ReportFile)
 		}
 
 		fmt.Fprintf(&b, "%s\ncode=$?\n", run)

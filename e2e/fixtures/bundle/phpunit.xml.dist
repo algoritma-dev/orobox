@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-    `orobox test` points PHPUnit at the bundle's own source root
-    (./bin/simple-phpunit --configuration=<bundle root>), so without this file PHPUnit exits
-    before running anything and the JUnit log it was asked for is never written.
+    `orobox test` points PHPUnit at the bundle's own source root (see the bundle branch of
+    runTestOnCompose, which passes the checkout as the configuration), so without this file
+    PHPUnit exits before running anything and the JUnit log it was asked for is never written.
 
     The bootstrap is the application's autoloader by absolute container path
     (config.OroRootDir): the bundle is installed into the prebuilt application through a path

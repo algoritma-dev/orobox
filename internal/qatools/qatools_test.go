@@ -416,6 +416,42 @@ func TestToolsWithoutReportAreUnchanged(t *testing.T) {
 	}
 }
 
+// TestReportScriptSkipsAToolWhoseConfigurationIsMissing covers the JS tools on an Oro version
+// that does not ship their configuration: .stylelintrc-css.yml only exists from 7.0, and a
+// stylelint handed a --config naming nothing exits non-zero with no report at all, which the
+// grading reads as a tool that could not run.
+func TestReportScriptSkipsAToolWhoseConfigurationIsMissing(t *testing.T) {
+	tools := Tools(ToolsOptions{
+		SourceRoot: config.OroRootDir,
+		Mode:       ModeCheck,
+		Report:     ReportGitLab,
+		ReportDir:  "/reports/qa",
+		OroVersion: "6.0",
+	})
+
+	for _, name := range []string{"eslint", "stylelint", "stylelint-css"} {
+		tool := toolByName(t, tools, name)
+		if tool.SkipUnless == "" {
+			t.Errorf("%s runs unguarded, so a missing configuration fails it instead of skipping it", name)
+			continue
+		}
+		script := ReportScript([]Tool{tool}, "/reports/qa")
+		// The skip still writes the empty document: a report file that is not there is how the
+		// caller tells a tool that never ran from one that found nothing.
+		if !strings.Contains(script, "printf '[]' > /reports/qa/"+name+".json") {
+			t.Errorf("the %s skip writes no empty report:\n%s", name, script)
+		}
+		if !strings.Contains(script, tool.SkipUnless) {
+			t.Errorf("the %s guard is missing from the script:\n%s", name, script)
+		}
+	}
+
+	// PHPStan is configured by a file orobox itself scaffolds, so it is never skipped.
+	if guard := toolByName(t, tools, "phpstan").SkipUnless; guard != "" {
+		t.Errorf("phpstan carries a skip guard %q; its configuration is orobox's own", guard)
+	}
+}
+
 func TestInstallPlanAlwaysCarriesTheGitLabFormatters(t *testing.T) {
 	viper.Set("test.qa.eslint", true)
 	viper.Set("test.qa.stylelint", true)

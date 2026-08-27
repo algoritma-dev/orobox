@@ -26,9 +26,12 @@ Design spec: [`docs/superpowers/specs/2026-08-24-e2e-test-suite-design.md`](../d
   PHP-CS-Fixer and the rest, and the suite learns nothing about them.
 - `test` runs **after** `test-init` (without the test database `orobox test`
   never reaches PHPUnit) and is **narrowed**: one run per suite (`unit`,
-  `functional`), each with `--filter UserTest`, so a handful of Oro's own tests
-  execute instead of the whole OroPlatform/OroCommerce suite, which takes hours
-  and says nothing about orobox. The step is graded from the JUnit report
+  `functional`), each with a filter that matches a handful of tests instead of
+  the whole OroPlatform/OroCommerce suite, which takes hours and says nothing
+  about orobox. The filter differs per install type (`Case.TestFilter`):
+  `UserTest` for a project, which runs Oro's own tests, and `E2ETest` for a
+  bundle, where PHPUnit is pointed at the bundle's own configuration and the
+  only suites that exist are the fixture checkout's. The step is graded from the JUnit report
   (`--report gitlab`), not from the exit code: PHPUnit exits 0 when a filter
   matches nothing, so the report's counts are what separate a real pass from an
   empty run.
@@ -102,6 +105,14 @@ A dedicated `e2e` job in `.github/workflows/ci.yml` runs nightly (cron) and on
 manual `workflow_dispatch`, one job per version (`fail-fast: false`). It does
 **not** run on pull requests — four full installs are too slow to gate merges.
 
+The job archives `E2E_LOG_DIR`, which per case holds one log per orobox
+invocation, the generated compose configuration under `orobox-config/`, and the
+per-tool QA and test files under `reports-raw/` — one status and one report per
+tool, exactly as the tool wrote them. The last one is not redundant with the
+step logs: the Dagger engine renders a step through a progress pane that keeps a
+bounded number of lines, so the tail of a QA step that ran seven tools is
+routinely not in the log at all.
+
 ## Layout
 
 - `support.go` — pure helpers (matrix parsing, config rendering, project-name
@@ -110,4 +121,13 @@ manual `workflow_dispatch`, one job per version (`fail-fast: false`). It does
 - `harness.go` (`//go:build e2e`) — the `Box` harness: isolated workdir, binary
   execution, HTTP checks, guaranteed Docker teardown.
 - `e2e_test.go` (`//go:build e2e`) — the matrix driver and green-path sequence.
-- `fixtures/` — `text/template` `.orobox.yaml` configs for each install type.
+- `fixtures/` — `text/template` `.orobox.yaml` configs for each install type,
+  plus `fixtures/bundle/`, the checkout a bundle case starts from: a
+  `composer.json`, a bundle class and a `phpunit.xml.dist` with a `unit` and a
+  `functional` suite. It is copied into the case working directory before
+  `.orobox.yaml` is written. A bundle checkout is the developer's own
+  repository and orobox never writes its sources, so without it the suite
+  exercised a bundle no developer could have: `orobox init` skipped the
+  `composer require` that installs the bundle into the application,
+  PHP-CS-Fixer aborted with "Unable to find composer.json" and PHPUnit found no
+  configuration and wrote an empty JUnit log for every suite.

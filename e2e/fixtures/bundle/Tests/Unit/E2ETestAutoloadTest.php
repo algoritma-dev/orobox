@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Orobox\Bundle\E2ETestBundle\Tests\Unit;
 
-use Orobox\Bundle\E2ETestBundle\E2ETestBundle;
+use Orobox\Bundle\E2ETestBundle\Marker;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -14,8 +14,8 @@ use PHPUnit\Framework\TestCase;
  */
 class E2ETestAutoloadTest extends TestCase
 {
-    public function testTheBundleClassIsAutoloadable(): void
+    public function testTheBundleNamespaceIsAutoloadable(): void
     {
-        self::assertTrue(class_exists(E2ETestBundle::class));
+        self::assertSame(Marker::NAME, Marker::name());
     }
 }
