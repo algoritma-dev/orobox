@@ -117,9 +117,9 @@ var BinaryPaths = map[string]string{
 	"rector":        config.OroRootDir + "/bin/rector",
 	"php-cs-fixer":  config.OroRootDir + "/bin/php-cs-fixer",
 	"twig-cs-fixer": config.OroRootDir + "/bin/twig-cs-fixer",
-	"eslint":        config.OroRootDir + "/node_modules/.bin/eslint",
-	"stylelint":     config.OroRootDir + "/node_modules/.bin/stylelint",
-	"stylelint-css": config.OroRootDir + "/node_modules/.bin/stylelint",
+	"eslint":        config.QaToolsDir + "/node_modules/.bin/eslint",
+	"stylelint":     config.QaToolsDir + "/node_modules/.bin/stylelint",
+	"stylelint-css": config.QaToolsDir + "/node_modules/.bin/stylelint",
 }
 
 // Recursive globs, single-quoted so POSIX sh (no globstar) forwards the raw `**` to the
@@ -158,14 +158,21 @@ func Tools(opts ToolsOptions) []Tool {
 	// No positional path for twig-cs-fixer: a CLI path would override the config's Finder,
 	// which is what discovers bundle templates under src/**/Resources/views.
 	twigArgs := []string{oroRoot + "/bin/twig-cs-fixer", "lint", "--config=" + twigCSFixerConfig.Path}
+	// The linters are addressed by the absolute path they were installed at, never through
+	// `npx`. npx resolves a bare tool name against the working directory's node_modules and
+	// downloads the newest release when it finds nothing there — which is the common case, since
+	// the QA packages live in vendor-bin/qa and the tools run from the source root. That download
+	// ignores the pins in NewInstallPlan: it fetches ESLint 10 and Stylelint 17, both of which
+	// require Node >= 20 and abort with EBADENGINE on the image's Node 18.
 	eslintArgs := []string{
-		"npx", "--yes", "eslint",
+		qaDir + "/node_modules/.bin/eslint",
 		"--resolve-plugins-relative-to", qaDir + "/node_modules",
 		"--config", eslintConfig.Path, "--ignore-path", eslintIgnore.Path,
 		"--quiet", "--no-error-on-unmatched-pattern",
 	}
-	stylelintArgs := []string{"npx", "--yes", "stylelint", scssTarget, "--config", stylelintConfig.Path, "--ignore-path", stylelintIgnore.Path, "--quiet", "--allow-empty-input"}
-	stylelintCSSArgs := []string{"npx", "--yes", "stylelint", cssTarget, "--config", stylelintCSSConfig.Path, "--ignore-path", stylelintCSSIgnore.Path, "--quiet", "--allow-empty-input"}
+	stylelintBin := qaDir + "/node_modules/.bin/stylelint"
+	stylelintArgs := []string{stylelintBin, scssTarget, "--config", stylelintConfig.Path, "--ignore-path", stylelintIgnore.Path, "--quiet", "--allow-empty-input"}
+	stylelintCSSArgs := []string{stylelintBin, cssTarget, "--config", stylelintCSSConfig.Path, "--ignore-path", stylelintCSSIgnore.Path, "--quiet", "--allow-empty-input"}
 
 	switch mode {
 	case ModeFix:

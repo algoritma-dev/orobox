@@ -345,7 +345,7 @@ func TestPlanQAStageRespectsDisabledTools(t *testing.T) {
 	viper.Set("test.qa.stylelint", false)
 
 	qa := joined(New(testConf("6.1", true), testStage(), "repo").QA.Commands)
-	if strings.Contains(qa, "npx --yes eslint") || strings.Contains(qa, "npx --yes stylelint") {
+	if strings.Contains(qa, "/.bin/eslint") || strings.Contains(qa, "/.bin/stylelint") {
 		t.Errorf("disabled JS tools still run: %s", qa)
 	}
 	if !strings.Contains(qa, "bin/phpstan") {
