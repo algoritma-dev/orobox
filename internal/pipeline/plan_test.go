@@ -935,6 +935,46 @@ func TestQaWarmupSeedsFromTheImageDump(t *testing.T) {
 	}
 }
 
+func TestQaWarmupDropsTheTestCacheBetweenTheRestoreAndTheUpdate(t *testing.T) {
+	qa := joined(New(testConf("7.0", true), testStage(), "repo").QA.Commands)
+
+	// The database reset runs through bin/console, which warms var/cache/test against the empty
+	// database it ran against. The dump then replaces that database, so the cache describes a
+	// database that no longer exists and oro:platform:update reasons from it — on Oro 7.0 that
+	// surfaced as "Circular reference detected for service doctrine.orm.default_entity_manager".
+	restore := strings.Index(qa, "gunzip -c "+config.SeedDumpPath(config.PostgresMajor(config.GetVersionsForOro("7.0").Postgres)))
+	drop := strings.Index(qa, "rm -rf "+qatools.CacheDir(qatools.EnvTest)+"\n  php bin/console oro:platform:update")
+	if restore < 0 || drop < 0 {
+		t.Fatalf("the seed no longer restores the dump and drops the test cache before updating: %s", qa)
+	}
+	if drop < restore {
+		t.Errorf("the test cache is dropped before the restore, so the update still boots on it: %s", qa)
+	}
+}
+
+func TestPipelineDatabasesCanDropAnInstalledSchema(t *testing.T) {
+	// DROP SCHEMA public CASCADE takes one lock per object and holds them all to the end of the
+	// transaction, so on an installed Oro the default 64 locks per transaction is not enough:
+	// Postgres answers "out of shared memory". The compose stack raises the same setting.
+	want := "max_locks_per_transaction=1024"
+
+	for name, stage := range map[string]config.StageConfig{"qa": testStage(), "test": functionalStage()} {
+		p := New(testConf("7.0", true), stage, "repo")
+		services := p.QA.Services
+		if name == "test" {
+			services = p.Test.Services
+		}
+
+		db := services[0]
+		if !strings.Contains(strings.Join(db.Args, " "), want) {
+			t.Errorf("%s database %q does not raise the lock limit: %v", name, db.Name, db.Args)
+		}
+		if len(db.Args) == 0 || db.Args[0] != "postgres" {
+			t.Errorf("%s database args do not start the server: %v", name, db.Args)
+		}
+	}
+}
+
 func TestQaWarmupUpdatesInsteadOfReinstallingWhenStale(t *testing.T) {
 	qa := joined(New(testConf("6.1", true), testStage(), "repo").QA.Commands)
 

@@ -21,6 +21,9 @@ type Service struct {
 	Image string
 	Port  int
 	Env   map[string]string
+	// Args replaces the image's default command, through its entrypoint. Empty leaves the image's
+	// own command in place.
+	Args []string
 	// DataCache makes the service's DataPath survive between pipeline runs, which is what turns
 	// the QA database into a one-off install instead of a per-run one.
 	DataCache string
@@ -567,6 +570,19 @@ func volumeSuffix(oroVersion, scope string) string {
 	return oroVersion + "-" + sanitized
 }
 
+// postgresArgs raises max_locks_per_transaction for the pipeline's databases, the way the compose
+// stack already does for a developer's.
+//
+// A lock is taken per object, held to the end of the transaction, and the default 64 per
+// transaction is what the shared lock table is sized from. `DROP SCHEMA public CASCADE` — how both
+// database resets empty a reused volume — is one transaction over every table, index, sequence and
+// constraint in an installed Oro, which is a five-figure object count on the larger versions. Past
+// the default it fails with `SQLSTATE[53200]: Out of memory: 7 ERROR: out of shared memory`, which
+// is what the Oro 7.0 QA step reported when its seed fell back to a reinstall.
+func postgresArgs() []string {
+	return []string{"postgres", "-c", "max_locks_per_transaction=1024"}
+}
+
 // qaServices is the QA step's own Postgres, with its data directory on a named cache volume.
 // That is what makes the Oro install reusable: the next run finds the schema already there and
 // only has to check the fingerprint.
@@ -575,6 +591,7 @@ func qaServices(suffix, postgresVersion string) []Service {
 		Name:      qaDBService,
 		Image:     "postgres:" + postgresVersion,
 		Port:      5432,
+		Args:      postgresArgs(),
 		DataCache: "orobox-qa-db-" + suffix,
 		DataPath:  "/var/lib/postgresql/data",
 		Env: map[string]string{
@@ -639,6 +656,15 @@ seed_install() {
   %[6]s
   export PGPASSWORD=%[12]s
   gunzip -c %[8]s | psql -h %[10]s -U %[11]s -d %[13]s -v ON_ERROR_STOP=1 >/dev/null || return 1
+  # The reset above runs through bin/console, so it left a warmed var/cache/test describing the
+  # empty database it ran against — the dumped container, the generated extend classes, the
+  # compiled Doctrine metadata. The dump then replaced that database wholesale, and
+  # oro:platform:update boots on top of whatever the cache holds rather than rebuilding it: on
+  # Oro 7.0 that surfaced as "Circular reference detected for service
+  # doctrine.orm.default_entity_manager", a container error with nothing to do with the database
+  # it was handed. The test step drops the same directory for the same reason; see rebuild() in
+  # testDatabaseCommand.
+  rm -rf %[4]s
   php bin/console oro:platform:update --force --env=test --timeout=0 --skip-download-translations --skip-translations || return 1
 }
 full_install() {
@@ -769,11 +795,7 @@ func qaToolCommands(oroVersion string) []string {
 	}
 
 	if plan.NeedsJSTools {
-		jsInstall := fmt.Sprintf("cd %s && %s %s %s", qaDir, plan.JSManager, plan.JSInstallArg, plan.JSSaveDevFlag)
-		if plan.JSManager == "pnpm" {
-			jsInstall += " --ignore-workspace-root-check"
-		}
-		commands = append(commands, jsInstall+" "+strings.Join(plan.JSPackages, " "))
+		commands = append(commands, qatools.JSInstallCommand(plan))
 	}
 
 	return commands
@@ -1108,6 +1130,7 @@ func testServices(conf *config.OroConfig, versions config.OroVersions) []Service
 			Name:  testDBService,
 			Image: "postgres:" + versions.Postgres,
 			Port:  5432,
+			Args:  postgresArgs(),
 			Env: map[string]string{
 				"POSTGRES_DB":       testDBName,
 				"POSTGRES_USER":     testDBUser,

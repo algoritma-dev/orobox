@@ -602,6 +602,16 @@ func (r *runner) service(service Service) *dagger.Service {
 		ctr = ctr.WithMountedCache(service.DataPath, r.client.CacheVolume(service.DataCache),
 			dagger.ContainerWithMountedCacheOpts{Sharing: dagger.CacheSharingModeLocked})
 	}
+	if len(service.Args) > 0 {
+		// UseEntrypoint keeps the image's entrypoint in front of the args, which for the Postgres
+		// image is what runs initdb and the extension script: replacing the command without it
+		// would start a server on an uninitialised data directory.
+		return ctr.WithExposedPort(service.Port).AsService(dagger.ContainerAsServiceOpts{
+			Args:          service.Args,
+			UseEntrypoint: true,
+		})
+	}
+
 	return ctr.WithExposedPort(service.Port).AsService()
 }
 

@@ -147,15 +147,11 @@ func runQaInitCommand(conf config.OroConfig) error {
 		}
 	}
 
-	// 2. Install JS packages in the QA tools namespace directory.
+	// 2. Install JS packages in the QA tools namespace directory. The install runs through the
+	//    shared shell line rather than as a bare exec because where the packages land is decided
+	//    by the manifest that line writes first; see JSInstallCommand.
 	if plan.NeedsJSTools {
-		npmArgs := []string{"exec", "-w", qaToolsDir, "-T", "application", plan.JSManager, plan.JSInstallArg, plan.JSSaveDevFlag}
-		if plan.JSManager == "pnpm" {
-			// pnpm refuses to add deps to a workspace root unless told it's intentional
-			// (ERR_PNPM_ADDING_TO_ROOT). The QA tools dir is such a root.
-			npmArgs = append(npmArgs, "--ignore-workspace-root-check")
-		}
-		npmArgs = append(npmArgs, plan.JSPackages...)
+		npmArgs := []string{"exec", "-T", "application", "sh", "-c", qatools.JSInstallCommand(plan)}
 		if err := docker.RunComposeCommandSilently(fmt.Sprintf("Installing %s QA packages...", strings.ToUpper(plan.JSManager)), npmArgs...); err != nil {
 			utils.PrintError(fmt.Sprintf("Failed to install %s packages: %v", plan.JSManager, err))
 			return err

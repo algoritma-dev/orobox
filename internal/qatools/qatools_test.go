@@ -428,6 +428,65 @@ func TestInstallPlanAlwaysCarriesTheGitLabFormatters(t *testing.T) {
 	}
 }
 
+func TestInstallPlanCarriesTheConfigsOroCommercesEslintrcExtends(t *testing.T) {
+	viper.Set("test.qa.eslint", true)
+	defer viper.Set("test.qa.eslint", nil)
+
+	plan := NewInstallPlan("6.1")
+	packages := strings.Join(plan.JSPackages, " ")
+
+	// OroCommerce's generated .eslintrc.yml extends `google` and `plugin:oro/recommended`, and
+	// that file is the base of every merged ESLint config. Without the packages behind those two
+	// names ESLint exits 2 with "couldn't find the config" before linting a single file.
+	for _, pkg := range []string{"eslint-config-google@~0.14.0", "eslint-plugin-oro@~0.0.3"} {
+		if !strings.Contains(packages, pkg) {
+			t.Errorf("%s is missing from the JS packages: %s", pkg, packages)
+		}
+	}
+}
+
+func TestJSInstallCommandPinsTheInstallToTheQaToolsDir(t *testing.T) {
+	viper.Set("test.qa.eslint", true)
+	viper.Set("test.qa.stylelint", true)
+	defer func() {
+		viper.Set("test.qa.eslint", nil)
+		viper.Set("test.qa.stylelint", nil)
+	}()
+
+	command := JSInstallCommand(NewInstallPlan("6.1"))
+
+	// The manifest is the whole point: without one in the QA tools directory the package manager
+	// installs into the nearest ancestor that has one — the application root — and the binaries
+	// BinaryPaths names never appear.
+	if !strings.Contains(command, config.QaToolsDir+"/package.json") {
+		t.Errorf("the install does not write a manifest in the QA tools dir: %s", command)
+	}
+	if !strings.Contains(command, "cd "+config.QaToolsDir+" && npm install --save-dev") {
+		t.Errorf("the install does not run in the QA tools dir: %s", command)
+	}
+	if !strings.Contains(command, "eslint@^8.57.0") {
+		t.Errorf("the install does not carry the planned packages: %s", command)
+	}
+}
+
+func TestJSToolsResolveBareConfigNamesFromTheQaToolsDir(t *testing.T) {
+	tools := Tools(ToolsOptions{SourceRoot: bundleRoot, AnalyzePath: bundleRoot})
+
+	want := "NODE_PATH=" + config.QaToolsDir + "/node_modules"
+	for _, name := range []string{"eslint", "stylelint", "stylelint-css"} {
+		tool := toolByName(t, tools, name)
+		if tool.Args[0] != want {
+			// A shareable config named in an `extends` list resolves relative to the file naming
+			// it, and OroCommerce's configs live at OroRoot, which has no node_modules of its own
+			// in a pipeline checkout.
+			t.Errorf("%s does not fall back to the QA node_modules: %v", name, tool.Args)
+		}
+		if !strings.Contains(strings.Join(tool.Args, " "), BinaryPaths[name]) {
+			t.Errorf("%s is not invoked through %s: %v", name, BinaryPaths[name], tool.Args)
+		}
+	}
+}
+
 func TestReportScriptRunsEveryToolAndRecordsTheStatus(t *testing.T) {
 	tools := []Tool{
 		{Name: "phpstan", Args: []string{"phpstan", "analyze"}, Setup: "warmup", ReportFile: "/reports/qa/phpstan.json"},

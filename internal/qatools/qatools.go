@@ -164,15 +164,25 @@ func Tools(opts ToolsOptions) []Tool {
 	// the QA packages live in vendor-bin/qa and the tools run from the source root. That download
 	// ignores the pins in NewInstallPlan: it fetches ESLint 10 and Stylelint 17, both of which
 	// require Node >= 20 and abort with EBADENGINE on the image's Node 18.
+	//
+	// NODE_PATH points both linters at the QA node_modules for everything they resolve by bare
+	// name from a config file. Their own `--resolve-plugins-relative-to` (ESLint) covers plugins
+	// only; a shareable config named in an `extends` list is resolved relative to the directory of
+	// the file naming it, and the file naming them is OroCommerce's — .eslintrc.yml at OroRoot
+	// extends `google`, .stylelintrc.yml extends `@oroinc/oro-stylelint-config`. Those packages
+	// are installed in the QA tools directory, and OroRoot has no node_modules of its own in a
+	// pipeline checkout, so without the fallback ESLint dies with "couldn't find the config".
+	nodePath := "NODE_PATH=" + qaDir + "/node_modules"
 	eslintArgs := []string{
+		nodePath,
 		qaDir + "/node_modules/.bin/eslint",
 		"--resolve-plugins-relative-to", qaDir + "/node_modules",
 		"--config", eslintConfig.Path, "--ignore-path", eslintIgnore.Path,
 		"--quiet", "--no-error-on-unmatched-pattern",
 	}
 	stylelintBin := qaDir + "/node_modules/.bin/stylelint"
-	stylelintArgs := []string{stylelintBin, scssTarget, "--config", stylelintConfig.Path, "--ignore-path", stylelintIgnore.Path, "--quiet", "--allow-empty-input"}
-	stylelintCSSArgs := []string{stylelintBin, cssTarget, "--config", stylelintCSSConfig.Path, "--ignore-path", stylelintCSSIgnore.Path, "--quiet", "--allow-empty-input"}
+	stylelintArgs := []string{nodePath, stylelintBin, scssTarget, "--config", stylelintConfig.Path, "--ignore-path", stylelintIgnore.Path, "--quiet", "--allow-empty-input"}
+	stylelintCSSArgs := []string{nodePath, stylelintBin, cssTarget, "--config", stylelintCSSConfig.Path, "--ignore-path", stylelintCSSIgnore.Path, "--quiet", "--allow-empty-input"}
 
 	switch mode {
 	case ModeFix:
@@ -414,8 +424,16 @@ func NewInstallPlan(oroVersion string) InstallPlan {
 	// The ^5.1.0 pin is not cosmetic. eslint-formatter-gitlab 6 and later declare a peer dependency
 	// on eslint >= 9 while this list pins eslint to ^8.57.0, so the unpinned package makes the whole
 	// npm install fail with ERESOLVE — taking the other JS tools down with it.
+	//
+	// eslint-config-google and eslint-plugin-oro are OroCommerce's, not Orobox's choice:
+	// the .eslintrc.yml OroCommerce generates at the application root extends `google` and
+	// `plugin:oro/recommended`, and that file is the base every merged ESLint config layers on.
+	// They are pinned to the constraints OroCommerce's own generated package.json declares, so the
+	// QA run resolves the same ruleset `npm run eslint-oro` would.
 	if needsEslint {
-		plan.JSPackages = append(plan.JSPackages, "eslint@^8.57.0", "eslint-plugin-no-jquery", "eslint-plugin-import", "eslint-formatter-gitlab@^5.1.0")
+		plan.JSPackages = append(plan.JSPackages,
+			"eslint@^8.57.0", "eslint-config-google@~0.14.0", "eslint-plugin-oro@~0.0.3",
+			"eslint-plugin-no-jquery", "eslint-plugin-import", "eslint-formatter-gitlab@^5.1.0")
 	}
 	if needsStylelint {
 		plan.JSPackages = append(plan.JSPackages, "stylelint@^15.11.0", "@oroinc/oro-stylelint-config", "stylelint-formatter-gitlab")
@@ -482,6 +500,35 @@ func ComposerInstallCommand(packages []string) string {
 			`elif [ -f %[2]s ]; then composer bin qa update -W --no-interaction --no-progress && rm -f %[2]s; `+
 			`else composer bin qa install --no-interaction --no-progress; fi`,
 		missing, marker)
+}
+
+// JSInstallCommand returns the shell line that installs the JS tools into the QA tools directory.
+//
+// The manifest it writes first is what pins the install location. npm and pnpm do not install into
+// the working directory, they install into the nearest package root — the first directory up the
+// tree holding a package.json (or a node_modules) — and OroCommerce generates a package.json at
+// the application root. Without a manifest of its own, `cd vendor-bin/qa && npm install` therefore
+// lands the tools in <OroRoot>/node_modules on a developer's stack while landing them in
+// vendor-bin/qa in a pipeline checkout, where the application root has neither file. BinaryPaths
+// and every invocation in Tools address one path, so the other one makes `orobox qa` report every
+// JS tool as not installed and exit before it runs anything.
+//
+// An existing manifest is left alone: a project that committed vendor-bin/qa/package.json pinned
+// the tool versions there on purpose, exactly as ComposerInstallCommand treats the Composer one.
+func JSInstallCommand(plan InstallPlan) string {
+	qaDir := config.QaToolsDir
+	manifest := qaDir + "/package.json"
+
+	install := fmt.Sprintf("cd %s && %s %s %s", qaDir, plan.JSManager, plan.JSInstallArg, plan.JSSaveDevFlag)
+	if plan.JSManager == "pnpm" {
+		// pnpm refuses to add deps to a workspace root unless told it is intentional
+		// (ERR_PNPM_ADDING_TO_ROOT). The QA tools dir is such a root.
+		install += " --ignore-workspace-root-check"
+	}
+
+	return fmt.Sprintf(
+		`mkdir -p %[1]s && { [ -f %[2]s ] || printf '%%s' '{"name":"orobox-qa-tools","private":true}' > %[2]s; } && %[3]s %[4]s`,
+		qaDir, manifest, install, strings.Join(plan.JSPackages, " "))
 }
 
 // ManifestDirtyFile is written into the QA namespace by SharedVendorScript when it changed the
