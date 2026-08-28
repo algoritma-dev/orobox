@@ -453,6 +453,32 @@ func TestPlanTestStageCachesTheOroInstall(t *testing.T) {
 		}
 	}
 
+	// The test-environment dump is tried before the prod one, and without any migration over it:
+	// what follows the restore is the cache regeneration, not oro:platform:update.
+	testDump := strings.Index(test, "dump-test-pg16.sql.gz")
+	prodDump := strings.Index(test, "/dump-pg16.sql.gz")
+	if testDump < 0 || prodDump < 0 || testDump > prodDump {
+		t.Errorf("the test-environment dump must be the rung above the prod dump: %s", test)
+	}
+
+	// Restoring without migrations is only safe when the dump's platform is the project's, so the
+	// rung is gated on the version file the image writes next to the dump.
+	for _, want := range []string{"dump-test-pg16.version", "seed_test_matches_the_project"} {
+		if !strings.Contains(test, want) {
+			t.Errorf("the test-dump rung is not gated on the baked platform version (%q): %s", want, test)
+		}
+	}
+
+	// The install gets one recovery: on Oro 6.0 and 6.1 it stops inside oro:migration:load with
+	// the extend entity cache never generated, and warming it by hand and finishing with
+	// oro:platform:update is what lets the run prepare its database at all.
+	// LastIndex for the warmup: regenerate() runs the same command earlier, over a restored dump.
+	install := strings.Index(test, "oro:install --no-interaction --env=test")
+	warmup := strings.LastIndex(test, "oro:entity-extend:cache:warmup --env=test")
+	if install < 0 || warmup < 0 || warmup < install {
+		t.Errorf("the extend cache warmup must follow the install as its recovery: %s", test)
+	}
+
 	// The client major follows the service's. An unversioned package is whatever the distribution
 	// defaults to, and a newer pg_dump writes settings the pinned server does not recognise.
 	if major := postgresMajor(p.Test.Services[0].Image[len("postgres:"):]); !strings.Contains(test, "postgresql"+major+"-client") {

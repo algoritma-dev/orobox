@@ -164,7 +164,7 @@ jobs:
             -e ORO_MQ_DSN=dbal: -e ORO_SESSION_DSN=native: \
             -e ORO_SEARCH_ENGINE_DSN='orm:?prefix=oro_search' \
             -e ORO_WEBSITE_SEARCH_ENGINE_DSN='orm:?prefix=oro_website_search' \
-            -e ORO_TAG="$ORO_TAG" -e ORO_REPO="$ORO_REPO" \
+            -e ORO_TAG="$ORO_TAG" -e ORO_REPO="$ORO_REPO" -e PG_MAJOR="$PG_MAJOR" \
             -e ORO_USER_NAME="$(env_val ORO_USER_NAME)" \
             -e ORO_USER_PASSWORD="$(env_val ORO_USER_PASSWORD)" \
             -e ORO_USER_EMAIL="$(env_val ORO_USER_EMAIL)" \
@@ -198,6 +198,46 @@ jobs:
                 --user-firstname="$ORO_USER_FIRSTNAME" --user-lastname="$ORO_USER_LASTNAME" \
                 --user-password="$ORO_USER_PASSWORD" \
                 --language="$ORO_LANGUAGE" --formatting-code="$ORO_FORMATTING_CODE"
+
+              # Both dumps are written from in here rather than from the host, because the second
+              # install has to reuse this checkout: the clone and the composer install are the
+              # expensive half of this step and paying for them twice would double it.
+              apk add --no-cache "postgresql${PG_MAJOR}-client" >/dev/null 2>&1 \
+                || apk add --no-cache postgresql-client >/dev/null
+              export PGPASSWORD=oro_db_pass
+              pg_dump -h seed-db -U oro_db_user --no-owner --no-privileges oro_db \
+                | gzip -c > "/out/dump-pg${PG_MAJOR}.sql.gz"
+
+              # The second dump is the same application installed in the test environment, and it
+              # exists because reconciling the prod one towards test is what the pipeline used to
+              # do and what broke: oro:platform:update --env=test replays the unversioned
+              # Tests/Functional/Environment migrations over a schema that never had them, and
+              # UpdateExtendConfigMigration dies with
+              # 'Cannot find entity for "test_extended_entity" table' on Oro 6.0 and 6.1.
+              # Restored as-is, this dump needs no migration at all — only the extend entity
+              # classes regenerated, which live in var/cache and no dump can carry.
+              #
+              # Best effort inside a best-effort step: a test dump that cannot be produced leaves
+              # the prod one in place, and the pipeline falls back to the ladder it used before.
+              psql -h seed-db -U oro_db_user -d oro_db -v ON_ERROR_STOP=1 \
+                -c 'DROP SCHEMA IF EXISTS public CASCADE' \
+                -c 'CREATE SCHEMA public' \
+                -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"' \
+                -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm' >/dev/null || exit 0
+              rm -rf var/cache
+              if ORO_ENV=test APP_ENV=test php bin/console oro:install --no-interaction --env=test \
+                   --sample-data=n --skip-translations \
+                   --application-url=http://localhost/ \
+                   --organization-name="$ORO_ORGANIZATION_NAME" \
+                   --user-name="$ORO_USER_NAME" --user-email="$ORO_USER_EMAIL" \
+                   --user-firstname="$ORO_USER_FIRSTNAME" --user-lastname="$ORO_USER_LASTNAME" \
+                   --user-password="$ORO_USER_PASSWORD" \
+                   --language="$ORO_LANGUAGE" --formatting-code="$ORO_FORMATTING_CODE"; then
+                pg_dump -h seed-db -U oro_db_user --no-owner --no-privileges oro_db \
+                  | gzip -c > "/out/dump-test-pg${PG_MAJOR}.sql.gz"
+              else
+                echo "The test-environment install failed; publishing the prod dump only."
+              fi
             '
 
           # The install is worthless without the version the entrypoint gates on: rather than ship
@@ -206,8 +246,11 @@ jobs:
           mv seed-context/oro-platform.version "seed-context/dump-pg${PG_MAJOR}.version"
           echo "Seeded from OroPlatform $(cat "seed-context/dump-pg${PG_MAJOR}.version")"
 
-          docker exec seed-db pg_dump -U oro_db_user --no-owner --no-privileges oro_db \
-            | gzip -c > "seed-context/dump-pg${PG_MAJOR}.sql.gz"
+          # The test dump gets the same version file: the pipeline restores it without running a
+          # single migration, so it must refuse a dump whose platform is not the project's.
+          if [ -f "seed-context/dump-test-pg${PG_MAJOR}.sql.gz" ]; then
+            cp "seed-context/dump-pg${PG_MAJOR}.version" "seed-context/dump-test-pg${PG_MAJOR}.version"
+          fi
 
           # The identity the entrypoint compares against before reusing the dump: an install that
           # asks for a different administrator or locale gets its own oro:install instead of a
@@ -239,6 +282,13 @@ jobs:
           FROM orobox-runtime:local
           COPY dump-pg${PG_MAJOR}.sql.gz dump-pg${PG_MAJOR}.identity dump-pg${PG_MAJOR}.version /opt/orobox/seed/
           EOF
+            # A separate COPY, and only when the file is there: the test dump is the best-effort
+            # half of a best-effort step, and naming a missing file would fail the whole build.
+            if [ -f "seed-context/dump-test-pg${PG_MAJOR}.sql.gz" ]; then
+              cat >> seed-context/Dockerfile <<EOF
+          COPY dump-test-pg${PG_MAJOR}.sql.gz dump-test-pg${PG_MAJOR}.version /opt/orobox/seed/
+          EOF
+            fi
             docker build -t "$TAG" -f seed-context/Dockerfile seed-context
           else
             docker tag orobox-runtime:local "$TAG"

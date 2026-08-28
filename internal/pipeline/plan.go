@@ -900,6 +900,18 @@ func testDBSeedDumpFile(postgresVersion string) string {
 	return config.SeedDumpPath(postgresMajor(postgresVersion))
 }
 
+// testDBSeedTestDumpFile is the same image dump installed in the test environment. It is the rung
+// above the prod one: same cost to restore, and nothing to migrate afterwards.
+func testDBSeedTestDumpFile(postgresVersion string) string {
+	return config.SeedTestDumpPath(postgresMajor(postgresVersion))
+}
+
+// testDBSeedTestVersionFile names the oro/platform version the test dump was installed from. The
+// image writes it next to the dump, and the rung refuses the dump without it.
+func testDBSeedTestVersionFile(postgresVersion string) string {
+	return strings.TrimSuffix(config.SeedTestDumpPath(postgresMajor(postgresVersion)), ".sql.gz") + ".version"
+}
+
 // testCaches mounts the database dump for a plan that installs Oro. A run that never touches a
 // schema mounts nothing and pays nothing. When a base scope is given, its dump is mounted
 // alongside so a scope with no dump of its own can start from it instead of from a full install.
@@ -1041,6 +1053,57 @@ if [ -z "$OROBOX_NO_CACHE" ] && [ -f %[9]s ]; then
   fi
   echo 'The migrations on top of the base dump failed; falling back to a full install.'
 fi
+# The test dump is restored without running a single migration, so it is only usable when its
+# platform is exactly the project's: an older one would leave the schema short of the migrations
+# in between, with nothing scheduled to apply them. Unlike the prod dump below — which
+# oro:platform:update reconciles, and which therefore only has to be *not newer* — this one has
+# to match. When it does not, the ladder simply carries on to the rung that does reconcile.
+seed_test_matches_the_project() {
+  baked="$(cat %[13]s 2>/dev/null || true)"
+  project="$(php -r '
+    $lock = json_decode((string) @file_get_contents("composer.lock"), true);
+    if (!is_array($lock)) { return; }
+    foreach (array_merge($lock["packages"] ?? [], $lock["packages-dev"] ?? []) as $package) {
+      if (($package["name"] ?? "") === "oro/platform") {
+        echo ltrim((string) ($package["version"] ?? ""), "v");
+        return;
+      }
+    }
+  ' 2>/dev/null)"
+  if [ -z "$baked" ] || [ -z "$project" ]; then return 1; fi
+  if [ "$baked" != "$project" ]; then
+    echo "The image's test database is OroPlatform $baked and this project is $project; skipping that rung."
+    return 1
+  fi
+  return 0
+}
+if [ -z "$OROBOX_NO_CACHE" ] && [ -f %[12]s ] && seed_test_matches_the_project; then
+  echo 'Seeding the test database from the test-environment dump the runtime image carries.'
+  restore_dump %[12]s
+  # No migrations over this dump: it was installed with --env=test, so the schema, the entity
+  # config and everything the unversioned Tests/Functional/Environment migrations produce are
+  # already in it. Only the generated extend entity classes are missing, because those live in
+  # var/cache and no dump carries them — which is exactly what regenerate rebuilds.
+  #
+  # Skipping oro:platform:update here is what keeps this rung off two failures the seeding rung
+  # below still walks into on Oro 6.0 and 6.1: UpdateExtendConfigMigration dying with
+  # 'Cannot find entity for "test_extended_entity" table' when the test migrations run over a
+  # prod dump, and the full install that follows it stopping in WarmUpEntityConfigCacheMigration.
+  if regenerate; then
+    # A project that ships migrations of its own still needs them applied: the image dump is
+    # vanilla OroCommerce for this version and knows nothing about them. Projects without any
+    # stop here, which is the whole point of the rung.
+    if [ -z "$(find src -path '*Migrations*' -type f 2>/dev/null | head -1)" ]; then
+      save_dump
+      exit 0
+    fi
+    if rebuild; then
+      save_dump
+      exit 0
+    fi
+  fi
+  echo 'The test-environment dump could not be reconciled; falling back to the prod dump.'
+fi
 if [ -z "$OROBOX_NO_CACHE" ] && [ -f %[11]s ]; then
   echo 'Seeding the test database from the dump the runtime image carries.'
   restore_dump %[11]s
@@ -1059,13 +1122,45 @@ echo 'Installing Oro for the test suites and caching the result. Later runs rest
 # meant to be, whether it runs after a failed rung or on a database that was only just created.
 reset_schema
 rm -rf var/cache/test
-php bin/console oro:install --no-interaction --env=test --skip-translations
+# The install is allowed one recovery, and only one, because on Oro 6.0 and 6.1 it reliably
+# stops inside oro:migration:load with
+#
+#   The target-entity Extend\Entity\EV_Auth_Status cannot be found in
+#   'Oro\Bundle\UserBundle\Entity\User#auth_status'
+#
+# raised by WarmUpEntityConfigCacheMigration. What is missing at that point is the generated
+# extend entity cache: var/cache/test/oro_entities/Extend/Entity is empty, so Doctrine cannot
+# resolve the enum classes the migration validates. Running the warmup by hand in that same
+# container succeeds, and so does the entity config warmup after it, which is what this does.
+#
+# It is a recovery and not a diagnosis: the same install, in the same image, with the same
+# sources, environment and composer.lock, completes on the compose engine and in a plain
+# docker run of the very same image. Every difference measurable from outside the engine was
+# ruled out one at a time — see the issue for the experiments. Until the cause is known, a run
+# that can finish preparing its database is worth more than one that fails to.
+if ! php bin/console oro:install --no-interaction --env=test --skip-translations; then
+  echo 'The install stopped before the extend entity classes existed; generating them and installing again.'
+  # The warmup needs the schema the failed attempt already loaded, so it runs before the reset
+  # and its output survives it: the classes live in var/cache/test, which the reset does not
+  # touch. The second install then finds them in place and gets past the migration that needs
+  # them.
+  #
+  # It is the install that is repeated, not oro:platform:update: the update assumes an
+  # installation that finished, and against a half-installed database it dies in loadDataStep
+  # with "getDefaultFormattingCodeAndLanguageCode(): Return value must be of type array, false
+  # returned" — oro_config never got its defaults.
+  php bin/console oro:entity-extend:cache:warmup --env=test
+  reset_schema
+  php bin/console oro:install --no-interaction --env=test --skip-translations
+fi
 save_dump`,
 		testDBDumpFile, testDBStampFile, oroWritableDirsCommand(),
 		testDBService, testDBUser, testDBPassword, testDBName, major,
 		testDBBaseDumpFile,
 		sourceFingerprintCommand("the cached test database will be rebuilt and not cached"),
-		testDBSeedDumpFile(postgresVersion))
+		testDBSeedDumpFile(postgresVersion),
+		testDBSeedTestDumpFile(postgresVersion),
+		testDBSeedTestVersionFile(postgresVersion))
 }
 
 // postgresMajor is the major version of a pinned image tag: "16.1-alpine" is 16. It names the
