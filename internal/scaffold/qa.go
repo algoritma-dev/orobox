@@ -24,13 +24,18 @@ type QaStubData struct {
 //
 // __DIR__ is correct for both without a second path mapping: the stub sits at the host source
 // root, which is bound at OroRoot for a project and at OroRoot/bundles/<Namespace> for a bundle.
+//
+// vendor-oro is excluded alongside vendor because a bundle checkout holds OroCommerce's own
+// installed tree under that name, bind-mounted as the container's vendor: a finder that walks it
+// hands the whole platform to tools that run in fix mode, and PHP-CS-Fixer then rewrites Oro's
+// sources under the running application.
 func QaStubDataFor(typeName string) QaStubData {
 	if typeName == config.InstallTypeBundle || typeName == "" {
 		return QaStubData{
 			PhpFinderPath:    "__DIR__",
-			PhpFinderExclude: "\n    ->exclude(['vendor', 'node_modules'])",
+			PhpFinderExclude: "\n    ->exclude(['vendor', 'vendor-oro', 'node_modules'])",
 			TwigPaths:        "[__DIR__]",
-			TwigExclude:      "$finder->exclude(['vendor', 'node_modules']);\n",
+			TwigExclude:      "$finder->exclude(['vendor', 'vendor-oro', 'node_modules']);\n",
 		}
 	}
 

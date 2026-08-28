@@ -208,11 +208,22 @@ func runQaOnCompose(format qatools.Report, baseline string) {
 
 	// Locally the tools may fix what they find; the deploy pipeline runs the same list in
 	// check-only mode.
+	//
+	// A report run is check-only for the same reason the pipeline is: what asked for a report is a
+	// caller that wants to be told what the tree looks like, not one that wants the tree changed
+	// under it. It is also the difference between a survivable run and a broken checkout on a
+	// bundle install, where the analysed tree holds OroCommerce's own vendor-oro: fix mode there
+	// rewrites the platform the running application is served from.
+	mode := qatools.ModeFix
+	if format != qatools.ReportNone {
+		mode = qatools.ModeCheck
+	}
+
 	allTools := qatools.Tools(qatools.ToolsOptions{
 		SourceRoot:  workingDir,
 		AnalyzePath: config.GetQaAnalyzePath(),
 		Env:         env,
-		Mode:        qatools.ModeFix,
+		Mode:        mode,
 		Report:      format,
 		ReportDir:   containerReportDir,
 		Baseline:    baseline,

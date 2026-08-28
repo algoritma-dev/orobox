@@ -153,7 +153,7 @@ func TestRenderQaStubsForBundle(t *testing.T) {
 	if !strings.Contains(body, "->in(__DIR__)") {
 		t.Errorf("bundle .php-cs-fixer.dist.php does not scan __DIR__:\n%s", body)
 	}
-	if !strings.Contains(body, "->exclude(['vendor', 'node_modules'])") {
+	if !strings.Contains(body, "->exclude(['vendor', 'vendor-oro', 'node_modules'])") {
 		t.Errorf("bundle .php-cs-fixer.dist.php does not exclude the installed trees:\n%s", body)
 	}
 
@@ -164,7 +164,7 @@ func TestRenderQaStubsForBundle(t *testing.T) {
 	if !strings.Contains(string(twig), "$finder->in([__DIR__]);") {
 		t.Errorf("bundle .twig-cs-fixer.php does not scan __DIR__:\n%s", twig)
 	}
-	if !strings.Contains(string(twig), "$finder->exclude(['vendor', 'node_modules']);") {
+	if !strings.Contains(string(twig), "$finder->exclude(['vendor', 'vendor-oro', 'node_modules']);") {
 		t.Errorf("bundle .twig-cs-fixer.php does not exclude the installed trees:\n%s", twig)
 	}
 }
