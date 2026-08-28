@@ -136,9 +136,13 @@ jobs:
           echo "Installing OroCommerce $ORO_TAG"
 
           docker network create seed-net
+          # max_locks_per_transaction is raised for the same reason the pipeline raises it on its own
+          # Postgres: DROP SCHEMA CASCADE over an installed OroCommerce takes a lock per object and
+          # runs out of shared memory at the default 64, which is what stopped the test install
+          # here with "out of shared memory / You might need to increase max_locks_per_transaction".
           docker run -d --name seed-db --network seed-net \
             -e POSTGRES_DB=oro_db -e POSTGRES_USER=oro_db_user -e POSTGRES_PASSWORD=oro_db_pass \
-            "postgres:${PG_VER}"
+            "postgres:${PG_VER}" -c max_locks_per_transaction=1024
 
           for _ in $(seq 1 60); do
             if docker exec seed-db pg_isready -U oro_db_user -d oro_db >/dev/null 2>&1; then break; fi
