@@ -152,7 +152,7 @@ jobs:
           # Elasticsearch are all off. The install is the same one the pipeline performs for its
           # own database: no sample data, no translations to download.
           mkdir -p seed-context
-          docker run --rm --network seed-net --user root \
+          docker run -d --name seed-app --network seed-net --user root \
             -v "$PWD/seed-context:/out" \
             -e ORO_ENV=prod -e APP_ENV=prod \
             -e COMPOSER_ALLOW_SUPERUSER=1 -e COMPOSER_PROCESS_TIMEOUT=0 \
@@ -173,7 +173,12 @@ jobs:
             -e ORO_ORGANIZATION_NAME="$(env_val ORO_ORGANIZATION_NAME)" \
             -e ORO_LANGUAGE="$(env_val ORO_LANGUAGE)" \
             -e ORO_FORMATTING_CODE="$(env_val ORO_FORMATTING_CODE)" \
-            orobox-runtime:local bash -c '
+            orobox-runtime:local sleep infinity
+
+          # The install runs through exec rather than as the container command, so the steps that
+          # follow it can reuse this checkout: cloning and composer install are the expensive half
+          # of this step, and a second container would pay for them twice.
+          docker exec -w /var/www/oro seed-app bash -c '
               set -e
               git clone -b "$ORO_TAG" --depth 1 "$ORO_REPO" /tmp/oro-app
               cp -rf /tmp/oro-app/. .
@@ -199,46 +204,55 @@ jobs:
                 --user-password="$ORO_USER_PASSWORD" \
                 --language="$ORO_LANGUAGE" --formatting-code="$ORO_FORMATTING_CODE"
 
-              # Both dumps are written from in here rather than from the host, because the second
-              # install has to reuse this checkout: the clone and the composer install are the
-              # expensive half of this step and paying for them twice would double it.
-              apk add --no-cache "postgresql${PG_MAJOR}-client" >/dev/null 2>&1 \
-                || apk add --no-cache postgresql-client >/dev/null
-              export PGPASSWORD=oro_db_pass
-              pg_dump -h seed-db -U oro_db_user --no-owner --no-privileges oro_db \
-                | gzip -c > "/out/dump-pg${PG_MAJOR}.sql.gz"
+          '
 
-              # The second dump is the same application installed in the test environment, and it
-              # exists because reconciling the prod one towards test is what the pipeline used to
-              # do and what broke: oro:platform:update --env=test replays the unversioned
-              # Tests/Functional/Environment migrations over a schema that never had them, and
-              # UpdateExtendConfigMigration dies with
-              # 'Cannot find entity for "test_extended_entity" table' on Oro 6.0 and 6.1.
-              # Restored as-is, this dump needs no migration at all — only the extend entity
-              # classes regenerated, which live in var/cache and no dump can carry.
-              #
-              # Best effort inside a best-effort step: a test dump that cannot be produced leaves
-              # the prod one in place, and the pipeline falls back to the ladder it used before.
-              psql -h seed-db -U oro_db_user -d oro_db -v ON_ERROR_STOP=1 \
-                -c 'DROP SCHEMA IF EXISTS public CASCADE' \
-                -c 'CREATE SCHEMA public' \
-                -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"' \
-                -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm' >/dev/null || exit 0
-              rm -rf var/cache
-              if ORO_ENV=test APP_ENV=test php bin/console oro:install --no-interaction --env=test \
-                   --sample-data=n --skip-translations \
-                   --application-url=http://localhost/ \
-                   --organization-name="$ORO_ORGANIZATION_NAME" \
-                   --user-name="$ORO_USER_NAME" --user-email="$ORO_USER_EMAIL" \
-                   --user-firstname="$ORO_USER_FIRSTNAME" --user-lastname="$ORO_USER_LASTNAME" \
-                   --user-password="$ORO_USER_PASSWORD" \
-                   --language="$ORO_LANGUAGE" --formatting-code="$ORO_FORMATTING_CODE"; then
-                pg_dump -h seed-db -U oro_db_user --no-owner --no-privileges oro_db \
-                  | gzip -c > "/out/dump-test-pg${PG_MAJOR}.sql.gz"
-              else
-                echo "The test-environment install failed; publishing the prod dump only."
-              fi
-            '
+          # Both dumps are taken with the server's own client, from inside seed-db: the runtime image
+          # ships postgresql18-client, and a dump written by 18 carries settings a 16 server
+          # rejects on restore — the same mismatch SeedDumpPath puts the major in the file name
+          # for. They also run as separate host commands rather than inside the container-side
+          # bash -c: the reset between the two installs needs quoted SQL identifiers, and a single
+          # quote in that script closes it. That is not hypothetical — it truncated this step after
+          # the first dump, and the step still reported success.
+          docker exec seed-db pg_dump -U oro_db_user --no-owner --no-privileges oro_db \
+            | gzip -c > "seed-context/dump-pg${PG_MAJOR}.sql.gz"
+
+          # The second dump is the same application installed in the test environment, and it
+          # exists because reconciling the prod one towards test is what the pipeline used to do
+          # and what broke: oro:platform:update --env=test replays the unversioned
+          # Tests/Functional/Environment migrations over a schema that never had them, and
+          # UpdateExtendConfigMigration dies on the missing entity for the test_extended_entity
+          # table on Oro 6.0 and 6.1. Restored as-is, this dump needs no migration at all — only
+          # the extend entity classes regenerated, which live in var/cache and no dump can carry.
+          #
+          # Best effort inside a best-effort step: if any of it fails the prod dump stays, and the
+          # pipeline falls back to the ladder it used before.
+          # Everything up to the dump sits inside the if: the step runs under set -e, and a failure
+          # out here would skip the pg_major output at the end — which is what the push step reads
+          # to decide whether there is any seed to copy at all. A test dump that cannot be built
+          # must cost the prod one nothing.
+          if docker exec seed-db psql -U oro_db_user -d oro_db -v ON_ERROR_STOP=1 \
+               -c 'DROP SCHEMA IF EXISTS public CASCADE' \
+               -c 'CREATE SCHEMA public' \
+               -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"' \
+               -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm' \
+             && docker exec -w /var/www/oro seed-app rm -rf var/cache \
+             && docker exec -w /var/www/oro -e ORO_ENV=test -e APP_ENV=test seed-app \
+               php bin/console oro:install --no-interaction --env=test --sample-data=n \
+                 --skip-translations --application-url=http://localhost/ \
+                 --organization-name="$(env_val ORO_ORGANIZATION_NAME)" \
+                 --user-name="$(env_val ORO_USER_NAME)" --user-email="$(env_val ORO_USER_EMAIL)" \
+                 --user-firstname="$(env_val ORO_USER_FIRSTNAME)" \
+                 --user-lastname="$(env_val ORO_USER_LASTNAME)" \
+                 --user-password="$(env_val ORO_USER_PASSWORD)" \
+                 --language="$(env_val ORO_LANGUAGE)" \
+                 --formatting-code="$(env_val ORO_FORMATTING_CODE)"; then
+            docker exec seed-db pg_dump -U oro_db_user --no-owner --no-privileges oro_db \
+              | gzip -c > "seed-context/dump-test-pg${PG_MAJOR}.sql.gz"
+          else
+            echo "::warning::The test-environment install failed for ${{ matrix.oro-version }}; the image gets the prod dump only."
+          fi
+
+          docker rm -f seed-app >/dev/null
 
           # The install is worthless without the version the entrypoint gates on: rather than ship
           # a dump nothing will ever restore, fail here and let the image go out seedless.
