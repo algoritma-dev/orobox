@@ -79,7 +79,7 @@ jobs:
           free -m
           docker system df
 
-      - name: Diagnostic: Node & pnpm in runner and application container
+      - name: "Diagnostic: Node & pnpm in runner and application container"
         if: always()
         run: |
           echo "=== Runner diagnostics ==="
@@ -90,11 +90,9 @@ jobs:
           corepack prepare pnpm@10.7.0 --activate 2>/dev/null || true
           pnpm -v || echo "pnpm: not found on runner"
 
-          echo "=== Docker / application container diagnostics ==="
+          echo "=== Docker compose project status ==="
           # show compose services so we can see names/status
           docker compose ps --all || true
-          # try to run the checks inside the application container; tolerate failures so the job continues
-          docker compose exec -T application sh -c 'echo "Container: node"; node -v || echo "node: not found in container"; echo "Container: pnpm"; pnpm -v || echo "pnpm: not found in container"; ls -la /var/www/oro/vendor-bin/qa/node_modules/.bin || echo "/var/www/oro/vendor-bin/qa/node_modules/.bin: not present"' || true
 
       - name: Run e2e (version ${{ matrix.version }})
         env:
@@ -124,6 +122,13 @@ jobs:
           # `signal "9"`, with nothing in the job log saying which process was chosen or what
           # its cgroup limit was. These two make the next occurrence self-explanatory.
           sudo dmesg | grep -iE "out of memory|oom-kill|killed process" | tail -20 || echo "no OOM kills in dmesg"
+
+          # Attempt to inspect the application container for Node/pnpm and QA bins.
+          # Run this without swallowing failures so that a missing runtime or container
+          # is visible in the job output.
+          echo "=== Application container diagnostics (may fail if stack not present) ==="
+          docker compose exec -T application sh -c 'echo "Container: node"; node -v; echo "Container: pnpm"; pnpm -v; ls -la /var/www/oro/vendor-bin/qa/node_modules/.bin'
+
           docker system df
           docker ps -a
           for c in $(docker ps -aq); do
