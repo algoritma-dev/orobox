@@ -79,6 +79,23 @@ jobs:
           free -m
           docker system df
 
+      - name: Diagnostic: Node & pnpm in runner and application container
+        if: always()
+        run: |
+          echo "=== Runner diagnostics ==="
+          echo "Runner node:"
+          node -v || echo "node: not found on runner"
+          echo "Runner corepack/pnpm:"
+          corepack --version 2>/dev/null || true
+          corepack prepare pnpm@10.7.0 --activate 2>/dev/null || true
+          pnpm -v || echo "pnpm: not found on runner"
+
+          echo "=== Docker / application container diagnostics ==="
+          # show compose services so we can see names/status
+          docker compose ps --all || true
+          # try to run the checks inside the application container; tolerate failures so the job continues
+          docker compose exec -T application sh -c 'echo "Container: node"; node -v || echo "node: not found in container"; echo "Container: pnpm"; pnpm -v || echo "pnpm: not found in container"; ls -la /var/www/oro/vendor-bin/qa/node_modules/.bin || echo "/var/www/oro/vendor-bin/qa/node_modules/.bin: not present"' || true
+
       - name: Run e2e (version ${{ matrix.version }})
         env:
           OROBOX_BIN: ${{ github.workspace }}/orobox
