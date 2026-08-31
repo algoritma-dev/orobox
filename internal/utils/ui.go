@@ -3,10 +3,15 @@ package utils
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/term"
 )
 
 var (
@@ -51,13 +56,24 @@ func PrintTitle(message string) {
 
 // AskQuestion asks a question to the user and returns the answer or a default value.
 func AskQuestion(reader *bufio.Reader, question string, defaultValue string) string {
+	answer, _ := AskQuestionOrEOF(reader, question, defaultValue)
+	return answer
+}
+
+// AskQuestionOrEOF is AskQuestion plus whether the reader is exhausted.
+//
+// The second return value is what lets a caller re-ask for a required value without hanging: a
+// non-interactive run — a script, a CI job, the e2e harness — hits EOF on the first read, so a
+// loop that only checked for an empty answer would never end.
+func AskQuestionOrEOF(reader *bufio.Reader, question string, defaultValue string) (string, bool) {
 	fmt.Printf("%s%s%s [%s]: ", colorCyan, question, colorReset, defaultValue)
-	input, _ := reader.ReadString('\n')
+	input, err := reader.ReadString('\n')
+	eof := errors.Is(err, io.EOF)
 	input = strings.TrimSpace(input)
 	if input == "" {
-		return defaultValue
+		return defaultValue, eof
 	}
-	return input
+	return input, eof
 }
 
 // AskYesNo asks a yes/no question to the user and returns the boolean response.
@@ -113,13 +129,31 @@ func AskSelection(reader *bufio.Reader, question string, options []string, defau
 	return options[idx-1]
 }
 
+// stdoutIsTerminal reports whether stdout is a terminal. Overridable in tests.
+var stdoutIsTerminal = func() bool {
+	return term.IsTerminal(int(os.Stdout.Fd()))
+}
+
 // StartLoader starts a spinner loader with a message.
+//
+// The spinner repaints one line with a carriage return, which only works on a terminal.
+// Piped or captured output (CI logs, the e2e harness) keeps every frame instead: ten lines a
+// second for as long as the step runs, which buries the real output and, in a long install,
+// alone exceeds a GitHub Actions step log. So off a terminal the message is printed once and
+// no spinner runs.
 func StartLoader(message string) {
 	loaderMu.Lock()
 	defer loaderMu.Unlock()
 
 	if loaderStop != nil {
 		return // Loader already running
+	}
+
+	if !stdoutIsTerminal() {
+		if message != "" {
+			fmt.Println(message)
+		}
+		return
 	}
 
 	loaderStop = make(chan struct{})

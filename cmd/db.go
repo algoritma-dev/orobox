@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/algoritma-dev/orobox/internal/docker"
 	"github.com/algoritma-dev/orobox/internal/utils"
@@ -58,10 +59,11 @@ var dbBackupCmd = &cobra.Command{
 	Use:   "backup [file]",
 	Short: "Backup the database to a file",
 	Args:  cobra.ExactArgs(1),
-	Run: func(_ *cobra.Command, args []string) {
+	// A pg_dump that fails is a runtime problem, not a usage problem.
+	SilenceUsage: true,
+	RunE: func(_ *cobra.Command, args []string) error {
 		docker.EnsureDockerCompose()
-		backupFile := args[0]
-		backupDatabase(backupFile)
+		return backupDatabase(args[0])
 	},
 }
 
@@ -69,11 +71,70 @@ var dbRestoreCmd = &cobra.Command{
 	Use:   "restore [file]",
 	Short: "Restore the database from a file",
 	Args:  cobra.ExactArgs(1),
-	Run: func(_ *cobra.Command, args []string) {
+	// See dbBackupCmd.
+	SilenceUsage: true,
+	RunE: func(_ *cobra.Command, args []string) error {
 		docker.EnsureDockerCompose()
-		restoreFile := args[0]
-		restoreDatabase(restoreFile)
+		return restoreDatabase(args[0])
 	},
+}
+
+// cacheClearScript empties var/cache/dev without racing the processes that write into it: it
+// detaches the directory with a rename and only then deletes it. Left as a shell snippet
+// because both steps have to happen in the container, in that order, in one exec.
+//
+// The fresh directory is recreated by the same exec rather than left to whoever gets there first.
+// var/cache is a volume every Oro container shares, so the directory's mode is whatever the
+// winning process's umask made it; creating it here means it is always the application container's.
+const cacheClearScript = `set -e
+dir=var/cache/dev
+if [ -d "$dir" ]; then
+  old="$dir.orobox-old.$$"
+  mv "$dir" "$old"
+  mkdir -p "$dir"
+  rm -rf "$old"
+fi`
+
+// oroKernelServices are the long-running services that boot an Oro kernel of their own against
+// the same var/cache volume the application container writes to.
+//
+// They are stopped for the duration of a restore, and that is not only about the cache. A restore
+// drops and recreates the database under them: a consumer mid-message, a cron job mid-run or a
+// request being served against the schema that is being replaced has nothing valid to do, and web
+// is in the list for the same reason as the rest — its health probe alone is enough to boot a
+// kernel every few seconds.
+//
+// The cache is what turns that from untidy into a failure. Once cacheClearScript has detached
+// var/cache/dev, every one of these processes starts rebuilding it concurrently with
+// oro:platform:update, and Oro's extend-class writer creates its directories without tolerating
+// the EEXIST a second creator hands it: "Could not create cache directory
+// .../var/cache/dev/oro_entities/Extend/Entity", and the restore fails on a race rather than on
+// anything about the dump.
+var oroKernelServices = []string{"web", "php-fpm-app", "ws", "consumer", "cron"}
+
+// quiesceOroKernels stops the services in oroKernelServices that are currently running and returns
+// the function that starts exactly those back up.
+//
+// Only the running ones are touched, so a restore never leaves a stack with more services up than
+// it found — a developer who deliberately keeps the consumer down gets it back down afterwards.
+// Both halves are best-effort: failing a restore because a background service could not be paused
+// would trade a rare race for a certain outage.
+func quiesceOroKernels() func() {
+	running := docker.RunningServices(oroKernelServices)
+	if len(running) == 0 {
+		return func() {}
+	}
+
+	if err := docker.RunComposeCommandSilently("", append([]string{"stop"}, running...)...); err != nil {
+		utils.PrintWarning(fmt.Sprintf("Could not pause %s during the restore: %v", strings.Join(running, ", "), err))
+		return func() {}
+	}
+
+	return func() {
+		if err := docker.RunComposeCommandSilently("", append([]string{"start"}, running...)...); err != nil {
+			utils.PrintWarning(fmt.Sprintf("Could not start %s back up: %v. Run 'orobox up'.", strings.Join(running, ", "), err))
+		}
+	}
 }
 
 func init() {
@@ -82,7 +143,10 @@ func init() {
 	dbCmd.AddCommand(dbRestoreCmd)
 }
 
-func backupDatabase(file string) {
+// backupDatabase returns the error rather than only printing it: a backup that produced no
+// usable dump must not report success to whoever runs it, and a caller writing a dump into a
+// deploy or CI step reads the exit code.
+func backupDatabase(file string) error {
 	utils.StartLoader("Creating database backup...")
 	defer utils.StopLoader()
 
@@ -92,7 +156,7 @@ func backupDatabase(file string) {
 	if err != nil {
 		utils.StopLoader()
 		utils.PrintError(fmt.Sprintf("Failed to create file: %v", err))
-		return
+		return err
 	}
 	defer f.Close()
 
@@ -103,17 +167,21 @@ func backupDatabase(file string) {
 		f.Close()
 		_ = os.Remove(file)
 		utils.PrintError(fmt.Sprintf("Backup failed: %v", err))
-		return
+		return err
 	}
 
 	utils.StopLoader()
 	utils.PrintSuccess(fmt.Sprintf("Backup saved to %s", file))
+	return nil
 }
 
-func restoreDatabase(file string) {
+// restoreDatabase returns the error rather than only printing it: every step below leaves the
+// database in a state the caller has to know about, and a restore that stopped halfway must not
+// look like a successful one.
+func restoreDatabase(file string) error {
 	if _, err := os.Stat(file); os.IsNotExist(err) {
 		utils.PrintError(fmt.Sprintf("File %s does not exist", file))
-		return
+		return fmt.Errorf("backup file %s does not exist", file)
 	}
 
 	dbUser, _, dbName, _ := docker.GetDatabaseCredentials()
@@ -121,8 +189,21 @@ func restoreDatabase(file string) {
 	// Ensure services are running
 	if err := docker.EnsureServicesRunning([]string{"db", "application"}); err != nil {
 		utils.PrintError(fmt.Sprintf("Failed to start services: %v", err))
-		return
+		return err
 	}
+
+	// The drop/create/restore below are all psql, so wait for the server and not just for
+	// the container.
+	if err := docker.WaitForDatabaseReady(false); err != nil {
+		utils.PrintError(err.Error())
+		return err
+	}
+
+	// Nothing else may hold a kernel open while the database and the cache underneath it are
+	// replaced; see oroKernelServices. Deferred, so a restore that fails halfway still hands the
+	// stack back in the shape it found it.
+	resume := quiesceOroKernels()
+	defer resume()
 
 	// 1. Restore the database
 	utils.StartLoader("Restoring database...")
@@ -139,7 +220,7 @@ func restoreDatabase(file string) {
 		if err := dbExec(nil, nil, clearArgs...); err != nil && q != terminateQuery {
 			utils.StopLoader()
 			utils.PrintError(fmt.Sprintf("Failed to clear database: %v", err))
-			return
+			return err
 		}
 	}
 
@@ -147,14 +228,14 @@ func restoreDatabase(file string) {
 	if err := dbExec(nil, nil, extensionArgs...); err != nil {
 		utils.StopLoader()
 		utils.PrintError(fmt.Sprintf("Failed to create uuid-ossp extension: %v", err))
-		return
+		return err
 	}
 
 	f, err := os.Open(file)
 	if err != nil {
 		utils.StopLoader()
 		utils.PrintError(fmt.Sprintf("Failed to open file: %v", err))
-		return
+		return err
 	}
 	defer f.Close()
 
@@ -163,7 +244,7 @@ func restoreDatabase(file string) {
 	if err := dbExec(f, nil, args...); err != nil {
 		utils.StopLoader()
 		utils.PrintError(fmt.Sprintf("Restore failed: %v", err))
-		return
+		return err
 	}
 	utils.StopLoader()
 	utils.PrintSuccess("Database restored.")
@@ -192,9 +273,16 @@ func restoreDatabase(file string) {
 		utils.PrintSuccess("Configuration URLs updated.")
 	}
 
-	// 3. Clear cache
+	// 3. Clear cache.
+	//
+	// The rename is the part that matters: a restore runs against a live stack, so web,
+	// consumer and cron keep warming the cache while the directory is being removed. A plain
+	// `rm -rf var/cache/dev` then walks a tree that grows underneath it and fails with
+	// "Directory not empty". After the rename those writers resolve var/cache/dev afresh and
+	// repopulate a new directory, and the detached tree can be removed with nothing writing
+	// into it.
 	utils.StartLoader("Clearing cache...")
-	if err := docker.RunComposeCommandSilently("", "exec", "-T", "application", "rm", "-rf", "var/cache/dev"); err != nil {
+	if err := docker.RunComposeCommandSilently("", "exec", "-T", "application", "sh", "-c", cacheClearScript); err != nil {
 		utils.StopLoader()
 		utils.PrintWarning(fmt.Sprintf("Failed to clear cache: %v", err))
 	} else {
@@ -203,14 +291,18 @@ func restoreDatabase(file string) {
 	}
 
 	// 4. Update platform
+	// The restore is not finished until the schema matches the code: reporting
+	// "Restore completed successfully!" after this failed left a database the application
+	// cannot boot against behind a zero exit code.
 	utils.StartLoader("Running oro:platform:update...")
 	if err := docker.RunComposeCommandSilently("", "exec", "-T", "application", "bin/console", "oro:platform:update", "--force", "--timeout=0"); err != nil {
 		utils.StopLoader()
 		utils.PrintError(fmt.Sprintf("oro:platform:update failed: %v", err))
-	} else {
-		utils.StopLoader()
-		utils.PrintSuccess("Platform updated.")
+		return err
 	}
+	utils.StopLoader()
+	utils.PrintSuccess("Platform updated.")
 
 	utils.PrintSuccess("Restore completed successfully!")
+	return nil
 }

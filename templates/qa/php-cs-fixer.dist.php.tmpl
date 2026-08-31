@@ -1,0 +1,21 @@
+<?php
+
+declare(strict_types=1);
+
+use PhpCsFixer\Config;
+use PhpCsFixer\Finder;
+
+/**
+ * Project-specific PHP-CS-Fixer configuration, generated once by `orobox qa-init`.
+ *
+ * Orobox merges the shared standard's rules with the ones set here, this file winning on the rules
+ * it names. Everything that is *not* a rule comes from this file — the finder above all, because
+ * Config::getFinder() answers with a lazily built default rather than with nothing, so "the
+ * project set no finder" is not detectable. The finder below is therefore the real analysed tree.
+ */
+$finder = (new Finder())
+    ->in([[.PhpFinderPath]])[[.PhpFinderExclude]];
+
+return (new Config())
+    ->setFinder($finder)
+    ->setRules([]);

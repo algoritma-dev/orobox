@@ -2,15 +2,22 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
+	"github.com/algoritma-dev/orobox/internal/pipeline"
+	"github.com/algoritma-dev/orobox/internal/qatools"
+	"github.com/algoritma-dev/orobox/internal/report"
 	"github.com/algoritma-dev/orobox/internal/utils"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var (
@@ -20,14 +27,15 @@ var (
 	qaTwigCSFixer bool
 	qaEslint      bool
 	qaStylelint   bool
-)
 
-type qaTool struct {
-	name    string
-	args    []string
-	workDir string // optional override; uses workingDir if empty
-	enabled bool
-}
+	qaEngine         string
+	qaReport         string
+	qaReportPath     string
+	qaCacheScope     string
+	qaBaseCacheScope string
+
+	qaGenerateBaseline bool
+)
 
 var qaCmd = &cobra.Command{
 	Use:   "qa",
@@ -49,31 +57,27 @@ func init() {
 	qaCmd.Flags().BoolVar(&qaTwigCSFixer, "twig-cs-fixer", false, "Run Twig-CS-Fixer")
 	qaCmd.Flags().BoolVar(&qaEslint, "eslint", false, "Run ESLint")
 	qaCmd.Flags().BoolVar(&qaStylelint, "stylelint", false, "Run Stylelint")
-}
 
-// qaToolBinaryPaths maps tool names to their expected binary paths inside the isolated QA tools directory.
-var qaToolBinaryPaths = map[string]string{
-	"phpstan":       config.OroRootDir + "/bin/phpstan",
-	"rector":        config.OroRootDir + "/bin/rector",
-	"php-cs-fixer":  config.OroRootDir + "/bin/php-cs-fixer",
-	"twig-cs-fixer": config.OroRootDir + "/bin/twig-cs-fixer",
-	"eslint":        config.OroRootDir + "/node_modules/.bin/eslint",
-	"stylelint":     config.OroRootDir + "/node_modules/.bin/stylelint",
-	"stylelint-css": config.OroRootDir + "/node_modules/.bin/stylelint",
+	qaCmd.Flags().StringVar(&qaEngine, "engine", "", "Where the checks run: compose or dagger (default: dagger in CI, compose otherwise)")
+	qaCmd.Flags().StringVar(&qaReport, "report", "", "Emit a machine-readable report: gitlab")
+	qaCmd.Flags().StringVar(&qaReportPath, "report-path", "", "Where to write the report (default: "+reportsRelDir+"/code-quality.json)")
+	qaCmd.Flags().StringVar(&qaCacheScope, "cache-scope", "", "Name the cache volume family, dagger engine only (default: the current branch)")
+	qaCmd.Flags().StringVar(&qaBaseCacheScope, "base-cache-scope", "", "Seed a missing test database dump from this cache scope, dagger engine only")
+	qaCmd.Flags().BoolVar(&qaGenerateBaseline, "generate-baseline", false, "Record PHPStan's current findings in "+qatools.BaselineFile+" instead of failing on them")
 }
 
 // checkMissingToolBinaries returns the names of tools whose binaries are not present in the container.
-func checkMissingToolBinaries(workingDir string, tools []qaTool) []string {
+func checkMissingToolBinaries(workingDir string, tools []qatools.Tool) []string {
 	seen := map[string]bool{}
 	var checks []string
 
 	for _, t := range tools {
-		binPath, ok := qaToolBinaryPaths[t.name]
+		binPath, ok := qatools.BinaryPaths[t.Name]
 		if !ok || seen[binPath] {
 			continue
 		}
 		seen[binPath] = true
-		checks = append(checks, fmt.Sprintf("test -f %s || printf 'MISSING:%s\\n'", binPath, t.name))
+		checks = append(checks, fmt.Sprintf("test -f %s || printf 'MISSING:%s\\n'", binPath, t.Name))
 	}
 
 	if len(checks) == 0 {
@@ -93,53 +97,169 @@ func checkMissingToolBinaries(workingDir string, tools []qaTool) []string {
 	return missing
 }
 
-func runQaCommand() {
-	workingDir := config.GetSourceRootContainerPath()
-	qaToolsDir := config.QaToolsDir
-
-	jsTarget := "src/Resources/public"
-	twigTarget := "src/Resources/views"
-
-	// Shell expressions for bundle-first config resolution:
-	// use the bundle's own config if it exists, else fall back to the default generated in QaToolsDir.
-	phpstanConfig := fmt.Sprintf("$([ -f %s/phpstan.neon ] && echo %s/phpstan.neon || echo %s/phpstan.neon)", workingDir, workingDir, qaToolsDir)
-	rectorConfig := fmt.Sprintf("$([ -f %s/rector.php ] && echo %s/rector.php || echo %s/rector.php)", workingDir, workingDir, qaToolsDir)
-	phpCSFixerConfig := fmt.Sprintf("$([ -f %s/.php-cs-fixer.dist.php ] && echo %s/.php-cs-fixer.dist.php || echo %s/.php-cs-fixer.dist.php)", workingDir, workingDir, qaToolsDir)
-	twigCSFixerConfig := fmt.Sprintf("$([ -f %s/.twig-cs-fixer.php ] && echo %s/.twig-cs-fixer.php || echo %s/.twig-cs-fixer.php)", workingDir, workingDir, qaToolsDir)
-	eslintConfig := fmt.Sprintf("$([ -f %s/.eslintrc.yml ] && echo %s/.eslintrc.yml || echo %s/.eslintrc.yml)", workingDir, workingDir, config.OroRootDir)
-	eslintIgnore := fmt.Sprintf("$([ -f %s/.eslintignore ] && echo %s/.eslintignore || echo %s/.eslintignore)", workingDir, workingDir, config.OroRootDir)
-	stylelintConfig := fmt.Sprintf("$([ -f %s/.stylelintrc.yml ] && echo %s/.stylelintrc.yml || echo %s/.stylelintrc.yml)", workingDir, workingDir, config.OroRootDir)
-	stylelintIgnore := fmt.Sprintf("$([ -f %s/.stylelintignore ] && echo %s/.stylelintignore || echo %s/.stylelintignore)", workingDir, workingDir, config.OroRootDir)
-	stylelintCSSConfig := fmt.Sprintf("$([ -f %s/.stylelintrc-css.yml ] && echo %s/.stylelintrc-css.yml || echo %s/.stylelintrc-css.yml)", workingDir, workingDir, config.OroRootDir)
-	stylelintCSSIgnore := fmt.Sprintf("$([ -f %s/.stylelintignore-css ] && echo %s/.stylelintignore-css || echo %s/.stylelintignore-css)", workingDir, workingDir, config.OroRootDir)
-
-	allTools := []qaTool{
-		{"phpstan", []string{config.OroRootDir + "/bin/phpstan", "analyze", "--configuration=" + phpstanConfig, "--autoload-file=" + config.OroRootDir + "/vendor/autoload.php"}, "", qaPhpstan},
-		{"rector", []string{config.OroRootDir + "/bin/rector", "process", "--config=" + rectorConfig}, config.OroRootDir, qaRector},
-		{"php-cs-fixer", []string{config.OroRootDir + "/bin/php-cs-fixer", "fix", "--config=" + phpCSFixerConfig}, "", qaPhpCSFixer},
-		{"twig-cs-fixer", []string{config.OroRootDir + "/bin/twig-cs-fixer", "lint", twigTarget, "--fix", "--config=" + twigCSFixerConfig}, "", qaTwigCSFixer},
-		{"eslint", []string{"npx", "--yes", "eslint", "--resolve-plugins-relative-to", qaToolsDir + "/node_modules", "--config", eslintConfig, "--ignore-path", eslintIgnore, "--fix", "--quiet", jsTarget}, "", qaEslint},
-		{"stylelint", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.{scss,less,sass,html}", "--config", stylelintConfig, "--ignore-path", stylelintIgnore, "--fix", "--quiet", "--allow-empty-input"}, "", qaStylelint},
-		{"stylelint-css", []string{"npx", "--yes", "stylelint", "Resources/public/**/*.css", "--config", stylelintCSSConfig, "--ignore-path", stylelintCSSIgnore, "--fix", "--quiet", "--allow-empty-input"}, "", qaStylelint},
+// missingJSLinters returns the missing tools that come from OroCommerce's node_modules rather than
+// from the QA tools directory, so the hint can name the install that actually provides them.
+func missingJSLinters(missing []string) []string {
+	var out []string
+	for _, name := range missing {
+		switch name {
+		case "eslint", "stylelint", "stylelint-css":
+			out = append(out, name)
+		}
 	}
+	return out
+}
+
+// qaFlagFor maps a tool name to the CLI flag that selects it explicitly.
+func qaFlagFor(name string) bool {
+	switch name {
+	case "phpstan":
+		return qaPhpstan
+	case "rector":
+		return qaRector
+	case "php-cs-fixer":
+		return qaPhpCSFixer
+	case "twig-cs-fixer":
+		return qaTwigCSFixer
+	case "eslint":
+		return qaEslint
+	case "stylelint", "stylelint-css":
+		return qaStylelint
+	default:
+		return false
+	}
+}
+
+func runQaCommand() {
+	engine, err := resolveEngine(qaEngine)
+	if err != nil {
+		utils.PrintError(err.Error())
+		os.Exit(1)
+	}
+	format, err := resolveReport(qaReport)
+	if err != nil {
+		utils.PrintError(err.Error())
+		os.Exit(1)
+	}
+
+	baseline := ""
+	if qaGenerateBaseline {
+		if baseline, err = resolveBaseline(engine, format); err != nil {
+			utils.PrintError(err.Error())
+			os.Exit(1)
+		}
+		// The baseline run is a PHPStan run, whatever the configuration enables: a project that
+		// left PHPStan off in .orobox.yaml and then asked for a baseline asked for PHPStan.
+		qaPhpstan = true
+	}
+
+	if engine == engineDagger {
+		runQaOnDagger(format)
+		return
+	}
+	runQaOnCompose(format, baseline)
+}
+
+// resolveBaseline validates --generate-baseline against the rest of the command and returns the
+// container path PHPStan writes.
+//
+// The Dagger engine is refused rather than supported. It analyses a clean clone inside a container
+// whose filesystem is thrown away with the run, so the baseline it generated would never reach the
+// checkout that has to commit it — the same reason that engine runs the tools in check-only mode.
+//
+// A report is refused because the two ask PHPStan for different output from one run: --report wants
+// the findings as GitLab JSON, a baseline run wants them as NEON in a file and prints nothing to
+// act on.
+//
+// The other tools are refused instead of ignored. Only PHPStan has a baseline, and a command line
+// that named Rector too would otherwise run PHPStan alone without saying so.
+func resolveBaseline(engine string, format qatools.Report) (string, error) {
+	if engine == engineDagger {
+		return "", fmt.Errorf("--generate-baseline needs --engine=%s: the %s engine analyses a throwaway clone, so the baseline it wrote could not be committed", engineCompose, engineDagger)
+	}
+	if format != qatools.ReportNone {
+		return "", fmt.Errorf("--generate-baseline and --report cannot be combined: a baseline run records the findings in %s instead of reporting them", qatools.BaselineFile)
+	}
+
+	var others []string
+	for flag, set := range map[string]bool{
+		"--rector":        qaRector,
+		"--php-cs-fixer":  qaPhpCSFixer,
+		"--twig-cs-fixer": qaTwigCSFixer,
+		"--eslint":        qaEslint,
+		"--stylelint":     qaStylelint,
+	} {
+		if set {
+			others = append(others, flag)
+		}
+	}
+	if len(others) > 0 {
+		sort.Strings(others)
+		return "", fmt.Errorf("--generate-baseline only applies to PHPStan; drop %s", strings.Join(others, ", "))
+	}
+
+	return qatools.BaselinePath(config.GetSourceRootContainerPath()), nil
+}
+
+func runQaOnCompose(format qatools.Report, baseline string) {
+	workingDir := config.GetSourceRootContainerPath()
+	env := resolveQaEnv()
+
+	reportPath := ""
+	containerReportDir := ""
+	if format != qatools.ReportNone {
+		var err error
+		reportPath, err = resolveReportPath(qaReportPath, reportsRelDir+"/code-quality.json")
+		if err != nil {
+			utils.PrintError(err.Error())
+			os.Exit(1)
+		}
+		// The source root is bind-mounted, so a file the container writes below it is already on
+		// the host: no copy step, and the same path works for every install type.
+		containerReportDir = workingDir + "/" + rawReportsRelDir + "/qa"
+	}
+
+	// Locally the tools may fix what they find; the deploy pipeline runs the same list in
+	// check-only mode.
+	//
+	// A report run is check-only for the same reason the pipeline is: what asked for a report is a
+	// caller that wants to be told what the tree looks like, not one that wants the tree changed
+	// under it. It is also the difference between a survivable run and a broken checkout on a
+	// bundle install, where the analysed tree holds OroCommerce's own vendor-oro: fix mode there
+	// rewrites the platform the running application is served from.
+	mode := qatools.ModeFix
+	if format != qatools.ReportNone {
+		mode = qatools.ModeCheck
+	}
+
+	allTools := qatools.Tools(qatools.ToolsOptions{
+		SourceRoot:  workingDir,
+		AnalyzePath: config.GetQaAnalyzePath(),
+		Env:         env,
+		Mode:        mode,
+		Report:      format,
+		ReportDir:   containerReportDir,
+		Baseline:    baseline,
+		OroVersion:  viper.GetString("oro_version"),
+	})
 
 	anyEnabled := false
 	for _, t := range allTools {
-		if t.enabled {
+		if qaFlagFor(t.Name) {
 			anyEnabled = true
 			break
 		}
 	}
 
-	utils.PrintInfo("Running QA tools in " + workingDir + "...")
+	utils.PrintInfo(fmt.Sprintf("Running QA tools in %s (%s environment)...", workingDir, env))
 
-	var enabledTools []qaTool
+	var enabledTools []qatools.Tool
 	for _, t := range allTools {
 		if anyEnabled {
-			if t.enabled {
+			if qaFlagFor(t.Name) {
 				enabledTools = append(enabledTools, t)
 			}
-		} else if config.IsQaToolEnabled(t.name) {
+		} else if config.IsQaToolEnabled(t.Name) {
 			enabledTools = append(enabledTools, t)
 		}
 	}
@@ -151,22 +271,15 @@ func runQaCommand() {
 
 	if missing := checkMissingToolBinaries(workingDir, enabledTools); len(missing) > 0 {
 		utils.PrintWarning(fmt.Sprintf("The following QA tools are enabled but not installed: %s", strings.Join(missing, ", ")))
+		// ESLint and Stylelint are OroCommerce's own installation, not a QA-local one (see
+		// qatools.BinaryPaths), so `orobox qa-init` cannot put them there: they appear with the
+		// application's node_modules, which the asset install populates.
+		if jsMissing := missingJSLinters(missing); len(jsMissing) > 0 {
+			utils.PrintWarning(fmt.Sprintf("%s run OroCommerce's own installation: build the assets (php bin/console oro:assets:install) so %s/node_modules exists.",
+				strings.Join(jsMissing, ", "), config.OroRootDir))
+		}
 		utils.PrintWarning("Run 'orobox qa-init' to install the missing tools.")
 		os.Exit(1)
-	}
-
-	var compositeCmd strings.Builder
-	for i, t := range enabledTools {
-		if i > 0 {
-			compositeCmd.WriteString(" && ")
-		}
-		// Wrap each command with an echo for better visibility
-		compositeCmd.WriteString(fmt.Sprintf("echo '--- Running %s ---' && ", t.name))
-		cmd := strings.Join(t.args, " ")
-		if t.workDir != "" {
-			cmd = fmt.Sprintf("(cd %s && %s)", t.workDir, cmd)
-		}
-		compositeCmd.WriteString(cmd)
 	}
 
 	args := []string{"exec"}
@@ -175,15 +288,205 @@ func runQaCommand() {
 		args = append(args, "-T")
 	}
 
-	// Always set ORO_ENV to test for QA tools
-	args = append(args, "-e", "ORO_ENV=test")
-	args = append(args, "application", "sh", "-c", compositeCmd.String())
+	// The tools run in the environment whose cache PHPStan reads: dev on a developer's stack,
+	// test in CI. See resolveQaEnv.
+	args = append(args, "-e", "ORO_ENV="+string(env))
+
+	script := qatools.Script(enabledTools)
+	if format != qatools.ReportNone {
+		script = qatools.ReportScript(enabledTools, containerReportDir)
+	}
+	args = append(args, "application", "sh", "-c", script)
 
 	err := docker.RunComposeCommand("", args...)
+
+	if baseline != "" {
+		if err != nil {
+			utils.PrintError("PHPStan could not generate the baseline.")
+			os.Exit(1)
+		}
+		finishBaseline(config.GetHostBundlePath())
+		return
+	}
+
+	if format != qatools.ReportNone {
+		// The script exits 0 whatever the tools concluded, so the outcome comes from the status
+		// file and the reports are merged either way.
+		finishQaReport(rawReportDir("qa"), reportPath, engineCompose, err)
+		return
+	}
+
 	if err != nil {
 		utils.PrintError("QA tools reported errors or warnings.")
 		os.Exit(1)
 	}
 
 	utils.PrintSuccess("All selected QA tools passed!")
+}
+
+// finishBaseline wires the freshly generated baseline into the project's own phpstan.neon, so the
+// next `orobox qa` actually reads it.
+//
+// projectDir is the host source root, the same directory the container wrote the baseline to
+// through the bind mount. A missing phpstan.neon is written rather than reported: the file is the
+// project's half of the merged configuration, and the include has nowhere else to live.
+//
+// A failure here warns instead of failing the command. The baseline itself is on disk and correct
+// at that point, and one `includes` line is something the developer can add.
+func finishBaseline(projectDir string) {
+	baselinePath := qatools.BaselinePath(projectDir)
+	if _, err := os.Stat(baselinePath); err != nil {
+		utils.PrintError(fmt.Sprintf("PHPStan reported success but %s was not written: %v", qatools.BaselineFile, err))
+		os.Exit(1)
+	}
+	utils.PrintSuccess("Wrote " + baselinePath + ".")
+
+	configPath := filepath.Join(projectDir, "phpstan.neon")
+	current, err := os.ReadFile(configPath)
+	if err != nil && !os.IsNotExist(err) {
+		utils.PrintWarning(fmt.Sprintf("Could not read %s: %v", configPath, err))
+		utils.PrintWarning("Add the baseline to its `includes` by hand to activate it.")
+		return
+	}
+
+	updated, changed := qatools.EnsureBaselineInclude(string(current))
+	if !changed {
+		utils.PrintInfo(fmt.Sprintf("phpstan.neon already includes %s.", qatools.BaselineFile))
+		return
+	}
+
+	if err := os.WriteFile(configPath, []byte(updated), 0o644); err != nil {
+		utils.PrintWarning(fmt.Sprintf("Could not add %s to %s: %v", qatools.BaselineFile, configPath, err))
+		utils.PrintWarning("Add it to the file's `includes` by hand to activate it.")
+		return
+	}
+	utils.PrintSuccess(fmt.Sprintf("Added %s to the `includes` of %s.", qatools.BaselineFile, configPath))
+}
+
+// runQaOnDagger runs the pipeline's own QA step: the same tools, the same check-only mode and the
+// same cache volumes a deploy of this branch would use.
+func runQaOnDagger(format qatools.Report) {
+	var conf config.OroConfig
+	if err := viper.Unmarshal(&conf); err != nil {
+		utils.PrintError(fmt.Sprintf("error reading config: %v", err))
+		os.Exit(1)
+	}
+
+	projectDir := config.GetHostBundlePath()
+	reportPath := ""
+	if format != qatools.ReportNone {
+		var err error
+		reportPath, err = resolveReportPath(qaReportPath, reportsRelDir+"/code-quality.json")
+		if err != nil {
+			utils.PrintError(err.Error())
+			os.Exit(1)
+		}
+	}
+
+	plan := pipeline.NewChecks(&conf, pipeline.ChecksOptions{
+		ProjectDir:     projectDir,
+		CacheScope:     resolveCacheScope(qaCacheScope),
+		BaseCacheScope: qaBaseCacheScope,
+		RunQA:          true,
+		Report:         format,
+	})
+
+	utils.PrintInfo("Running the QA tools in the pipeline engine. The first run has no caches and takes a while.")
+
+	result, runErr := pipeline.Run(context.Background(), plan, pipeline.Options{
+		ProjectDir: projectDir,
+		Debug:      viper.GetBool("debug"),
+		// composer install runs in the pipeline too, so a private VCS repository over SSH needs
+		// the developer's agent here exactly as a deploy does.
+		SSHAuthSock:   os.Getenv("SSH_AUTH_SOCK"),
+		SSHPrivateKey: os.Getenv("OROBOX_DEPLOY_SSH_KEY"),
+		ReportHostDir: filepath.Join(projectDir, rawReportsRelDir),
+	})
+
+	if format != qatools.ReportNone {
+		finishQaReport(result.QAReportDir, reportPath, engineDagger, runErr)
+		return
+	}
+
+	if runErr != nil {
+		utils.PrintError(runErr.Error())
+		os.Exit(1)
+	}
+	utils.PrintSuccess("All selected QA tools passed!")
+}
+
+// finishQaReport merges the per-tool files into the single document GitLab reads and turns the
+// step's recorded status back into an exit code.
+//
+// runErr is the engine's own error, which in report mode can only be a real failure — a container
+// that could not start, an image that could not be pulled — because the tools' own exit codes are
+// swallowed by the report script on purpose.
+func finishQaReport(rawDir, reportPath, engine string, runErr error) {
+	if runErr != nil {
+		utils.PrintError(runErr.Error())
+		os.Exit(1)
+	}
+	if rawDir == "" {
+		utils.PrintError("the QA step produced no report directory")
+		os.Exit(1)
+	}
+
+	entries, err := os.ReadDir(rawDir)
+	if err != nil {
+		utils.PrintError(fmt.Sprintf("could not read the raw reports in %s: %v", rawDir, err))
+		os.Exit(1)
+	}
+
+	var reports []report.ToolReport
+	for _, entry := range entries {
+		if filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(rawDir, entry.Name()))
+		if err != nil {
+			utils.PrintError(fmt.Sprintf("could not read %s: %v", entry.Name(), err))
+			os.Exit(1)
+		}
+		reports = append(reports, report.ToolReport{
+			Tool: strings.TrimSuffix(entry.Name(), ".json"),
+			Data: data,
+		})
+	}
+
+	merged, err := report.MergeCodeQuality(reports, qaPathPrefix(engine))
+	if err != nil {
+		utils.PrintError(err.Error())
+		os.Exit(1)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(reportPath), 0o755); err != nil {
+		utils.PrintError(fmt.Sprintf("could not create the report directory: %v", err))
+		os.Exit(1)
+	}
+	if err := os.WriteFile(reportPath, merged.Data, 0o644); err != nil {
+		utils.PrintError(fmt.Sprintf("could not write the report: %v", err))
+		os.Exit(1)
+	}
+
+	printReportSummary(merged.Counts, reportPath)
+
+	if reportStatusFailed(rawDir) {
+		utils.PrintError("QA tools reported errors or warnings.")
+		os.Exit(1)
+	}
+	utils.PrintSuccess("All selected QA tools passed!")
+}
+
+// qaPathPrefix is how a reported path is turned into one GitLab can resolve.
+//
+// On the Dagger engine the repository root is above the application whenever deploy.source_dir is
+// set, so that directory has to be prefixed back. On the compose engine the command runs from
+// inside the project and the two roots coincide.
+func qaPathPrefix(engine string) report.PathPrefix {
+	prefix := report.PathPrefix{ContainerRoot: config.GetSourceRootContainerPath()}
+	if engine == engineDagger {
+		prefix.ContainerRoot = config.OroRootDir
+		prefix.RepoSubdir = viper.GetString("deploy.source_dir")
+	}
+	return prefix
 }

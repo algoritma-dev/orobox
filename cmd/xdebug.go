@@ -20,6 +20,10 @@ var xdebugCmd = &cobra.Command{
 	Use:   "xdebug [on|off|status]",
 	Short: "Enable, disable or show Xdebug status",
 	Args:  cobra.ExactArgs(1),
+	// A patch or reload that fails is a runtime problem, not a usage problem: printing the
+	// flag list after it buries the actual error (and the compose output above it) under
+	// help text that has nothing to do with the failure.
+	SilenceUsage: true,
 	RunE: func(_ *cobra.Command, args []string) error {
 		docker.EnsureDockerCompose()
 		action := args[0]
@@ -76,7 +80,10 @@ func applyXdebugHotfix(enable bool, service string, reloadPhpFpm bool, restartSe
 	execArgs = append(execArgs, service, "bash", "-c", fmt.Sprintf("if [ -f %s ]; then mv %s %s; fi", source, source, target))
 	err := docker.RunComposeCommandSilently("Applying Xdebug patch...", execArgs...)
 	if err != nil {
-		return fmt.Errorf("failed to patch %s: %w", service, err)
+		// `docker compose exec` needs the service up. The most common reason this fails is a
+		// stack that is not running (or a container that died), so point there: the bare
+		// "exit status 1" on its own leaves nothing to act on.
+		return fmt.Errorf("failed to patch %s: %w (if %s is not running, start the stack with 'orobox up')", service, err, service)
 	}
 
 	if reloadPhpFpm {

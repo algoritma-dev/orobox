@@ -33,6 +33,47 @@ func TestGetVersionsForOro(t *testing.T) {
 	}
 }
 
+func TestGetQaSymfonyConstraints(t *testing.T) {
+	tests := []struct {
+		version      string
+		wantContains []string
+		wantAbsent   []string
+	}{
+		{
+			version:      "5.1",
+			wantContains: []string{"symfony/console:^5.4", "symfony/event-dispatcher:^5.4", "symfony/service-contracts:^2.5", "psr/container:^1.1", "psr/log:^2"},
+			wantAbsent:   []string{"symfony/service-contracts:^3.0"},
+		},
+		{
+			version:      "7.0",
+			wantContains: []string{"symfony/console:^6.4", "symfony/service-contracts:^3.0", "psr/container:^2.0"},
+			// psr/log is only pinned on the 5.4 line (console 5.4 conflicts with psr/log >=3).
+			wantAbsent: []string{"psr/log:^2", "symfony/service-contracts:^2.5"},
+		},
+		{
+			version:      "6.1",
+			wantContains: []string{"symfony/console:^6.4", "symfony/service-contracts:^3.0"},
+			wantAbsent:   []string{"psr/log:^2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			got := strings.Join(GetQaSymfonyConstraints(tt.version), " ")
+			for _, want := range tt.wantContains {
+				if !strings.Contains(got, want) {
+					t.Errorf("GetQaSymfonyConstraints(%q) missing %q; got %q", tt.version, want, got)
+				}
+			}
+			for _, absent := range tt.wantAbsent {
+				if strings.Contains(got, absent) {
+					t.Errorf("GetQaSymfonyConstraints(%q) should not contain %q; got %q", tt.version, absent, got)
+				}
+			}
+		})
+	}
+}
+
 func TestOroConfig_Validate(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -72,9 +113,20 @@ func TestOroConfig_Validate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "demo without namespace is valid",
+			config: OroConfig{
+				Type:       InstallTypeDemo,
+				OroVersion: "6.1",
+				Domains: []DomainConfig{
+					{Host: "example.com"},
+				},
+			},
+			wantErr: false,
+		},
+		{
 			name: "unknown type is rejected",
 			config: OroConfig{
-				Type:       "demo",
+				Type:       "garbage",
 				Namespace:  "MyNamespace",
 				OroVersion: "6.1",
 				Domains: []DomainConfig{
@@ -404,4 +456,170 @@ func TestGetInternalDir(t *testing.T) {
 			t.Errorf("Expected %s, got %s", expected, dir)
 		}
 	})
+}
+
+func TestParseConfigComposerSSHAgent(t *testing.T) {
+	const base = `
+type: project
+oro_version: "6.1"
+domains:
+  - host: example.com
+`
+
+	t.Run("unset means auto-detect", func(t *testing.T) {
+		conf, err := ParseConfig([]byte(base))
+		if err != nil {
+			t.Fatalf("ParseConfig failed: %v", err)
+		}
+		if conf.Composer.SSHAgent != nil {
+			t.Errorf("expected ssh_agent to be nil when absent, got %v", *conf.Composer.SSHAgent)
+		}
+	})
+
+	t.Run("true", func(t *testing.T) {
+		conf, err := ParseConfig([]byte(base + "composer:\n  ssh_agent: true\n"))
+		if err != nil {
+			t.Fatalf("ParseConfig failed: %v", err)
+		}
+		if conf.Composer.SSHAgent == nil || !*conf.Composer.SSHAgent {
+			t.Errorf("expected ssh_agent true, got %v", conf.Composer.SSHAgent)
+		}
+	})
+
+	t.Run("false", func(t *testing.T) {
+		conf, err := ParseConfig([]byte(base + "composer:\n  ssh_agent: false\n"))
+		if err != nil {
+			t.Fatalf("ParseConfig failed: %v", err)
+		}
+		if conf.Composer.SSHAgent == nil || *conf.Composer.SSHAgent {
+			t.Errorf("expected ssh_agent false, got %v", conf.Composer.SSHAgent)
+		}
+	})
+}
+
+// An unset ssh_agent must not appear in a generated config file: a written `ssh_agent: false`
+// would silently pin forwarding off for every future checkout of that repository.
+func TestSaveConfigOmitsUnsetSSHAgent(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, ".orobox.yaml")
+
+	conf := &OroConfig{
+		Type:       InstallTypeProject,
+		OroVersion: "6.1",
+		Domains:    []DomainConfig{{Host: "example.com"}},
+	}
+	if err := SaveConfig(configPath, conf); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("Read saved config failed: %v", err)
+	}
+	if strings.Contains(string(data), "ssh_agent") {
+		t.Errorf("expected ssh_agent to be omitted when unset, got:\n%s", data)
+	}
+}
+
+// A config file that says nothing about QA must survive a load/save round-trip with every tool
+// still enabled. IsQaToolEnabled treats an unset key as enabled, so a written `phpstan: false`
+// does not just record the current state — it silently disables the tool for good. `orobox
+// deploy-init` rewrites the whole file, so this is the difference between `orobox qa-init`
+// installing the tool set and reporting "No QA tools are enabled in configuration".
+func TestSaveConfigKeepsUnsetQaToolsEnabled(t *testing.T) {
+	viper.Reset()
+	viper.SetConfigType("yaml")
+	source := "type: project\noro_version: \"6.1\"\ntest:\n  use_tmpfs: true\n  tmpfs_size: 1g\n"
+	if err := viper.ReadConfig(strings.NewReader(source)); err != nil {
+		t.Fatal(err)
+	}
+
+	var conf OroConfig
+	if err := viper.Unmarshal(&conf); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	configPath := filepath.Join(t.TempDir(), ".orobox.yaml")
+	if err := SaveConfig(configPath, &conf); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("Read saved config failed: %v", err)
+	}
+	if strings.Contains(string(data), "phpstan") {
+		t.Errorf("expected the qa section to be omitted when unset, got:\n%s", data)
+	}
+
+	viper.Reset()
+	viper.SetConfigFile(configPath)
+	if err := viper.ReadInConfig(); err != nil {
+		t.Fatalf("Reload failed: %v", err)
+	}
+	for _, tool := range []string{"phpstan", "rector", "php-cs-fixer", "twig-cs-fixer", "eslint", "stylelint"} {
+		if !IsQaToolEnabled(tool) {
+			t.Errorf("%s is disabled after a round-trip that never configured it", tool)
+		}
+	}
+}
+
+// An explicitly disabled tool is a decision, and a round-trip must preserve it.
+func TestSaveConfigPreservesExplicitQaTools(t *testing.T) {
+	viper.Reset()
+	viper.SetConfigType("yaml")
+	source := "type: project\ntest:\n  qa:\n    phpstan: false\n    rector: true\n"
+	if err := viper.ReadConfig(strings.NewReader(source)); err != nil {
+		t.Fatal(err)
+	}
+
+	var conf OroConfig
+	if err := viper.Unmarshal(&conf); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	configPath := filepath.Join(t.TempDir(), ".orobox.yaml")
+	if err := SaveConfig(configPath, &conf); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	viper.Reset()
+	viper.SetConfigFile(configPath)
+	if err := viper.ReadInConfig(); err != nil {
+		t.Fatalf("Reload failed: %v", err)
+	}
+	if IsQaToolEnabled("phpstan") {
+		t.Error("an explicit phpstan: false was lost by the round-trip")
+	}
+	if !IsQaToolEnabled("rector") {
+		t.Error("an explicit rector: true was lost by the round-trip")
+	}
+	if !IsQaToolEnabled("eslint") {
+		t.Error("eslint was never configured and must stay enabled")
+	}
+}
+
+func TestQaSharedPackagesIsACopy(t *testing.T) {
+	first := QaSharedPackages()
+	if len(first) == 0 {
+		t.Fatal("no shared packages")
+	}
+	first[0] = "mutated"
+
+	if second := QaSharedPackages(); second[0] == "mutated" {
+		t.Error("QaSharedPackages hands out the list the constraints are built from")
+	}
+
+	// Every shared package needs a constraint for the case where the application does not ship
+	// it: without one, bamarni resolves that package against the newest Symfony line.
+	constraints := strings.Join(GetQaSymfonyConstraints("6.1"), " ")
+	for _, name := range QaSharedPackages() {
+		if name == "psr/log" {
+			// Only capped on Symfony 5.4; see GetQaSymfonyConstraints.
+			continue
+		}
+		if !strings.Contains(constraints, name+":") {
+			t.Errorf("%s is shared but unconstrained: %s", name, constraints)
+		}
+	}
 }

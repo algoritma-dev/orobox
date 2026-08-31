@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"runtime"
 
+	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/utils"
 )
 
@@ -58,6 +59,17 @@ func composerAuthEnv(auth map[string]interface{}) string {
 	return "COMPOSER_AUTH=" + string(encoded)
 }
 
+// ComposerAuthJSON returns the JSON value for COMPOSER_AUTH built from the composer.auth
+// section, or "" when no auth is configured. Callers that inject it as a secret rather than
+// a plain env entry use this instead of CredentialRunArgs.
+func ComposerAuthJSON(auth map[string]interface{}) string {
+	env := composerAuthEnv(auth)
+	if env == "" {
+		return ""
+	}
+	return env[len("COMPOSER_AUTH="):]
+}
+
 // hostSSHAgentSocket returns the host-side path to bind-mount as the SSH agent
 // socket, and whether an agent is available. On Docker Desktop the well-known
 // forwarding socket is always used; on native Linux the live $SSH_AUTH_SOCK is used.
@@ -71,25 +83,51 @@ func hostSSHAgentSocket() (string, bool) {
 	}
 }
 
+// needsSSHForwardingIn reports whether the host SSH agent must be forwarded for a checkout
+// at repoDir. composer.ssh_agent decides when it is set; otherwise forwarding is on when an
+// SSH-transport URL appears in composer.repositories, in extraURLs, or in the checkout's own
+// composer.json. The last case is what makes forwarding work for project and demo installs,
+// where the application's repositories live in its own manifest and never in .orobox.yaml.
+func needsSSHForwardingIn(repoDir string, c config.ComposerConfig, extraURLs ...string) bool {
+	if c.SSHAgent != nil {
+		return *c.SSHAgent
+	}
+	if reposUseSSH(c.Repositories, extraURLs...) {
+		return true
+	}
+	for _, url := range manifestRepoURLs(repoDir) {
+		if IsSSHRepoURL(url) {
+			return true
+		}
+	}
+	return false
+}
+
+// needsSSHForwarding is needsSSHForwardingIn for the checkout that holds .orobox.yaml.
+func needsSSHForwarding(c config.ComposerConfig, extraURLs ...string) bool {
+	return needsSSHForwardingIn(config.GetHostBundlePath(), c, extraURLs...)
+}
+
 // CredentialRunArgs returns extra `docker compose run` flags that forward private
 // repository credentials into a composer/git command:
 //   - COMPOSER_AUTH (token / basic auth) from composer.auth in orobox.yml
-//   - the host SSH agent socket + SSH_AUTH_SOCK/GIT_SSH_COMMAND when any repository
-//     (or one of extraURLs) uses an SSH URL
+//   - the host SSH agent socket + SSH_AUTH_SOCK/GIT_SSH_COMMAND when needsSSHForwarding
+//     says so (composer.ssh_agent, or an SSH URL in composer.repositories, in the
+//     project's own composer.json, or in extraURLs)
 //
 // The flags are meant to be spliced before the SERVICE name of a `run` invocation.
 // They are no-ops (nil) when nothing needs forwarding.
-func CredentialRunArgs(auth map[string]interface{}, repos []map[string]interface{}, extraURLs ...string) []string {
+func CredentialRunArgs(c config.ComposerConfig, extraURLs ...string) []string {
 	var args []string
 
-	if env := composerAuthEnv(auth); env != "" {
+	if env := composerAuthEnv(c.Auth); env != "" {
 		args = append(args, "-e", env)
 	}
 
-	if reposUseSSH(repos, extraURLs...) {
+	if needsSSHForwarding(c, extraURLs...) {
 		sock, ok := hostSSHAgentSocket()
 		if !ok {
-			utils.PrintWarning("An SSH repository URL is configured but no SSH agent was found ($SSH_AUTH_SOCK is empty). Start ssh-agent and add your key, e.g. `eval $(ssh-agent) && ssh-add`.")
+			utils.PrintWarning("SSH agent forwarding is enabled but no SSH agent was found ($SSH_AUTH_SOCK is empty). Start ssh-agent and add your key, e.g. `eval \"$(ssh-agent)\" && ssh-add`.")
 		} else {
 			args = append(args,
 				"-v", sock+":"+containerSSHAgentSocket,

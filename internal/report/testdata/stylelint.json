@@ -1,0 +1,16 @@
+[
+  {
+    "type": "issue",
+    "check_name": "property-case",
+    "severity": "major",
+    "description": "Expected \"COLOR\" to be \"color\" (property-case)",
+    "fingerprint": "277d86ff49184768e9a6fe681fb33d69",
+    "location": {
+      "path": "var/qa-probe/bad.scss",
+      "lines": {
+        "begin": 2,
+        "end": 2
+      }
+    }
+  }
+]

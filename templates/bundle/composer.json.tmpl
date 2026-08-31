@@ -1,13 +1,13 @@
 {
-    "name": "{{.PackageName}}",
+    "name": "[[.PackageName]]",
     "type": "symfony-bundle",
-    "description": "{{.ClassName}} for OroCommerce",
+    "description": "[[.ClassName]] for OroCommerce",
     "require": {
         "php": ">=8.1"
     },
     "autoload": {
         "psr-4": {
-            "{{esc .Namespace}}\\": ""
+            "[[esc .Namespace]]\\": ""
         }
     }
 }

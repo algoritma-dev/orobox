@@ -1,0 +1,403 @@
+package cmd
+
+import (
+	"bufio"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/algoritma-dev/orobox/internal/config"
+	"github.com/algoritma-dev/orobox/internal/pipeline"
+	"github.com/spf13/viper"
+)
+
+func init() {
+	// The deploy templates are rendered from the repository root, one level up from cmd.
+	pipeline.Templates = os.DirFS("..")
+}
+
+// setDeployConfig loads a YAML document into viper the way initConfig does at runtime.
+func setDeployConfig(t *testing.T, yaml string) {
+	t.Helper()
+	viper.Reset()
+	viper.SetConfigType("yaml")
+	if err := viper.ReadConfig(strings.NewReader(yaml)); err != nil {
+		t.Fatalf("could not load test config: %v", err)
+	}
+	t.Cleanup(viper.Reset)
+}
+
+const projectDeployYAML = `
+type: project
+oro_version: "6.1"
+domains:
+  - host: oro.demo
+    root: public
+deploy:
+  pre_built_assets_enabled: false
+  repository: git@gitlab.com:acme/shop.git
+  stages:
+    - name: staging
+      ref: develop
+      host: staging.acme.com
+      user: deploy
+      deploy_path: /var/www/oro
+    - name: production
+      ref: main
+      host: acme.com
+      user: deploy
+      deploy_path: /var/www/oro
+      test_suites: [unit, functional]
+`
+
+func TestLoadDeployConfig(t *testing.T) {
+	setDeployConfig(t, projectDeployYAML)
+
+	conf, err := loadDeployConfig()
+	if err != nil {
+		t.Fatalf("loadDeployConfig() error = %v", err)
+	}
+	if got := conf.Deploy.StageNames(); len(got) != 2 || got[1] != "production" {
+		t.Errorf("stage names = %v", got)
+	}
+}
+
+func TestLoadDeployConfigRejectsNonProject(t *testing.T) {
+	setDeployConfig(t, `
+type: bundle
+namespace: Acme
+oro_version: "6.1"
+domains:
+  - host: oro.demo
+`)
+
+	_, err := loadDeployConfig()
+	if err == nil {
+		t.Fatal("loadDeployConfig() error = nil, want a rejection for the bundle install type")
+	}
+	if !strings.Contains(err.Error(), "only available for install type") {
+		t.Errorf("error = %q", err)
+	}
+}
+
+func TestLoadDeployConfigRequiresDeployBlock(t *testing.T) {
+	setDeployConfig(t, `
+type: project
+oro_version: "6.1"
+domains:
+  - host: oro.demo
+`)
+
+	_, err := loadDeployConfig()
+	if err == nil || !strings.Contains(err.Error(), "deploy-init") {
+		t.Errorf("error = %v, want a pointer to deploy-init", err)
+	}
+}
+
+func TestStageSelection(t *testing.T) {
+	setDeployConfig(t, projectDeployYAML)
+
+	conf, err := loadDeployConfig()
+	if err != nil {
+		t.Fatalf("loadDeployConfig() error = %v", err)
+	}
+
+	if _, err := conf.Deploy.StageFor(""); err == nil {
+		t.Error("an empty stage name must be rejected when two stages exist")
+	}
+	stage, err := conf.Deploy.StageFor("production")
+	if err != nil {
+		t.Fatalf("StageFor(production) error = %v", err)
+	}
+	if !stage.RunsFunctionalTests() {
+		t.Error("production stage should run functional tests")
+	}
+}
+
+func TestCheckDeployerFiles(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := checkDeployerFiles(dir); err == nil || !strings.Contains(err.Error(), "deploy-init") {
+		t.Errorf("error = %v, want a missing deploy.php error pointing at deploy-init", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "deploy.php"), []byte("<?php"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkDeployerFiles(dir); err == nil || !strings.Contains(err.Error(), "vendor-bin/deploy/composer.json") {
+		t.Errorf("error = %v, want the missing composer.json to be reported", err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(dir, "vendor-bin", "deploy"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "vendor-bin", "deploy", "composer.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// deploy.php requires the recipe, and nothing in the pipeline regenerates it: only deploy-init
+	// writes it. Without this check a missing recipe fails inside the release container instead of
+	// here.
+	if err := checkDeployerFiles(dir); err == nil || !strings.Contains(err.Error(), config.DeployRecipeRelPath) {
+		t.Errorf("error = %v, want the missing %s to be reported", err, config.DeployRecipeRelPath)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, config.DeployRecipeRelPath)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, config.DeployRecipeRelPath), []byte("<?php"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkDeployerFiles(dir); err != nil {
+		t.Errorf("checkDeployerFiles() error = %v, want nil once every file exists", err)
+	}
+}
+
+func TestDeployOptionsRequiresCredentials(t *testing.T) {
+	t.Setenv("SSH_AUTH_SOCK", "")
+	t.Setenv("OROBOX_DEPLOY_SSH_KEY", "")
+	t.Setenv("CI_JOB_TOKEN", "")
+
+	if _, err := deployOptions(t.TempDir(), config.StageConfig{Host: "acme.com"}, true); err == nil {
+		t.Error("deployOptions() error = nil, want a missing credentials error")
+	}
+}
+
+func TestDeployOptionsUsesCIJobToken(t *testing.T) {
+	t.Setenv("SSH_AUTH_SOCK", "")
+	t.Setenv("OROBOX_DEPLOY_SSH_KEY", "-----BEGIN KEY-----")
+	t.Setenv("OROBOX_DEPLOY_GIT_TOKEN", "")
+	t.Setenv("OROBOX_DEPLOY_GIT_USER", "")
+	t.Setenv("CI_JOB_TOKEN", "job-token")
+
+	opts, err := deployOptions(t.TempDir(), config.StageConfig{Host: "acme.com"}, true)
+	if err != nil {
+		t.Fatalf("deployOptions() error = %v", err)
+	}
+	if opts.GitHTTPToken != "job-token" || opts.GitHTTPUser != "gitlab-ci-token" {
+		t.Errorf("git credentials = %q / %q, want the GitLab job token", opts.GitHTTPToken, opts.GitHTTPUser)
+	}
+	if opts.SSHPrivateKey == "" {
+		t.Error("SSHPrivateKey was not picked up from the environment")
+	}
+}
+
+func TestDeployOptionsSkipsTheCredentialCheckWithoutARelease(t *testing.T) {
+	t.Setenv("SSH_AUTH_SOCK", "")
+	t.Setenv("OROBOX_DEPLOY_SSH_KEY", "")
+	t.Setenv("CI_JOB_TOKEN", "")
+
+	if _, err := deployOptions(t.TempDir(), config.StageConfig{Host: "acme.com"}, false); err != nil {
+		t.Errorf("deployOptions() error = %v, want nil when the release is skipped", err)
+	}
+}
+
+func TestSplitSuites(t *testing.T) {
+	tests := []struct {
+		answer string
+		want   []string
+	}{
+		{"unit, functional", []string{"unit", "functional"}},
+		{"functional", []string{"functional"}},
+		{"", []string{"unit"}},
+		{"unit, integration", []string{"unit"}},
+	}
+
+	for _, tt := range tests {
+		got := splitSuites(tt.answer)
+		if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+			t.Errorf("splitSuites(%q) = %v, want %v", tt.answer, got, tt.want)
+		}
+	}
+}
+
+func TestWriteDeployFilesKeepsExistingStub(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := writeDeployFiles(dir); err != nil {
+		t.Fatalf("writeDeployFiles() error = %v", err)
+	}
+
+	recipe := filepath.Join(dir, config.DeployRecipeRelPath)
+	if data, err := os.ReadFile(recipe); err != nil {
+		t.Fatalf("recipe not written: %v", err)
+	} else if !strings.Contains(string(data), "task('oro:update'") {
+		t.Error("recipe does not contain the Oro tasks")
+	}
+
+	stub := filepath.Join(dir, config.DeployStubRelPath)
+	if err := os.WriteFile(stub, []byte("<?php // mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The recipe is regenerated on every run; the stub belongs to the project.
+	if err := os.WriteFile(recipe, []byte("<?php // stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeDeployFiles(dir); err != nil {
+		t.Fatalf("writeDeployFiles() second run error = %v", err)
+	}
+
+	if data, _ := os.ReadFile(stub); string(data) != "<?php // mine" {
+		t.Errorf("deploy.php was overwritten: %q", data)
+	}
+	if data, _ := os.ReadFile(recipe); strings.Contains(string(data), "stale") {
+		t.Error("the recipe was not refreshed")
+	}
+}
+
+func TestAskStageDefaultsAndOverrides(t *testing.T) {
+	original := stdin
+	defer func() { stdin = original }()
+
+	// name, ref, host, user, path, port, keep, suites, restart
+	stdin = strings.NewReader("staging\n\nstaging.acme.com\n\n\n2222\n3\nunit, functional\nsudo systemctl restart oro-consumer\n")
+
+	stage := askStage(bufio.NewReader(stdin), config.StageConfig{})
+
+	if stage.Name != "staging" || stage.Host != "staging.acme.com" {
+		t.Errorf("stage = %+v", stage)
+	}
+	if stage.Ref != "main" || stage.User != "deploy" || stage.DeployPath != "/var/www/oro" {
+		t.Errorf("defaults were not applied: %+v", stage)
+	}
+	if stage.Port != 2222 || stage.KeepReleases != 3 {
+		t.Errorf("port/keep_releases = %d/%d", stage.Port, stage.KeepReleases)
+	}
+	if len(stage.TestSuites) != 2 {
+		t.Errorf("TestSuites = %v", stage.TestSuites)
+	}
+	if stage.RestartCommand == "" {
+		t.Error("RestartCommand was not read")
+	}
+}
+
+func TestDeployCommandHasNoCacheFlag(t *testing.T) {
+	if deployCmd.Flags().Lookup("no-cache") == nil {
+		t.Error("deploy is missing the --no-cache flag")
+	}
+}
+
+func TestDeployCommandHasSkipFlags(t *testing.T) {
+	for _, name := range []string{"skip-qa", "skip-test", "skip-release"} {
+		if deployCmd.Flags().Lookup(name) == nil {
+			t.Errorf("deploy is missing the --%s flag", name)
+		}
+	}
+}
+
+func TestDeploySourceOutsideCIClones(t *testing.T) {
+	t.Setenv("CI", "")
+	deployRef = ""
+
+	spec, ref, err := deploySource("/home/dev/shop")
+	if err != nil {
+		t.Fatalf("deploySource returned %v", err)
+	}
+	if spec.Kind != pipeline.SourceGit {
+		t.Error("a local deploy must clone: the artifacts and the remote checkout have to come from the same committed tree")
+	}
+	if ref != "" {
+		t.Errorf("a cloning deploy must not force a ref, the stage decides: %q", ref)
+	}
+}
+
+func TestDeploySourceInCIUsesTheJobCheckoutAndItsCommit(t *testing.T) {
+	t.Setenv("CI", "true")
+	t.Setenv("CI_COMMIT_SHA", "0f1e2d3c4b5a")
+	deployRef = ""
+
+	spec, ref, err := deploySource("/builds/acme/shop")
+	if err != nil {
+		t.Fatalf("deploySource returned %v", err)
+	}
+	if spec.Kind != pipeline.SourceHost || spec.Dir != "/builds/acme/shop" {
+		t.Errorf("Source = %+v, want the job's checkout", spec)
+	}
+	if ref != "0f1e2d3c4b5a" {
+		t.Errorf("ref = %q, want the commit that was built", ref)
+	}
+}
+
+func TestDeployExplicitRefWinsOverTheBuiltCommit(t *testing.T) {
+	t.Setenv("CI", "true")
+	t.Setenv("CI_COMMIT_SHA", "0f1e2d3c4b5a")
+
+	deployRef = "v2.1.0"
+	defer func() { deployRef = "" }()
+
+	_, ref, err := deploySource("/builds/acme/shop")
+	if err != nil {
+		t.Fatalf("deploySource returned %v", err)
+	}
+	if ref != "" {
+		t.Errorf("an explicit --ref must not be overridden: %q", ref)
+	}
+}
+
+// TestDeployInitRefusesToWriteAnIncompleteStage guards the e2e failure where a non-interactive
+// deploy-init accepted the empty default for "Remote host", wrote the stage to .orobox.yaml and
+// left a project where *every* orobox command — ci-init and down included — died with
+// `config error: deploy stage at index 0 is missing required field "host"`.
+//
+// The guard is the validation that now runs before the write; this asserts the shape it has to
+// catch, so a prompt that silently returns an empty required value cannot pass unnoticed again.
+func TestDeployInitRefusesToWriteAnIncompleteStage(t *testing.T) {
+	oldStdin := stdin
+	// No input at all: the reader is at EOF, which is what a CI run or the e2e harness provides.
+	stdin = strings.NewReader("")
+	defer func() { stdin = oldStdin }()
+
+	conf := &config.OroConfig{Type: config.InstallTypeProject}
+	conf.Deploy = askDeployConfig(conf)
+
+	if len(conf.Deploy.Stages) != 1 {
+		t.Fatalf("expected one stage, got %d", len(conf.Deploy.Stages))
+	}
+	if conf.Deploy.Stages[0].Host != "" {
+		t.Fatalf("expected an empty host with no input, got %q", conf.Deploy.Stages[0].Host)
+	}
+	if err := conf.ValidateDeploy(); err == nil {
+		t.Fatal("expected ValidateDeploy to reject a stage with no host, so deploy-init can refuse to write it")
+	}
+}
+
+// TestDeployInitKeepsExistingStageValuesWithoutInput is the other half: with a complete stage
+// already in .orobox.yaml, a non-interactive re-run is an edit that changes nothing, and the
+// result must still validate.
+func TestDeployInitKeepsExistingStageValuesWithoutInput(t *testing.T) {
+	oldStdin := stdin
+	stdin = strings.NewReader("")
+	defer func() { stdin = oldStdin }()
+
+	conf := &config.OroConfig{
+		Type: config.InstallTypeProject,
+		Deploy: &config.DeployConfig{
+			Repository: "https://example.test/app.git",
+			Stages: []config.StageConfig{{
+				Name:       "production",
+				Ref:        "main",
+				Host:       "deploy.example.test",
+				User:       "deploy",
+				DeployPath: "/var/www/oro",
+			}},
+		},
+	}
+
+	conf.Deploy = askDeployConfig(conf)
+	if err := conf.ValidateDeploy(); err != nil {
+		t.Fatalf("re-running deploy-init over a complete stage must stay valid: %v", err)
+	}
+	if got := conf.Deploy.Stages[0].Host; got != "deploy.example.test" {
+		t.Fatalf("host = %q, want the existing value kept", got)
+	}
+}
+
+// TestAskRequiredReAsksOnBlankInput covers the interactive half: a user who just hits enter on a
+// required question is asked again rather than having the blank accepted.
+func TestAskRequiredReAsksOnBlankInput(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader("\n\ndeploy.example.test\n"))
+	if got := askRequired(reader, "Remote host", ""); got != "deploy.example.test" {
+		t.Fatalf("askRequired() = %q, want the first non-empty answer", got)
+	}
+}

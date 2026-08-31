@@ -1,0 +1,32 @@
+<?php
+
+declare(strict_types=1);
+
+use TwigCsFixer\Config\Config;
+use TwigCsFixer\File\Finder;
+use TwigCsFixer\Ruleset\Ruleset;
+use TwigCsFixer\Standard\TwigCsFixer;
+
+/**
+ * Project-specific Twig-CS-Fixer configuration, generated once by `orobox qa-init`.
+ *
+ * Orobox merges the shared ruleset with this one, keyed by rule class, so a rule both sides carry
+ * is taken from here — with this file's configuration of it. The finder and every other Config
+ * setting come from this file.
+ *
+ * The bundled standard is added rather than left out: the merge dedupes it against the base
+ * config's copy, and without it a missing base config would make twig-cs-fixer pass while
+ * checking nothing.
+ */
+$ruleset = new Ruleset();
+$ruleset->addStandard(new TwigCsFixer());
+
+$finder = new Finder();
+$finder->in([[.TwigPaths]]);
+[[.TwigExclude]]
+$config = new Config();
+$config->setRuleset($ruleset);
+$config->allowNonFixableRules();
+$config->setFinder($finder);
+
+return $config;

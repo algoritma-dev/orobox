@@ -1,0 +1,40 @@
+<?php
+
+// Deployer entry point, created by `orobox deploy-init`.
+//
+// This file is yours: orobox never overwrites it. The Oro tasks live in
+// [[.RecipePath]], which orobox does rewrite on every deploy-init run.
+//
+// Host, user, port, path, repository, ref and keep_releases come from the OROBOX_DEPLOY_*
+// environment variables `orobox deploy` injects from .orobox.yaml.
+
+namespace Deployer;
+
+require 'recipe/common.php';
+require __DIR__ . '/[[.RecipePath]]';
+
+set('repository', getenv('OROBOX_DEPLOY_REPOSITORY'));
+set('branch', getenv('OROBOX_DEPLOY_REF'));
+set('keep_releases', (int) (getenv('OROBOX_DEPLOY_KEEP_RELEASES') ?: [[.DefaultKeepReleases]]));
+
+// Files and directories that survive a release. Adjust to the project's needs.
+// var/data and public/media hold Oro's private and public file storage: without them here the
+// files uploaded by users disappear with the release that received them.
+set('shared_files', ['.env-app.local']);
+set('shared_dirs', ['var/logs', 'var/data', 'public/media', 'var/import_export']);
+set('writable_dirs', ['var/cache', 'var/logs', 'var/data']);
+
+// Deployer's default writable_mode is 'acl', which needs the web server user and fails with
+// "Can't detect http user name." on hosts where that process is not visible (shared hosting,
+// or PHP-FPM running under the deploy user). 'chmod' works there because the deploy user owns
+// the files it has to write. On a host where the web server runs as a different user, switch
+// back to 'acl' and name the user explicitly:
+//
+//     set('writable_mode', 'acl');
+//     set('http_user', 'www-data');
+set('writable_mode', 'chmod');
+
+host(getenv('OROBOX_DEPLOY_HOST'))
+    ->setRemoteUser(getenv('OROBOX_DEPLOY_USER'))
+    ->setPort((int) (getenv('OROBOX_DEPLOY_PORT') ?: [[.DefaultSSHPort]]))
+    ->setDeployPath(getenv('OROBOX_DEPLOY_PATH'));

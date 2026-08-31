@@ -6,6 +6,15 @@ x-templates:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  # Websocket wiring belongs to Orobox, not to the project's own dotenv: the server runs as
+  # the "ws" service on the compose network, and the browser reaches it through the nginx
+  # port published on the host. Injected as environment (not env_file) so it also overrides
+  # the addresses a project checkout carries in its own dotenv files.
+  websocket-env: &websocket-env
+    ORO_WEBSOCKET_SERVER_DSN: "//0.0.0.0:{{.WebsocketBackendPort}}"
+    ORO_WEBSOCKET_BACKEND_DSN: "tcp://{{.WebsocketBackendHost}}:{{.WebsocketBackendPort}}"
+    ORO_WEBSOCKET_FRONTEND_DSN: "//*:{{.WebsocketFrontendPort}}/ws"
+
   volumes-oro: &volumes-oro
     {{if .BindWholeRepo -}}
     - "{{.BundlePath}}:{{.OroRootDir}}:cached"
@@ -17,13 +26,45 @@ x-templates:
     - "cache:{{.OroRootDir}}/var/cache:delegated"
     - "public_storage:{{.OroRootDir}}/public/media:delegated"
     - "private_storage:{{.OroRootDir}}/var/data:delegated"
-    - "{{.InternalDir}}/.env:{{.OroRootDir}}/.env-app.local:cached"
-    - "{{.InternalDir}}/.env.test:{{.OroRootDir}}/.env-app.test:cached"
+    {{if .MountsEnvFiles -}}
+    # Sources are relative to the project directory, which GetBaseComposeArgs points at the
+    # internal directory — the same resolution `env_file: .env` relies on in the setup file.
+    # Naming the internal directory here as well resolved to <internal>/<internal>/.env, and a
+    # missing bind source makes Docker mount an empty directory instead: Symfony's Dotenv then
+    # skips .env-app.local and the container silently falls back to Oro's own .env-app.
+    - "./.env:{{.OroRootDir}}/.env-app.local:cached"
+    - "./.env.test:{{.OroRootDir}}/.env-app.test:cached"
+    {{- end}}
+    {{if .SSHAgentSocket -}}
+    # Forwarded host SSH agent, so composer/git over SSH work inside the running stack.
+    # A YAML merge key cannot extend a sequence, so the mount goes in the shared anchor:
+    # the services that never run git simply carry an unused socket.
+    - "{{.SSHAgentSocket}}:/ssh-agent"
+    {{- end}}
 
 services:
   application:
     <<: *oro-app
     user: ${ORO_USER_RUNTIME:-www-data}
+    # This is the container that runs composer install, oro:install and oro:assets:build, so
+    # it gets the headroom the long-running services do not need: webpack's production build
+    # is the memory peak of the whole installation.
+    mem_limit: ${ORO_BUILD_MEM_LIMIT:-{{.BuildMemoryLimit}}}
+    environment:
+      # Node sizes its default heap from the host's RAM, not from the container's cgroup
+      # limit, so on a machine with plenty of memory webpack grows straight past mem_limit
+      # and the cgroup OOM killer takes it out. oro:assets:build reports that as
+      # `The process has been signaled with signal "9"` — and never as "JavaScript heap out
+      # of memory", because node never reached a limit of its own. Telling node the budget
+      # makes it collect within it, and turns the remaining overflow into a clean error.
+      NODE_OPTIONS: --max-old-space-size=${ORO_NODE_HEAP_MB:-{{.NodeHeapMB}}}
+      {{- if .SSHAgentSocket}}
+      # accept-new avoids an interactive host-key prompt on first connect, and the known-hosts
+      # file lives in /tmp so the write never needs a writable $HOME. HOME itself is left alone:
+      # a long-running service keeps the home directory its image gives it.
+      SSH_AUTH_SOCK: /ssh-agent
+      GIT_SSH_COMMAND: ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known_hosts
+      {{- end}}
     command:
       - bash
       - -c
@@ -144,14 +185,16 @@ services:
     command: php-fpm
     restart: unless-stopped
     user: ${ORO_USER_RUNTIME:-www-data}
+    environment:
+      <<: *websocket-env
+    # web waits on this with condition: service_healthy. retries is explicit because the
+    # default is 3, which at a 5s interval tolerates only 15s of failing probes.
     healthcheck:
       test: ["CMD", "php-fpm", "-t"]
       interval: 5s
       timeout: 30s
+      retries: 18
       start_period: 15s
-    environment:
-      ORO_ENV: ${ORO_ENV:-dev}
-      ORO_LOG_PATH: php://stderr
     depends_on:
       {{if .Postgres -}}
       "db":
@@ -181,9 +224,20 @@ services:
     restart: unless-stopped
     user: ${ORO_USER_RUNTIME:-www-data}
     init: true
+    # The websocket server is a long-running console command: without .env it gets an
+    # empty ORO_ENV and dies on "the environment cannot be empty" in a restart loop.
+    env_file:
+      - .env
     environment:
-      ORO_ENV: ${ORO_ENV:-dev}
-      ORO_LOG_PATH: php://stderr
+      <<: *websocket-env
+      ORO_XDEBUG_ENABLED: ${ORO_WS_XDEBUG_ENABLED:-false}
+    expose:
+      - "{{.WebsocketBackendPort}}"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 {{.WebsocketBackendPort}}"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
     depends_on:
       "php-fpm-app":
         condition: service_healthy
@@ -198,8 +252,7 @@ services:
     env_file:
       - .env
     environment:
-      ORO_ENV: ${ORO_ENV:-dev}
-      ORO_LOG_PATH: php://stderr
+      <<: *websocket-env
       ORO_XDEBUG_ENABLED: ${ORO_CONSUMER_XDEBUG_ENABLED:-false}
     depends_on:
       "php-fpm-app":
@@ -218,8 +271,7 @@ services:
     env_file:
       - .env
     environment:
-      ORO_ENV: ${ORO_ENV:-dev}
-      ORO_LOG_PATH: php://stderr
+      <<: *websocket-env
       ORO_XDEBUG_ENABLED: ${ORO_CRON_XDEBUG_ENABLED:-false}
     volumes: *volumes-oro
     depends_on:
@@ -243,8 +295,16 @@ services:
       POSTGRES_USER: ${ORO_DB_USER:-oro_db_user}
       POSTGRES_PASSWORD: ${ORO_DB_PASSWORD:-oro_db_pass}
       POSTGRES_ROOT_PASSWORD: ${ORO_DB_ROOT_PASSWORD:-oro_db_pass}
+    # Probed every 2s, not on Docker's 30s default: the first probe is what releases every
+    # `condition: service_healthy` dependency, and Postgres is normally accepting within a
+    # second or two of the container starting. retries preserves the old failure budget —
+    # 45 x 2s is the same 90s after start_period that the default 3 x 30s allowed, which a
+    # cold initdb on a loaded runner can still need.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 2s
+      timeout: 5s
+      retries: 45
       start_period: 60s
     restart: unless-stopped
     volumes:
@@ -257,11 +317,14 @@ services:
     hostname: redis
     ports:
       - "6379:6379"
+    # php-fpm-app waits on this with condition: service_healthy. See db for why the interval
+    # is short and retries are sized to the startup a loaded runner can need.
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
+      interval: 2s
       timeout: 5s
-      retries: 5
+      retries: 45
+      start_period: 30s
     restart: unless-stopped
   {{end}}
   {{if .RedisInsight}}
@@ -287,11 +350,15 @@ services:
     image: "rabbitmq:{{.RabbitMQVersion}}"
     hostname: rabbitmq
     restart: unless-stopped
+    # php-fpm-app waits on this with condition: service_healthy, and the broker takes a while
+    # to accept: a long interval delays every dependent start, a small retry count fails a
+    # slow one. See db.
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 10s
+      interval: 2s
       timeout: 5s
-      retries: 5
+      retries: 45
+      start_period: 60s
     ports:
       {{if true -}}
       - "15672:15672"
@@ -306,11 +373,15 @@ services:
     image: "elasticsearch:{{.ElasticsearchVersion}}"
     hostname: elasticsearch
     restart: unless-stopped
+    # kibana waits on this with condition: service_healthy, and a single-node cluster is the
+    # slowest starter here — it had the tightest budget of all: 5 retries at 10s and no
+    # start_period, so 50s total. See db.
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health?local=true || exit 1"]
-      interval: 10s
+      interval: 2s
       timeout: 5s
-      retries: 5
+      retries: 45
+      start_period: 60s
     ports:
       - "9200:9200"
     environment:
@@ -329,8 +400,14 @@ services:
     image: gotenberg/gotenberg:8.23.2
     ports:
       - "3000:3000"
+    # See db: the install waits on this one with condition: service_healthy, so leaving the
+    # interval unset put Docker's 30s default in front of every `orobox init`.
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://127.0.0.1:3000/health" ]
+      interval: 2s
+      timeout: 5s
+      retries: 45
+      start_period: 30s
     restart: on-failure
   {{if .Adminer}}
   adminer:

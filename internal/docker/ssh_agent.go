@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/utils"
 )
 
@@ -75,7 +76,7 @@ func loadKeyIntoAgent(sock, keyPath string) error {
 // EnsureSSHAgent makes an SSH agent holding a usable key reachable through
 // $SSH_AUTH_SOCK so CredentialRunArgs can forward it into containers.
 //
-// On Linux, when a repository uses an SSH URL:
+// On Linux, when needsSSHForwarding says the agent must be forwarded:
 //   - an existing agent that already holds identities is used as-is;
 //   - an existing but empty agent (the desktop-keyring case) gets the first
 //     default key loaded into it, prompting for a passphrase if needed;
@@ -89,10 +90,10 @@ func loadKeyIntoAgent(sock, keyPath string) error {
 // Desktop forwards the host agent itself). The returned cleanup kills any
 // agent this function spawned (no-op otherwise) and must be called by the
 // caller (typically via defer).
-func EnsureSSHAgent(repos []map[string]interface{}, extraURLs ...string) (func(), error) {
+func EnsureSSHAgent(c config.ComposerConfig, extraURLs ...string) (func(), error) {
 	noop := func() {}
 
-	if !reposUseSSH(repos, extraURLs...) {
+	if !needsSSHForwarding(c, extraURLs...) {
 		return noop, nil
 	}
 	// Docker Desktop forwards the host agent via a well-known socket; nothing to do.

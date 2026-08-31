@@ -1,0 +1,34 @@
+type: project
+oro_version: "{{.Version}}"
+domains:
+  - host: {{.Host}}
+    root: public
+    ssl: false
+services:
+  redis: false
+  redisinsight: false
+  mailpit: true
+  rabbitmq: false
+  elasticsearch: false
+  kibana: false
+  adminer: true
+test:
+  use_tmpfs: true
+  tmpfs_size: 1g
+# deploy-init is exercised non-interactively: the harness feeds it no stdin, so every prompt
+# takes its default. Seeding a complete stage is what makes those defaults valid — deploy-init
+# refuses to write an incomplete stage (it would be rejected by config validation on the next
+# load, breaking every later command in the case, `down` included).
+deploy:
+  stages:
+    - name: production
+      ref: main
+      host: deploy.e2e.test
+      user: deploy
+      deploy_path: /var/www/oro
+      test_suites:
+        - unit
+commands:
+  - name: e2e-cache-clear
+    command: php bin/console cache:clear
+    description: Clear the Symfony cache (exercised by the e2e suite)

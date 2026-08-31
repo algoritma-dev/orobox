@@ -1,84 +1,97 @@
 package scaffold
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+	"testing/fstest"
+)
 
-func TestParseBundleArg(t *testing.T) {
-	tests := []struct {
-		name          string
-		arg           string
-		namespaceFlag string
-		packageFlag   string
-		want          BundleOptions
-		wantErr       bool
-	}{
-		{
-			name: "fully qualified class",
-			arg:  `Acme\FooBundle\AcmeFooBundle`,
-			want: BundleOptions{
-				ClassName:   "AcmeFooBundle",
-				Namespace:   `Acme\FooBundle`,
-				Prefix:      "AcmeFoo",
-				Alias:       "acme_foo",
-				PackageName: "acme/foo-bundle",
-			},
-		},
-		{
-			name:          "short name with namespace flag",
-			arg:           "AcmeFooBundle",
-			namespaceFlag: `Acme\FooBundle`,
-			want: BundleOptions{
-				ClassName:   "AcmeFooBundle",
-				Namespace:   `Acme\FooBundle`,
-				Prefix:      "AcmeFoo",
-				Alias:       "acme_foo",
-				PackageName: "acme/foo-bundle",
-			},
-		},
-		{
-			name: "short name, no flags falls back to top-level namespace and orobox package",
-			arg:  "AcmeFooBundle",
-			want: BundleOptions{
-				ClassName:   "AcmeFooBundle",
-				Namespace:   "AcmeFooBundle",
-				Prefix:      "AcmeFoo",
-				Alias:       "acme_foo",
-				PackageName: "orobox/acme-foo-bundle",
-			},
-		},
-		{
-			name:        "package flag overrides derived package",
-			arg:         `Acme\FooBundle\AcmeFooBundle`,
-			packageFlag: "custom/pkg",
-			want: BundleOptions{
-				ClassName:   "AcmeFooBundle",
-				Namespace:   `Acme\FooBundle`,
-				Prefix:      "AcmeFoo",
-				Alias:       "acme_foo",
-				PackageName: "custom/pkg",
-			},
-		},
-		{
-			name:    "empty arg errors",
-			arg:     "",
-			wantErr: true,
-		},
+// useTemplates swaps the package's template filesystem for the duration of one test.
+func useTemplates(t *testing.T, files fstest.MapFS) {
+	t.Helper()
+	old := Templates
+	Templates = files
+	t.Cleanup(func() { Templates = old })
+}
+
+type nameData struct{ Name string }
+
+func TestWriteOnceLeavesAnExistingFileAlone(t *testing.T) {
+	useTemplates(t, fstest.MapFS{
+		"templates/test/stub.tmpl": &fstest.MapFile{Data: []byte("rendered [[.Name]]")},
+	})
+	root := t.TempDir()
+	artifact := Artifact{RelPath: "sub/stub.txt", TemplatePath: "templates/test/stub.tmpl", Ownership: WriteOnce}
+
+	first, err := Write(root, artifact, nameData{"one"})
+	if err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if !first.Written || first.Skipped {
+		t.Fatalf("first write = %+v, want Written", first)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := ParseBundleArg(tt.arg, tt.namespaceFlag, tt.packageFlag)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got != tt.want {
-				t.Errorf("ParseBundleArg(%q, %q, %q):\n got  %+v\n want %+v", tt.arg, tt.namespaceFlag, tt.packageFlag, got, tt.want)
-			}
-		})
+	second, err := Write(root, artifact, nameData{"two"})
+	if err != nil {
+		t.Fatalf("second Write() error = %v", err)
+	}
+	if second.Written || !second.Skipped {
+		t.Fatalf("second write = %+v, want Skipped", second)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, "sub", "stub.txt"))
+	if err != nil {
+		t.Fatalf("could not read the written file: %v", err)
+	}
+	if string(data) != "rendered one" {
+		t.Errorf("file = %q, want the first render", data)
+	}
+}
+
+func TestRewriteRefreshesAnExistingFile(t *testing.T) {
+	useTemplates(t, fstest.MapFS{
+		"templates/test/stub.tmpl": &fstest.MapFile{Data: []byte("rendered [[.Name]]")},
+	})
+	root := t.TempDir()
+	artifact := Artifact{RelPath: "stub.txt", TemplatePath: "templates/test/stub.tmpl", Ownership: Rewrite}
+
+	if _, err := Write(root, artifact, nameData{"one"}); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	second, err := Write(root, artifact, nameData{"two"})
+	if err != nil {
+		t.Fatalf("second Write() error = %v", err)
+	}
+	if !second.Written {
+		t.Fatalf("second write = %+v, want Written", second)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(root, "stub.txt"))
+	if string(data) != "rendered two" {
+		t.Errorf("file = %q, want the second render", data)
+	}
+}
+
+func TestWriteAllStopsAtTheFirstFailure(t *testing.T) {
+	useTemplates(t, fstest.MapFS{
+		"templates/test/ok.tmpl": &fstest.MapFile{Data: []byte("fine")},
+	})
+	root := t.TempDir()
+
+	results, err := WriteAll(root, []Artifact{
+		{RelPath: "ok.txt", TemplatePath: "templates/test/ok.tmpl", Ownership: Rewrite},
+		{RelPath: "broken.txt", TemplatePath: "templates/test/missing.tmpl", Ownership: Rewrite},
+		{RelPath: "never.txt", TemplatePath: "templates/test/ok.tmpl", Ownership: Rewrite},
+	}, nil)
+
+	if err == nil {
+		t.Fatal("WriteAll() error = nil, want a failure on the missing template")
+	}
+	if len(results) != 1 {
+		t.Errorf("results = %d, want the one artifact written before the failure", len(results))
+	}
+	if _, err := os.Stat(filepath.Join(root, "never.txt")); err == nil {
+		t.Error("WriteAll() kept going after a failure")
 	}
 }

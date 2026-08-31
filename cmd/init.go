@@ -35,7 +35,10 @@ var initCmd = &cobra.Command{
 	Long: `Initialize provisions the environment in the current directory: it generates
 the configuration, the Docker Compose files, and runs the OroCommerce install. Use
 'orobox create project|bundle' first to scaffold the source tree.`,
-	Run: func(_ *cobra.Command, _ []string) {
+	// A clone, a composer install or an oro:install that fails is a runtime problem, not a
+	// usage problem: printing the flag list after it buries the actual error under help text.
+	SilenceUsage: true,
+	RunE: func(_ *cobra.Command, _ []string) error {
 		generateConfig()
 
 		// Reload config after generation
@@ -56,8 +59,11 @@ the configuration, the Docker Compose files, and runs the OroCommerce install. U
 
 		docker.EnsureDockerCompose()
 
+		// The failing step has already printed what went wrong; the error exists so Execute
+		// exits 1. Returning nil here would report a bootstrap that never happened as a
+		// success, and every caller — CI job, Makefile, e2e harness — reads the exit code.
 		if !performInstallation() {
-			return
+			return errors.New("environment initialization failed")
 		}
 
 		utils.PrintSuccess("Environment initialized successfully!")
@@ -69,10 +75,13 @@ the configuration, the Docker Compose files, and runs the OroCommerce install. U
 				fmt.Printf("127.0.0.1 %s\n", host)
 			}
 		}
+		return nil
 	},
 }
 
-func performInstallation() bool {
+// performInstallation is a variable so a test can drive the command's exit code without
+// standing up Docker, a clone and a full oro:install.
+var performInstallation = func() bool {
 	var conf config.OroConfig
 	if err := viper.Unmarshal(&conf); err != nil {
 		utils.PrintError(fmt.Sprintf("Error reading config: %v", err))
@@ -84,6 +93,10 @@ func performInstallation() bool {
 		utils.PrintError(fmt.Sprintf("%v", err))
 		return false
 	}
+
+	// EnsureDockerCompose has already written the internal env files, so project and demo
+	// checkouts can be seeded before anything starts or clones.
+	seedProjectEnvFiles(strategy)
 
 	// Remove any existing containers to ensure fresh bind mounts after init.
 	// If vendor-oro was deleted and recreated, running containers would still hold
@@ -103,7 +116,7 @@ func performInstallation() bool {
 	// Ensure an SSH agent with a loaded key is available before any composer/git
 	// run that clones a private SSH repository, so credentials forward into the
 	// containers. No-op when no SSH repo is configured or an agent already exists.
-	sshCleanup, err := docker.EnsureSSHAgent(conf.Composer.Repositories, oroRepo)
+	sshCleanup, err := docker.EnsureSSHAgent(conf.Composer, oroRepo)
 	if err != nil {
 		utils.PrintError(err.Error())
 		return false
@@ -133,8 +146,26 @@ func performInstallation() bool {
 		return false
 	}
 
-	// Run volume-init to fix permissions before any composer/git command
-	if err := docker.RunComposeCommandSilently("Ensuring permissions...", "run", "--rm", "-T", "volume-init"); err != nil {
+	// `up -d` returns before Postgres listens, and the database this just started is the one
+	// oro:install writes into. On a first start it also has to initdb and run init-db.sql.
+	if err := docker.WaitForDatabaseReady(false); err != nil {
+		utils.PrintError(err.Error())
+		return false
+	}
+
+	// Run volume-init to fix permissions before any composer/git command.
+	//
+	// Every one-off container below runs with --no-deps (see initRunArgs): the services we
+	// need are already started explicitly above, and the `application` service depends_on
+	// web/consumer/cron, so without it Compose would start the whole long-running stack
+	// before OroCommerce exists. Those services cannot boot without an installed database,
+	// so `restart: unless-stopped` puts them in a restart loop, and every retry compiles the
+	// Symfony container into var/cache/dev. That races oro:install, whose
+	// "rm -rf var/cache/*" then fails with "can't remove 'var/cache/dev': Directory not
+	// empty", leaving a half-written entity-config cache behind. oro:install later reads it
+	// and dies in oro:entity-extend:cache:clear with "ConfigCache::getCacheKey(): Argument #1
+	// ($key) must be of type string, null given".
+	if err := docker.RunComposeCommandSilently("Ensuring permissions...", initRunArgs("volume-init")...); err != nil {
 		utils.PrintWarning(fmt.Sprintf("volume-init failed: %v", err))
 	}
 
@@ -145,7 +176,7 @@ func performInstallation() bool {
 
 	// 3. For bundle, we need to clone into the volume if not already there
 	// Always try to clone if composer.json is missing in the container
-	checkCmd := []string{"run", "--rm", "-T", "application", "test", "-f", "composer.json"}
+	checkCmd := initRunArgs("application", "test", "-f", "composer.json")
 	utils.StartLoader("Checking for OroCommerce installation...")
 	_, err = docker.RunComposeCommandWithOutput(checkCmd...)
 	utils.StopLoader()
@@ -162,8 +193,8 @@ func performInstallation() bool {
 		// Drop orobox-managed env files from the clone before copying: they are
 		// single-file bind mounts at OroRoot, and cp cannot replace a mount point
 		// ("can't create ... File exists"). The mounted versions are authoritative.
-		cloneCmd := []string{"run", "--rm", "-T"}
-		cloneCmd = append(cloneCmd, docker.CredentialRunArgs(conf.Composer.Auth, conf.Composer.Repositories, oroRepo)...)
+		cloneCmd := initRunArgs()
+		cloneCmd = append(cloneCmd, docker.CredentialRunArgs(conf.Composer, oroRepo)...)
 		cloneCmd = append(cloneCmd, "application", "bash", "-c",
 			fmt.Sprintf("git clone -b %s --depth 1 %s /tmp/oro-app && rm -f /tmp/oro-app/.env-app.local /tmp/oro-app/.env-app.test && cp -rf /tmp/oro-app/. . && rm -rf /tmp/oro-app && composer install", resolvedVersion, oroRepo))
 		if err := docker.RunComposeCommandSilently(scaffoldMsg, cloneCmd...); err != nil {
@@ -182,13 +213,13 @@ func performInstallation() bool {
 		}
 
 		// Sources present: check for vendors (especially if vendor-oro was just added)
-		checkVendor := []string{"run", "--rm", "-T", "application", "test", "-f", "vendor/autoload.php"}
+		checkVendor := initRunArgs("application", "test", "-f", "vendor/autoload.php")
 		utils.StartLoader("Checking for vendors...")
 		_, errVendor := docker.RunComposeCommandWithOutput(checkVendor...)
 		utils.StopLoader()
 		if errVendor != nil {
-			installCmd := []string{"run", "--rm", "-T"}
-			installCmd = append(installCmd, docker.CredentialRunArgs(conf.Composer.Auth, conf.Composer.Repositories)...)
+			installCmd := initRunArgs()
+			installCmd = append(installCmd, docker.CredentialRunArgs(conf.Composer)...)
 			installCmd = append(installCmd, "application", "composer", "install")
 			if err := docker.RunComposeCommandSilently("Installing dependencies...", installCmd...); err != nil {
 				utils.PrintError(fmt.Sprintf("Composer install failed: %v", err))
@@ -221,8 +252,8 @@ func performInstallation() bool {
 			` && COMPOSER_ALLOW_SUPERUSER=1 composer require "%s:@dev" --no-interaction --no-scripts`,
 			bundlePackageName,
 		)
-		requireCmd := []string{"run", "--rm", "-T"}
-		requireCmd = append(requireCmd, docker.CredentialRunArgs(conf.Composer.Auth, conf.Composer.Repositories)...)
+		requireCmd := initRunArgs()
+		requireCmd = append(requireCmd, docker.CredentialRunArgs(conf.Composer)...)
 		requireCmd = append(requireCmd, "application", "bash", "-c", bashCmd)
 		if err := docker.RunComposeCommandSilently("Installing bundle into vendor...", requireCmd...); err != nil {
 			utils.PrintWarning(fmt.Sprintf("Bundle installation failed: %v", err))
@@ -240,8 +271,8 @@ func performInstallation() bool {
 		return true
 	}
 
-	volumeSetupCmd := []string{"run", "--rm", "-T"}
-	volumeSetupCmd = append(volumeSetupCmd, docker.CredentialRunArgs(conf.Composer.Auth, conf.Composer.Repositories)...)
+	volumeSetupCmd := initRunArgs()
+	volumeSetupCmd = append(volumeSetupCmd, docker.CredentialRunArgs(conf.Composer)...)
 	volumeSetupCmd = append(volumeSetupCmd, "volume-setup")
 	if err := docker.RunSetupComposeCommandSilently("Setting up volumes for installation...", volumeSetupCmd...); err != nil {
 		utils.PrintWarning(fmt.Sprintf("volume-setup failed: %v", err))
@@ -254,12 +285,69 @@ func performInstallation() bool {
 	return true
 }
 
+// initRunArgs builds the leading `docker compose run` arguments for the one-off containers
+// init uses, appending any extra arguments (service name and command).
+//
+// --no-deps is the important part: init runs before OroCommerce is installed, and the
+// `application` service depends_on web, consumer and cron. Without it Compose starts that
+// whole long-running stack, which cannot boot against an empty database and therefore
+// restart-loops (restart: unless-stopped), recompiling the Symfony container into
+// var/cache/dev on every retry. That concurrent writer makes oro:install's
+// "rm -rf var/cache/*" fail ("can't remove 'var/cache/dev': Directory not empty") and the
+// surviving half-written entity-config cache then crashes
+// oro:entity-extend:cache:clear with a null cache key. The services init genuinely needs
+// (db, gotenberg and the optional ones) are started explicitly beforehand.
+func initRunArgs(extra ...string) []string {
+	args := []string{"run", "--rm", "-T", "--no-deps"}
+	return append(args, extra...)
+}
+
+// seedProjectEnvFiles copies Orobox's generated env files into the checkout for install
+// types that no longer bind-mount them (project, demo), so a freshly scaffolded
+// application starts with working DSNs. An existing file is never touched: from the first
+// init onwards the project owns these files. This runs only from init — wiring it into the
+// EnsureDockerCompose path shared by up, run, test and friends would clobber the project's
+// own edits on every command.
+func seedProjectEnvFiles(strategy config.InstallType) {
+	if strategy.MountsInternalEnvFiles() {
+		return
+	}
+
+	internalDir := config.GetInternalDir()
+	repoDir := config.GetHostBundlePath()
+
+	seeds := []struct{ src, dst string }{
+		{filepath.Join(internalDir, ".env"), filepath.Join(repoDir, ".env-app.local")},
+		{filepath.Join(internalDir, ".env.test"), filepath.Join(repoDir, ".env-app.test")},
+	}
+
+	for _, seed := range seeds {
+		if _, err := os.Stat(seed.dst); err == nil {
+			continue
+		} else if !errors.Is(err, os.ErrNotExist) {
+			utils.PrintWarning(fmt.Sprintf("Could not check %s: %v", seed.dst, err))
+			continue
+		}
+
+		content, err := os.ReadFile(seed.src)
+		if err != nil {
+			utils.PrintWarning(fmt.Sprintf("Could not read %s: %v", seed.src, err))
+			continue
+		}
+		if err := os.WriteFile(seed.dst, content, 0644); err != nil {
+			utils.PrintWarning(fmt.Sprintf("Could not seed %s: %v", seed.dst, err))
+			continue
+		}
+		utils.PrintInfo(fmt.Sprintf("Seeded %s from %s (the project owns it from now on).", filepath.Base(seed.dst), seed.src))
+	}
+}
+
 func init() {
 	rootCmd.AddCommand(initCmd)
 
 	initCmd.Flags().StringVarP(&oroVersion, "oro-version", "v", "6.1", "OroCommerce version")
 	initCmd.Flags().StringVarP(&bundleNamespace, "bundle-namespace", "n", "", "Bundle namespace")
-	initCmd.Flags().StringVarP(&installType, "type", "t", "", "Installation type (bundle|project)")
+	initCmd.Flags().StringVarP(&installType, "type", "t", "", "Installation type (bundle|project|demo)")
 	initCmd.Flags().BoolVar(&forceInstall, "force-install", false, "Force oro:install even if the project already has composer.json")
 }
 
@@ -298,7 +386,7 @@ func generateConfig() {
 	typeOfInstall := installType
 	if typeOfInstall == "" {
 		typeOfInstall = utils.AskSelection(reader, "Installation type",
-			[]string{config.InstallTypeBundle, config.InstallTypeProject}, config.InstallTypeBundle)
+			[]string{config.InstallTypeBundle, config.InstallTypeProject, config.InstallTypeDemo}, config.InstallTypeBundle)
 	}
 
 	strategy, err := config.InstallTypeFor(typeOfInstall)

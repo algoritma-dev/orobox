@@ -31,20 +31,28 @@ type ServicesConfig struct {
 }
 
 // QaConfig represents the configuration for enabled QA tools.
+//
+// Every field is a pointer, and that is not cosmetic. IsQaToolEnabled reads an unset key as
+// enabled, so "unset" and "false" are different states — and a plain bool cannot tell them
+// apart. `orobox deploy-init` rewrites the whole config file through SaveConfig, so a value
+// field would turn every tool the file never mentioned into an explicit `false` and disable
+// the entire QA tool set for good.
 type QaConfig struct {
-	Phpstan     bool `yaml:"phpstan" mapstructure:"phpstan"`
-	Rector      bool `yaml:"rector" mapstructure:"rector"`
-	PhpCSFixer  bool `yaml:"php_cs_fixer" mapstructure:"php_cs_fixer"`
-	TwigCSFixer bool `yaml:"twig_cs_fixer" mapstructure:"twig_cs_fixer"`
-	Eslint      bool `yaml:"eslint" mapstructure:"eslint"`
-	Stylelint   bool `yaml:"stylelint" mapstructure:"stylelint"`
+	Phpstan     *bool `yaml:"phpstan,omitempty" mapstructure:"phpstan"`
+	Rector      *bool `yaml:"rector,omitempty" mapstructure:"rector"`
+	PhpCSFixer  *bool `yaml:"php_cs_fixer,omitempty" mapstructure:"php_cs_fixer"`
+	TwigCSFixer *bool `yaml:"twig_cs_fixer,omitempty" mapstructure:"twig_cs_fixer"`
+	Eslint      *bool `yaml:"eslint,omitempty" mapstructure:"eslint"`
+	Stylelint   *bool `yaml:"stylelint,omitempty" mapstructure:"stylelint"`
 }
 
 // TestConfig represents the configuration for the test environment.
 type TestConfig struct {
-	UseTmpfs  bool     `yaml:"use_tmpfs" mapstructure:"use_tmpfs"`
-	TmpfsSize string   `yaml:"tmpfs_size" mapstructure:"tmpfs_size"`
-	Qa        QaConfig `yaml:"qa" mapstructure:"qa"`
+	UseTmpfs  bool   `yaml:"use_tmpfs" mapstructure:"use_tmpfs"`
+	TmpfsSize string `yaml:"tmpfs_size" mapstructure:"tmpfs_size"`
+	// Qa is a pointer for the same reason its fields are: a struct value would always be
+	// serialized, turning a config that never mentioned QA into one that disables it.
+	Qa *QaConfig `yaml:"qa,omitempty" mapstructure:"qa"`
 }
 
 // CommandConfig represents a custom command that can be run in the container.
@@ -64,6 +72,12 @@ type ComposerConfig struct {
 	// COMPOSER_AUTH env var only into the containers that run composer, so tokens
 	// for private repositories never get committed or baked into long-running services.
 	Auth map[string]interface{} `yaml:"auth" mapstructure:"auth"`
+	// SSHAgent overrides the auto-detection of SSH agent forwarding. Nil means auto-detect
+	// (any SSH-transport repository URL, here or in the project's own composer.json); a
+	// non-nil value forces forwarding on or off. It is a pointer because "unset" and
+	// "explicitly false" must mean different things, and so an unset value is never written
+	// into a generated config file.
+	SSHAgent *bool `yaml:"ssh_agent,omitempty" mapstructure:"ssh_agent"`
 }
 
 // OroVersions defines the versions of components for a specific OroCommerce version.
@@ -76,6 +90,17 @@ type OroVersions struct {
 	PNPM          string
 	RabbitMQ      string
 	Elasticsearch string
+	// Symfony is the Symfony minor line this Oro version ships. QA tools install into
+	// an isolated vendor tree, but PHPStan co-loads Oro's classes with the tools'
+	// Symfony copies in one process, so those copies must match this line or PHP
+	// fatals on incompatible method signatures. See GetQaSymfonyConstraints.
+	Symfony string
+	// Stylelint is the npm constraint for stylelint itself, and StylelintConfig the exact
+	// version of @oroinc/oro-stylelint-config this Oro version's own package.json declares.
+	// They travel together: the shareable config carries its own stylelint dependency, and a
+	// mismatch is not a warning but a crash. See GetQaStylelint.
+	Stylelint       string
+	StylelintConfig string
 }
 
 // SupportedOroVersions is the list of supported OroCommerce versions.
@@ -86,43 +111,55 @@ func GetVersionsForOro(oroVersion string) OroVersions {
 	switch oroVersion {
 	case "7.0":
 		return OroVersions{
-			PHP:           "8.5",
-			Postgres:      "17.6-alpine",
-			Redis:         "7.4-alpine",
-			Node:          "24",
-			PNPM:          "10",
-			RabbitMQ:      "4.2-management-alpine",
-			Elasticsearch: "9.2.0",
+			PHP:             "8.5",
+			Postgres:        "17.6-alpine",
+			Redis:           "7.4-alpine",
+			Node:            "24",
+			PNPM:            "10",
+			RabbitMQ:        "4.2-management-alpine",
+			Elasticsearch:   "9.2.0",
+			Symfony:         "6.4",
+			Stylelint:       "^16.26.1",
+			StylelintConfig: "7.0.1",
 		}
 	case "6.1":
 		return OroVersions{
-			PHP:           "8.4",
-			Postgres:      "16.1-alpine",
-			Redis:         "7.2-alpine",
-			Node:          "22",
-			NPM:           "10",
-			RabbitMQ:      "3.12-management-alpine",
-			Elasticsearch: "8.4.1",
+			PHP:             "8.4",
+			Postgres:        "16.1-alpine",
+			Redis:           "7.2-alpine",
+			Node:            "22",
+			NPM:             "10",
+			RabbitMQ:        "3.12-management-alpine",
+			Elasticsearch:   "8.4.1",
+			Symfony:         "6.4",
+			Stylelint:       "^16.17.0",
+			StylelintConfig: "6.1.0-lts001",
 		}
 	case "6.0":
 		return OroVersions{
-			PHP:           "8.3",
-			Postgres:      "16.1-alpine",
-			Redis:         "7.0-alpine",
-			Node:          "20.19",
-			NPM:           "10",
-			RabbitMQ:      "3.12-management-alpine",
-			Elasticsearch: "8.4.1",
+			PHP:             "8.3",
+			Postgres:        "16.1-alpine",
+			Redis:           "7.0-alpine",
+			Node:            "20.19",
+			NPM:             "10",
+			RabbitMQ:        "3.12-management-alpine",
+			Elasticsearch:   "8.4.1",
+			Symfony:         "6.4",
+			Stylelint:       "^15.11.0",
+			StylelintConfig: "6.0.0-lts1",
 		}
 	case "5.1":
 		return OroVersions{
-			PHP:           "8.2",
-			Postgres:      "16.1-alpine",
-			Redis:         "6.2-alpine",
-			Node:          "18.14",
-			NPM:           "9.3",
-			RabbitMQ:      "3.11-management-alpine",
-			Elasticsearch: "8.4.1",
+			PHP:             "8.2",
+			Postgres:        "16.1-alpine",
+			Redis:           "6.2-alpine",
+			Node:            "18.14",
+			NPM:             "9.3",
+			RabbitMQ:        "3.11-management-alpine",
+			Elasticsearch:   "8.4.1",
+			Symfony:         "5.4",
+			Stylelint:       "^15.11.0",
+			StylelintConfig: "5.1.0-lts002",
 		}
 	default:
 		// Fallback for other versions or default
@@ -150,13 +187,16 @@ type OroConfig struct {
 	Test       TestConfig      `yaml:"test" mapstructure:"test"`
 	Commands   []CommandConfig `yaml:"commands" mapstructure:"commands"`
 	Composer   ComposerConfig  `yaml:"composer" mapstructure:"composer"`
+	// Deploy is a pointer so a project without deployment keeps a clean config file: a struct
+	// value would always be serialized, empty stages and all.
+	Deploy *DeployConfig `yaml:"deploy,omitempty" mapstructure:"deploy"`
 }
 
 // Install types for OroCommerce.
 const (
 	InstallTypeBundle  = "bundle"
 	InstallTypeProject = "project"
-	// InstallTypeDemo is parked on a separate branch
+	InstallTypeDemo    = "demo"
 )
 
 // OroRootDir is the base directory for OroCommerce in the container.
@@ -198,7 +238,7 @@ func (c *OroConfig) Validate() error {
 			return errors.New("config error: 'host' is required for domain at index " + string(rune(i)))
 		}
 	}
-	return nil
+	return c.ValidateDeploy()
 }
 
 // ParseConfig parses a configuration from bytes.
@@ -252,6 +292,145 @@ func GetSourceRootContainerPath() string {
 		return GetBundleRootContainerPath()
 	}
 	return installType.SourceRootContainer()
+}
+
+// GetQaAnalyzePath returns the source tree PHPStan should analyze for the active
+// install type. Passing this explicitly on the PHPStan CLI overrides the config's
+// own `paths`, which the algoritma plugin resolves against the isolated QA dir.
+func GetQaAnalyzePath() string {
+	installType, err := InstallTypeFor(viper.GetString("type"))
+	if err != nil {
+		return GetBundleRootContainerPath()
+	}
+	return installType.QaAnalyzePath()
+}
+
+// QaAnalyzePathFor returns the tree PHPStan analyzes for an explicit install type, for
+// callers that know the type without going through viper — the deploy pipeline, which is
+// always a project.
+func QaAnalyzePathFor(typeName string) string {
+	installType, err := InstallTypeFor(typeName)
+	if err != nil {
+		return GetBundleRootContainerPath()
+	}
+	return installType.QaAnalyzePath()
+}
+
+// qaSharedPackages are the packages the QA tool set and OroCommerce both need. They are the
+// reason the QA namespace needs any dependency bookkeeping at all: the tools live in the
+// isolated vendor-bin/qa tree, the application lives in vendor/, and a class present in both
+// trees can end up compiled twice in one PHP process. See qatools.SharedVendorScript.
+//
+// The order is stable so the generated manifest patch and the pinned requirements do not
+// reshuffle between runs.
+var qaSharedPackages = []string{
+	"symfony/console", "symfony/event-dispatcher", "symfony/string", "symfony/finder",
+	"symfony/filesystem", "symfony/process", "symfony/options-resolver", "symfony/stopwatch",
+	"symfony/service-contracts", "symfony/event-dispatcher-contracts",
+	"psr/container", "psr/log",
+	// twig/twig is shared for the same reason as the Symfony components, but it fails in a way
+	// of its own: Twig's DebugExtension require_once's Resources/debug.php, which declares the
+	// global function twig_var_dump(). The QA tree's copy sits under another path, so
+	// include_once cannot dedupe it, and PHPStan — the one tool that boots the kernel with the
+	// application's autoloader first — dies with "Cannot redeclare twig_var_dump()" as soon as
+	// both copies are loaded. Twig dropped those global functions in 3.9, so only the Oro lines
+	// still on an older Twig (5.1) reach the fatal; sharing the package removes the second copy
+	// on every line instead of on the ones that happen to fail today.
+	"twig/twig",
+}
+
+// QaSharedPackages returns the names of the packages both trees need, for the manifest patch
+// that hands them over to the application's tree. A copy is returned so a caller cannot
+// reorder the list the constraints are built from.
+func QaSharedPackages() []string {
+	out := make([]string, len(qaSharedPackages))
+	copy(out, qaSharedPackages)
+	return out
+}
+
+// GetQaSymfonyConstraints returns Composer constraints that pin the QA tools'
+// Symfony components (and the ABI-critical PSR packages) to the same line Oro
+// ships. Without them, bamarni resolves the tools against the latest Symfony,
+// and PHPStan then fatals when it co-loads Oro's older Symfony classes with the
+// tools' newer copies (mismatched method signatures on ServiceLocator,
+// Command::execute, TraceableEventDispatcher, ...).
+//
+// They are the fallback, not the fix: a package the application's own tree ships is removed
+// from the QA requirements entirely by the manifest patch (see qatools.SharedVendorScript),
+// because two identical copies still fatal — the dumped Symfony container inline-requires
+// vendor files by path, and include_once cannot dedupe a second copy under another path.
+// The constraints still matter for the packages the application does not ship, and for the
+// resolution that happens before the patch has anything installed to read.
+func GetQaSymfonyConstraints(oroVersion string) []string {
+	sf := GetVersionsForOro(oroVersion).Symfony
+	if sf == "" {
+		sf = "6.4"
+	}
+
+	// Symfony 6.4 pairs with service-contracts v3 / psr-container v2; 5.4 with v2 / v1. psr/log
+	// is only capped on 5.4, where symfony/console conflicts with psr/log >=3, which
+	// algoritma/php-coding-standards otherwise drags in via composer/composer.
+	contracts, container, log := "^3.0", "^2.0", ""
+	if sf == "5.4" {
+		contracts, container, log = "^2.5", "^1.1", "^2"
+	}
+
+	constraints := make([]string, 0, len(qaSharedPackages))
+	for _, name := range qaSharedPackages {
+		switch name {
+		case "symfony/service-contracts", "symfony/event-dispatcher-contracts":
+			constraints = append(constraints, name+":"+contracts)
+		case "psr/container":
+			constraints = append(constraints, name+":"+container)
+		case "psr/log":
+			if log != "" {
+				constraints = append(constraints, name+":"+log)
+			}
+		case "twig/twig":
+			// Twig versions independently of Symfony, so the Symfony line says nothing about it.
+			// The constraint is only the fallback for a tree that does not ship Twig at all; an
+			// Oro application always does, and the manifest patch then replaces it with the exact
+			// line the application installed.
+			constraints = append(constraints, name+":^3.0")
+		default:
+			constraints = append(constraints, name+":^"+sf)
+		}
+	}
+	return constraints
+}
+
+// QaStylelint is the stylelint half of the JS tool set, resolved for one Oro line.
+//
+// The three packages are one decision, not three: @oroinc/oro-stylelint-config carries its own
+// stylelint dependency (^15.3 up to Oro 6.0, ^16 from 6.1).
+//
+// No formatter is named here any more. Which stylelint actually runs is OroCommerce's choice, not
+// this table's — the linters are the application's own installation — and a formatter picked from
+// a version table is what produced "formatters[STYLELINT_FORMATTER] is not a function" on an Oro
+// line whose LTS patch had moved on. The formatter is Orobox's own file instead; see
+// qatools/stylelintformatter.go.
+type QaStylelint struct {
+	// Stylelint is the npm constraint for stylelint itself.
+	Stylelint string
+	// Config is the exact @oroinc/oro-stylelint-config version this Oro version declares. It is
+	// pinned rather than floated for the same reason eslint-config-google is: the version is
+	// OroCommerce's choice, and `latest` resolves to whichever line Oro released most recently —
+	// which on a pnpm install is overridden anyway by the application's own workspace resolution.
+	Config string
+}
+
+// GetQaStylelint resolves the stylelint packages for an Oro version.
+//
+// Both formatters read the report path from the same STYLELINT_CODE_QUALITY_REPORT variable and
+// leave the human-readable output on stdout, so which one is installed changes nothing above this
+// function.
+func GetQaStylelint(oroVersion string) QaStylelint {
+	versions := GetVersionsForOro(oroVersion)
+
+	return QaStylelint{
+		Stylelint: versions.Stylelint,
+		Config:    versions.StylelintConfig,
+	}
 }
 
 // GetHostBundlePath returns the absolute path to the bundle on the host.

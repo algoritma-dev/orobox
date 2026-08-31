@@ -112,6 +112,12 @@ services:
 
   gotenberg:
     image: gotenberg/gotenberg:8.23.2
+    # The install depends on this with condition: service_healthy, and an unset interval
+    # means Docker's 30s default before the first probe ever runs.
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://127.0.0.1:3000/health" ]
+      interval: 2s
+      timeout: 5s
+      retries: 45
+      start_period: 30s
     restart: on-failure

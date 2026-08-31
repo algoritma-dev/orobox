@@ -12,14 +12,17 @@ import (
 var downCmd = &cobra.Command{
 	Use:   "down",
 	Short: "Shut down the environment",
-	Run: func(_ *cobra.Command, _ []string) {
+	// See upCmd: a compose failure is not a usage error.
+	SilenceUsage: true,
+	RunE: func(_ *cobra.Command, _ []string) error {
 		docker.SetIncludeTestFiles(true)
 		docker.EnsureDockerCompose()
 		if err := docker.RunComposeCommandSilently("Stopping containers...", "down", "--remove-orphans"); err != nil {
 			utils.PrintError(fmt.Sprintf("Shut down failed: %v", err))
-			return
+			return err
 		}
 		utils.PrintSuccess("Environment shut down.")
+		return nil
 	},
 }
 

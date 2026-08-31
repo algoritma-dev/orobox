@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"text/template"
+	"time"
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/utils"
@@ -71,6 +72,36 @@ func GetComposeCommand() []string {
 	return memoizedComposeCmd
 }
 
+// The websocket server listens inside the compose network only: nginx proxies the
+// browser-facing "/ws" location to it, and PHP talks to it directly over the same
+// address. Both the compose file and the generated .env render from these values so
+// the service name and the port cannot drift apart.
+const (
+	websocketBackendHost = "ws"
+	websocketBackendPort = "8080"
+)
+
+// Memory budget for the container that installs OroCommerce.
+//
+// The long-running services keep the smaller mem_limit from the oro-app template: they never
+// run webpack, and raising their ceiling would give away the protection the limit exists for.
+// The `application` service is different — composer install, oro:install and oro:assets:build
+// all run there, and the webpack production build is the memory peak of the whole install.
+//
+// nodeHeapMB is derived from the limit rather than written next to it, so the two cannot drift
+// into a heap ceiling above the cgroup limit — which is the failure this exists to prevent.
+// The reserve covers node's non-heap memory (young generation, compiled code, source-map
+// buffers) plus the PHP process waiting on it.
+const (
+	buildMemoryLimitMB = 5120
+	buildMemoryReserve = 1024
+)
+
+var (
+	buildMemoryLimit = fmt.Sprintf("%dm", buildMemoryLimitMB)
+	nodeHeapMB       = buildMemoryLimitMB - buildMemoryReserve
+)
+
 // GetNginxPorts returns the configured HTTP and HTTPS ports for Nginx.
 func GetNginxPorts() (httpPort string, httpsPort string) {
 	httpPort = viper.GetString("nginx_http_port")
@@ -89,6 +120,17 @@ func GetNginxPorts() (httpPort string, httpsPort string) {
 		httpsPort = "8443"
 	}
 	return
+}
+
+// websocketFrontendPort returns the port the browser must use to reach the websocket
+// server. The connection goes through nginx, so it is the published nginx port and not
+// the internal websocketBackendPort. Only one port can be advertised, so a setup mixing
+// SSL and plain domains advertises the HTTPS one.
+func websocketFrontendPort(hasSsl bool, httpPort, httpsPort string) string {
+	if hasSsl {
+		return httpsPort
+	}
+	return httpPort
 }
 
 // GetApplicationURLs returns the list of URLs where the application is reachable.
@@ -208,6 +250,8 @@ func EnsureDockerCompose() bool {
 		BundleNamespace         string
 		Domains                 []config.DomainConfig
 		MemoryLimit             string
+		BuildMemoryLimit        string
+		NodeHeapMB              int
 		NginxHTTPPort           string
 		NginxHTTPSPort          string
 		PhpFpmPort              string
@@ -224,6 +268,12 @@ func EnsureDockerCompose() bool {
 		RunsComposerRequire     bool
 		RunsComposerInstall     bool
 		SyncsVendorToHost       bool
+		MountsEnvFiles          bool
+		WebsocketBackendHost    string
+		WebsocketBackendPort    string
+		WebsocketFrontendPort   string
+		SSHAgentSocket          string
+		SeedDumpPath            string
 	}{
 		Type:                    viper.GetString("type"),
 		InternalDir:             internalDir,
@@ -231,11 +281,15 @@ func EnsureDockerCompose() bool {
 		CustomBundle:            config.CustomBundlePath,
 		BundleNamespace:         config.GetBundlePath(),
 		MemoryLimit:             "2048M", // Default
+		BuildMemoryLimit:        buildMemoryLimit,
+		NodeHeapMB:              nodeHeapMB,
 		PhpFpmPort:              "9000",
 		UserRuntime:             "www-data",
 		UseTmpfs:                viper.GetBool("test.use_tmpfs"),
 		TmpfsSize:               viper.GetString("test.tmpfs_size"),
 		BundleRootContainerPath: config.GetBundleRootContainerPath(),
+		WebsocketBackendHost:    websocketBackendHost,
+		WebsocketBackendPort:    websocketBackendPort,
 	}
 
 	// Resolve the install-type strategy and derive every behavioral flag from it.
@@ -250,6 +304,24 @@ func EnsureDockerCompose() bool {
 	data.RunsComposerRequire = installType.RunsComposerRequire()
 	data.RunsComposerInstall = installType.RunsComposerInstall()
 	data.SyncsVendorToHost = installType.SyncsVendorToHost()
+	data.MountsEnvFiles = installType.MountsInternalEnvFiles()
+
+	// SSH agent forwarding for the long-running stack. Unlike init's one-shot runs, this
+	// path never starts an agent: EnsureSSHAgent kills any agent it spawns when the command
+	// returns, and a socket mounted into a container that outlives the command would be dead
+	// for the rest of that container's life. So only an agent the user already runs is used.
+	var composerConf config.ComposerConfig
+	if err := viper.UnmarshalKey("composer", &composerConf); err != nil {
+		utils.PrintWarning(fmt.Sprintf("Could not read the composer configuration: %v", err))
+	}
+	if needsSSHForwarding(composerConf) {
+		if sock, ok := hostSSHAgentSocket(); ok {
+			data.SSHAgentSocket = sock
+		} else {
+			utils.PrintWarning("SSH agent forwarding is enabled but no agent was found ($SSH_AUTH_SOCK is empty). " +
+				"Start one with `eval \"$(ssh-agent)\" && ssh-add`, then re-run the command.")
+		}
+	}
 
 	if data.TmpfsSize == "" {
 		data.TmpfsSize = "1g"
@@ -271,6 +343,8 @@ func EnsureDockerCompose() bool {
 		}
 	}
 
+	data.WebsocketFrontendPort = websocketFrontendPort(data.HasSsl, data.NginxHTTPPort, data.NginxHTTPSPort)
+
 	if data.HasSsl {
 		absCertsPath, err := filepath.Abs(filepath.Join(config.GetInternalDir(), "certs"))
 		if err == nil {
@@ -291,6 +365,10 @@ func EnsureDockerCompose() bool {
 	data.PnpmVersion = versions.PNPM
 	data.PostgresVersion = versions.Postgres
 	data.Postgres = true
+	// Rendered into the entrypoint so the install step knows where to look for the dump the
+	// image was built with. The name carries the Postgres major, so an image whose seed was
+	// dumped by another server simply has no file at this path and the install runs as before.
+	data.SeedDumpPath = config.SeedDumpPath(config.PostgresMajor(versions.Postgres))
 
 	data.RabbitMQ = viper.GetBool("services.rabbitmq")
 	if data.RabbitMQ {
@@ -906,6 +984,14 @@ func getRemoteImageDigest(imageName, arch, osName string) (string, error) {
 	return "", fmt.Errorf("no matching platform found")
 }
 
+// ReloadWebServer asks nginx to re-read its configuration. The generated nginx.conf is
+// bind-mounted, so a template change reaches a running web container as a file change
+// only: without this reload the container keeps serving the previous configuration until
+// it is recreated.
+func ReloadWebServer() error {
+	return RunComposeCommandSilently("Reloading web server configuration...", "exec", "-T", "web", "nginx", "-s", "reload")
+}
+
 // RunComposeCommandWithOutput runs docker compose and returns its combined output.
 // It is a variable to allow overriding in tests.
 var RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
@@ -954,6 +1040,54 @@ type ServiceStatus struct {
 	Health  string `json:"Health"`
 }
 
+// ServiceStatuses asks compose for the state of the named services, keyed by service name. A
+// service compose knows nothing about — never created, or already removed — is simply absent from
+// the map, and so is every service when the query itself fails: callers treat "no status" as "not
+// running", which is the safe reading for both.
+func ServiceStatuses(serviceNames []string) map[string]ServiceStatus {
+	statusMap := make(map[string]ServiceStatus)
+
+	args := append([]string{"ps", "--format", "json"}, serviceNames...)
+	output, err := RunComposeCommandWithOutput(args...)
+	if err != nil {
+		return statusMap
+	}
+
+	// Compose has emitted both shapes across its 2.x line: a JSON array, and one object per line.
+	var statuses []ServiceStatus
+	if jsonErr := json.Unmarshal(output, &statuses); jsonErr == nil {
+		for _, s := range statuses {
+			statusMap[s.Service] = s
+		}
+		return statusMap
+	}
+
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if line == "" {
+			continue
+		}
+		var s ServiceStatus
+		if jsonErr := json.Unmarshal([]byte(line), &s); jsonErr == nil {
+			statusMap[s.Service] = s
+		}
+	}
+	return statusMap
+}
+
+// RunningServices filters serviceNames down to the ones compose reports as running, keeping the
+// caller's order so a stop/start pair is symmetric.
+func RunningServices(serviceNames []string) []string {
+	statuses := ServiceStatuses(serviceNames)
+
+	running := make([]string, 0, len(serviceNames))
+	for _, name := range serviceNames {
+		if status, ok := statuses[name]; ok && status.State == "running" {
+			running = append(running, name)
+		}
+	}
+	return running
+}
+
 var (
 	ensuredServices      = make(map[string]bool)
 	ensuredServicesMu    sync.Mutex
@@ -997,46 +1131,29 @@ func EnsureServicesRunning(serviceNames []string) error {
 		return nil
 	}
 
-	// Use docker compose ps --format json to check status of all services at once
-	args := append([]string{"ps", "--format", "json"}, servicesToCheck...)
-	output, err := RunComposeCommandWithOutput(args...)
+	statusMap := ServiceStatuses(servicesToCheck)
 
-	statusMap := make(map[string]ServiceStatus)
-	if err == nil {
-		// try to parse as array
-		var statuses []ServiceStatus
-		if jsonErr := json.Unmarshal(output, &statuses); jsonErr == nil {
-			for _, s := range statuses {
-				statusMap[s.Service] = s
-			}
-		} else {
-			// Fallback for line-delimited or single object
-			lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-			for _, line := range lines {
-				if line == "" {
-					continue
-				}
-				var s ServiceStatus
-				if jsonErr := json.Unmarshal([]byte(line), &s); jsonErr == nil {
-					statusMap[s.Service] = s
-				}
-			}
-		}
-	}
-
+	// "starting" is deliberately not accepted here. A container in that state is running but
+	// has not passed a single probe yet — Postgres is not accepting connections, RabbitMQ is
+	// not listening — and every caller of this function goes straight on to exec into the
+	// service. Those are waited out below instead, along with anything that has to be started.
+	var servicesToAwait []string
 	for _, name := range servicesToCheck {
 		status, ok := statusMap[name]
-		if ok && status.State == "running" && (status.Health == "" || status.Health == "healthy" || status.Health == "starting") {
+		switch {
+		case ok && status.State == "running" && (status.Health == "" || status.Health == "healthy"):
 			ensuredServicesMu.Lock()
 			ensuredServices[name] = true
 			ensuredServicesMu.Unlock()
-		} else {
+		case ok && status.State == "running":
+			servicesToAwait = append(servicesToAwait, name)
+		default:
 			servicesToStart = append(servicesToStart, name)
 		}
 	}
 
 	if len(servicesToStart) == 0 {
-		return nil
+		return waitForServicesHealthy(servicesToAwait)
 	}
 
 	// If any service is not running/healthy, start them
@@ -1046,13 +1163,105 @@ func EnsureServicesRunning(serviceNames []string) error {
 		return err
 	}
 
-	ensuredServicesMu.Lock()
-	for _, name := range servicesToStart {
-		ensuredServices[name] = true
-	}
-	ensuredServicesMu.Unlock()
+	// `up -d` returns once the containers are created and running, which is well before a
+	// healthcheck has passed, so the services it just started are waited on too.
+	return waitForServicesHealthy(append(servicesToAwait, servicesToStart...))
+}
 
-	return nil
+// The health poll budget: 45 attempts two seconds apart, matching the 90s the compose
+// healthchecks themselves tolerate after their start period. Variables so a test can drive the
+// loop without a clock.
+var (
+	serviceHealthAttempts = 45
+	serviceHealthInterval = 2 * time.Second
+)
+
+// waitForServicesHealthy blocks until every named service reports healthy, marking each ensured
+// as it does.
+//
+// A service that declares no healthcheck reports an empty Health and is accepted immediately:
+// `application` and `mail` are such services and appear in almost every call, so waiting on them
+// would hang forever. An explicit "unhealthy" is a failure and not something to keep polling —
+// the probe ran and answered.
+func waitForServicesHealthy(names []string) error {
+	pending := make([]string, 0, len(names))
+	for _, name := range names {
+		ensuredServicesMu.Lock()
+		already := ensuredServices[name]
+		ensuredServicesMu.Unlock()
+		if !already {
+			pending = append(pending, name)
+		}
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+
+	for attempt := 0; attempt < serviceHealthAttempts; attempt++ {
+		if attempt == 1 {
+			// Announced only once it is clear there is something to wait for: a stack that is
+			// already up answers on the first poll.
+			utils.StartLoader(fmt.Sprintf("Waiting for %s to become healthy...", strings.Join(pending, ", ")))
+			defer utils.StopLoader()
+		}
+		if attempt > 0 {
+			sleepFunc(serviceHealthInterval)
+		}
+
+		statuses := serviceStatuses(pending)
+
+		var stillPending []string
+		for _, name := range pending {
+			status, ok := statuses[name]
+			switch {
+			case ok && status.State == "running" && (status.Health == "" || status.Health == "healthy"):
+				ensuredServicesMu.Lock()
+				ensuredServices[name] = true
+				ensuredServicesMu.Unlock()
+			case ok && status.Health == "unhealthy":
+				return fmt.Errorf("service %s is unhealthy: its healthcheck ran and failed", name)
+			default:
+				stillPending = append(stillPending, name)
+			}
+		}
+
+		pending = stillPending
+		if len(pending) == 0 {
+			return nil
+		}
+	}
+
+	budget := time.Duration(serviceHealthAttempts) * serviceHealthInterval
+	return fmt.Errorf("service(s) %s did not become healthy within %s", strings.Join(pending, ", "), budget)
+}
+
+// serviceStatuses reads `docker compose ps` for the given services. A read that fails yields an
+// empty map, which the caller treats as "not ready yet" and retries.
+func serviceStatuses(names []string) map[string]ServiceStatus {
+	output, err := RunComposeCommandWithOutput(append([]string{"ps", "--format", "json"}, names...)...)
+	if err != nil {
+		return nil
+	}
+
+	statuses := make(map[string]ServiceStatus)
+	var list []ServiceStatus
+	if err := json.Unmarshal(output, &list); err == nil {
+		for _, s := range list {
+			statuses[s.Service] = s
+		}
+		return statuses
+	}
+	// Compose also emits one JSON object per line.
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if line == "" {
+			continue
+		}
+		var s ServiceStatus
+		if err := json.Unmarshal([]byte(line), &s); err == nil {
+			statuses[s.Service] = s
+		}
+	}
+	return statuses
 }
 
 // IsDatabaseInitialized checks if the database is initialized.

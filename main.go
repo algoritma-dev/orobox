@@ -5,6 +5,7 @@ import (
 	"embed"
 	"github.com/algoritma-dev/orobox/cmd"
 	"github.com/algoritma-dev/orobox/internal/docker"
+	"github.com/algoritma-dev/orobox/internal/pipeline"
 	"github.com/algoritma-dev/orobox/internal/scaffold"
 )
 
@@ -13,6 +14,7 @@ var templatesFS embed.FS
 
 func main() {
 	docker.Templates = templatesFS
+	pipeline.Templates = templatesFS
 	scaffold.Templates = templatesFS
 	cmd.Execute()
 }

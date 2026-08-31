@@ -1,0 +1,26 @@
+{
+    "totals": {
+        "changed_files": 1,
+        "errors": 1
+    },
+    "file_diffs": [
+        {
+            "file": "var/qa-probe/Bad.php",
+            "diff": "--- Original\n+++ New\n@@ -1,7 +1,6 @@\n <?php\n class Bad {\n-    public function run( $x ) {\n-        $unused = 1;\n+    public function run( $x ): string|int {\n         if ($x == null) { return \"nope\"; }\n         return strlen($x, \"extra\");\n     }\n",
+            "applied_rectors": [
+                "Rector\\DeadCode\\Rector\\Assign\\RemoveUnusedVariableAssignRector",
+                "Rector\\TypeDeclaration\\Rector\\ClassMethod\\ReturnTypeFromStrictTypedCallRector"
+            ]
+        }
+    ],
+    "changed_files": [
+        "var/qa-probe/Bad.php"
+    ],
+    "errors": [
+        {
+            "message": "Syntax error, unexpected '{', expecting T_VARIABLE",
+            "file": "var/qa-probe/Broken.php",
+            "line": 3
+        }
+    ]
+}

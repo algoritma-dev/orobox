@@ -17,9 +17,12 @@ var cleanBeforeUp bool
 var upCmd = &cobra.Command{
 	Use:   "up",
 	Short: "Start the development environment",
-	Run: func(_ *cobra.Command, _ []string) {
+	// A stack that will not start is a runtime problem, not a usage problem: the flag list
+	// printed after it buries the compose output that says what actually went wrong.
+	SilenceUsage: true,
+	RunE: func(_ *cobra.Command, _ []string) error {
 		certificates.InstallSslCertificates()
-		docker.EnsureDockerCompose()
+		configChanged := docker.EnsureDockerCompose()
 
 		if cleanBeforeUp {
 			if err := docker.RunComposeCommandSilently("Cleaning up environment...", "down", "-v", "--remove-orphans"); err != nil {
@@ -29,7 +32,15 @@ var upCmd = &cobra.Command{
 
 		if err := docker.RunComposeCommandSilently("Starting containers...", "up", "-d"); err != nil {
 			utils.PrintError(fmt.Sprintf("Startup failed: %v", err))
-			return
+			return err
+		}
+
+		// A container that was already running keeps its bind-mounted nginx.conf, so a
+		// regenerated configuration (new domain, websocket proxy, ...) needs a reload.
+		if configChanged {
+			if err := docker.ReloadWebServer(); err != nil {
+				utils.PrintWarning(fmt.Sprintf("Could not reload the web server configuration: %v", err))
+			}
 		}
 
 		fmt.Println()
@@ -92,6 +103,7 @@ var upCmd = &cobra.Command{
 			fmt.Printf("	- ORO_SEARCH_URL=http://elasticsearch:9200\n")
 		}
 
+		return nil
 	},
 }
 

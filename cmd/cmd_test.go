@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -23,6 +25,56 @@ func init() {
 		"templates/docker/docker-compose.setup.yml": &fstest.MapFile{Data: []byte("version: '3'")},
 		"templates/docker/docker-compose.test.yml":  &fstest.MapFile{Data: []byte("version: '3'")},
 	}
+}
+
+// TestMain clears CI for the whole package.
+//
+// `orobox qa` and `orobox test` pick their engine from the environment: with CI set they run the
+// Dagger pipeline instead of the compose stack. Every test here mocks the compose layer, so on a CI
+// runner — where CI is always set — they would otherwise start a real pipeline against the cmd
+// package directory and fail on a composer.json that is not there. Tests that care about the
+// engine set CI themselves with t.Setenv.
+func TestMain(m *testing.M) {
+	if err := os.Unsetenv("CI"); err != nil {
+		panic(err)
+	}
+	os.Exit(m.Run())
+}
+
+// psAfterUp answers ps the way compose does across a start: nothing while the services are
+// still down, then every requested service running and healthy once an `up` has been issued.
+//
+// Tests that assert an `up` was needed have to model that transition. Answering "already
+// running" from the first call makes EnsureServicesRunning correctly skip the start, and
+// answering "still down" forever makes it wait out the health budget it now honours.
+func psAfterUp(calls [][]string, args []string) []byte {
+	for _, call := range calls {
+		if len(call) > 0 && call[0] == "up" {
+			return psRunningRequested(args)
+		}
+	}
+	return []byte("[]")
+}
+
+// psRunningRequested answers `docker compose ps --format json <services...>` about the services
+// the call actually asked for, reporting each as running and healthy.
+//
+// Compose answers about the services in the request. A mock that always named a single service
+// let EnsureServicesRunning see every other one as absent, and since it waits for health rather
+// than accepting "starting", that meant polling for a service the mock never mentioned.
+func psRunningRequested(args []string) []byte {
+	var statuses []docker.ServiceStatus
+	for _, name := range args[1:] {
+		if strings.HasPrefix(name, "-") || name == "json" {
+			continue
+		}
+		statuses = append(statuses, docker.ServiceStatus{Service: name, State: "running", Health: "healthy"})
+	}
+	body, err := json.Marshal(statuses)
+	if err != nil {
+		panic(err)
+	}
+	return body
 }
 
 func TestUpCommand(t *testing.T) {
@@ -59,13 +111,22 @@ func TestUpCommand(t *testing.T) {
 		calls = calls[1:]
 	}
 
-	if len(calls) != 1 {
-		t.Errorf("Expected 1 more call to RunComposeCommand (up), got %d: %v", len(calls), calls)
+	if len(calls) == 0 {
+		t.Errorf("Expected a call to RunComposeCommand (up), got none")
 		return
 	}
 
 	if len(calls[0]) < 2 || calls[0][0] != "up" || !contains(calls[0], "-d") {
 		t.Errorf("Expected call to be up -d, got %v", calls[0])
+	}
+
+	// EnsureDockerCompose reports a configuration change whenever it writes the internal files,
+	// which on a clean checkout (CI) it always does, so up follows with an nginx reload. Accept
+	// that call, reject anything else.
+	for _, call := range calls[1:] {
+		if call[0] != "exec" || !contains(call, "nginx") {
+			t.Errorf("Unexpected extra call after up: %v", call)
+		}
 	}
 }
 
@@ -145,7 +206,7 @@ func TestTestCommand(t *testing.T) {
 
 	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
 		if len(args) > 0 && args[0] == "ps" {
-			return []byte(`{"Service": "application", "State": "running"}`), nil
+			return psAfterUp(calls, args), nil
 		}
 		// Return 1 for database check
 		return []byte("1"), nil
@@ -323,7 +384,7 @@ func TestTestCommandBundle(t *testing.T) {
 
 	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
 		if len(args) > 0 && args[0] == "ps" {
-			return []byte(`{"Service": "application", "State": "running"}`), nil
+			return psAfterUp(calls, args), nil
 		}
 		return []byte("1"), nil
 	}
@@ -443,7 +504,7 @@ func TestTestInitCommand(t *testing.T) {
 	// Simulates uninitialized environment to avoid prompts and running containers
 	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
 		if len(args) > 0 && args[0] == "ps" {
-			return []byte(`{"Service": "application", "State": "running"}`), nil
+			return psAfterUp(calls, args), nil
 		}
 		return []byte("0"), nil
 	}

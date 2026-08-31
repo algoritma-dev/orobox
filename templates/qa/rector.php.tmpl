@@ -1,0 +1,19 @@
+<?php
+
+declare(strict_types=1);
+
+use Rector\Config\RectorConfig;
+
+/**
+ * Project-specific Rector configuration, generated once by `orobox qa-init`.
+ *
+ * Orobox applies the shared standard first and this closure second, on the same RectorConfig, so
+ * calls made here override the standard's. Returning anything but a closure or a
+ * RectorConfigBuilder makes `orobox qa` fail with an explicit message rather than skip the file.
+ *
+ * Orobox adds one skip of its own on top of both: src/AppKernel.php, which OroCommerce generates
+ * and ships again with every release, so reformatting it is work the next update undoes.
+ */
+return static function (RectorConfig $rectorConfig): void {
+    // $rectorConfig->skip([__DIR__ . '/src/Migrations']);
+};

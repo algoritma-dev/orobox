@@ -11,6 +11,18 @@ on:
       - 'templates/docker/docker-compose.yml'
       - '.github/workflows/docker-build.yml'
   workflow_dispatch:
+    # Narrowing the matrix by hand is what makes one image reproducible on its own: the full
+    # matrix is twelve cells that each install OroCommerce, which is not what verifying a change
+    # to one version needs.
+    inputs:
+      oro-versions:
+        description: 'JSON array of Oro versions to build'
+        required: false
+        default: '["5.1", "6.0", "6.1", "7.0"]'
+      types:
+        description: 'JSON array of install types to build'
+        required: false
+        default: '["bundle", "project", "demo"]'
 
 jobs:
   build:
@@ -18,8 +30,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        oro-version: ["5.1", "6.0", "6.1", "7.0"]
-        type: ["bundle", "project"]
+        # `inputs` is empty on push, so each side falls back to the whole list rather than to an
+        # unparseable empty string.
+        oro-version: ${{ fromJSON(inputs.oro-versions || '["5.1", "6.0", "6.1", "7.0"]') }}
+        type: ${{ fromJSON(inputs.types || '["bundle", "project", "demo"]') }}
 
     steps:
       - name: Checkout code
@@ -70,14 +84,231 @@ jobs:
           cp .orobox/docker-entrypoint.sh build-context/
           cp .orobox/init-db.sql build-context/
 
-      - name: Build and push
+      # Built into the local daemon rather than pushed: the seed bake below has to run *this*
+      # image, and the push happens afterwards from the thin layer that adds the dump.
+      - name: Build runtime image
         uses: docker/build-push-action@v5
         with:
           context: build-context
           file: build-context/Dockerfile
-          push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/orobox:${{ matrix.oro-version }}-${{ matrix.type }}-latest
+          load: true
+          tags: orobox-runtime:local
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
             MEMORY_LIMIT=2048M
+
+      # Installs OroCommerce once, here, and keeps the resulting database as a dump inside the
+      # image. Every consumer — `orobox init`, the QA cache, the functional test database —
+      # restores it and reconciles the schema with oro:platform:update instead of paying for an
+      # oro:install of its own. On the e2e matrix that install costs about five minutes in init
+      # and six in each of the two pipeline steps, on every run, because a GitHub runner starts
+      # with every cache empty.
+      #
+      # Best effort on purpose: a bake that fails must not stop the image from being published.
+      # It leaves no dump behind, every consumer finds no file at the seed path, and the run
+      # costs exactly what it cost before this step existed. The warning is what makes that
+      # visible instead of silent.
+      - name: Bake the installed database into the image
+        id: seed
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Read from the rendered .env rather than restated here, so the identity below and the
+          # options the entrypoint would have passed to oro:install cannot drift apart.
+          env_val() { grep -E "^$1=" .orobox/.env | head -1 | cut -d= -f2- | tr -d '"'; }
+
+          PG_VER="$(env_val ORO_PG_VER)"
+          PG_MAJOR="${PG_VER%%.*}"
+          echo "Postgres $PG_VER (major $PG_MAJOR)"
+
+          # Same resolution `orobox init` performs: the newest release tag under the X.Y series,
+          # ignoring pre-releases, falling back to the series itself when there is no tag.
+          ORO_REPO=https://github.com/oroinc/orocommerce-application.git
+          ORO_TAG="$(git ls-remote --tags --refs "$ORO_REPO" \
+            | sed 's#.*refs/tags/##' \
+            | grep -E "^${{ matrix.oro-version }}(\.[0-9]+)*$" \
+            | sort -V | tail -1)"
+          ORO_TAG="${ORO_TAG:-${{ matrix.oro-version }}}"
+          echo "Installing OroCommerce $ORO_TAG"
+
+          docker network create seed-net
+          # max_locks_per_transaction is raised for the same reason the pipeline raises it on its own
+          # Postgres: DROP SCHEMA CASCADE over an installed OroCommerce takes a lock per object and
+          # runs out of shared memory at the default 64, which is what stopped the test install
+          # here with "out of shared memory / You might need to increase max_locks_per_transaction".
+          docker run -d --name seed-db --network seed-net \
+            -e POSTGRES_DB=oro_db -e POSTGRES_USER=oro_db_user -e POSTGRES_PASSWORD=oro_db_pass \
+            "postgres:${PG_VER}" -c max_locks_per_transaction=1024
+
+          for _ in $(seq 1 60); do
+            if docker exec seed-db pg_isready -U oro_db_user -d oro_db >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          docker exec seed-db psql -U oro_db_user -d oro_db -v ON_ERROR_STOP=1 \
+            -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"' \
+            -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm'
+
+          # Only Postgres is up, so the DSNs are the ones orobox renders when Redis, RabbitMQ and
+          # Elasticsearch are all off. The install is the same one the pipeline performs for its
+          # own database: no sample data, no translations to download.
+          mkdir -p seed-context
+          docker run -d --name seed-app --network seed-net --user root \
+            -v "$PWD/seed-context:/out" \
+            -e ORO_ENV=prod -e APP_ENV=prod \
+            -e COMPOSER_ALLOW_SUPERUSER=1 -e COMPOSER_PROCESS_TIMEOUT=0 \
+            -e COMPOSER_AUTH="{\"github-oauth\":{\"github.com\":\"${GITHUB_TOKEN}\"}}" \
+            -e ORO_DB_HOST=seed-db -e ORO_DB_PORT=5432 -e ORO_DB_NAME=oro_db \
+            -e ORO_DB_USER=oro_db_user -e ORO_DB_PASSWORD=oro_db_pass \
+            -e ORO_DB_DSN="postgres://oro_db_user:oro_db_pass@seed-db:5432/oro_db?sslmode=disable&charset=utf8&serverVersion=${PG_VER}" \
+            -e ORO_APP_PROTOCOL=http -e ORO_APP_DOMAIN=localhost -e ORO_APP_URL=http://localhost/ \
+            -e ORO_MQ_DSN=dbal: -e ORO_SESSION_DSN=native: \
+            -e ORO_SEARCH_ENGINE_DSN='orm:?prefix=oro_search' \
+            -e ORO_WEBSITE_SEARCH_ENGINE_DSN='orm:?prefix=oro_website_search' \
+            -e ORO_TAG="$ORO_TAG" -e ORO_REPO="$ORO_REPO" -e PG_MAJOR="$PG_MAJOR" \
+            -e ORO_USER_NAME="$(env_val ORO_USER_NAME)" \
+            -e ORO_USER_PASSWORD="$(env_val ORO_USER_PASSWORD)" \
+            -e ORO_USER_EMAIL="$(env_val ORO_USER_EMAIL)" \
+            -e ORO_USER_FIRSTNAME="$(env_val ORO_USER_FIRSTNAME)" \
+            -e ORO_USER_LASTNAME="$(env_val ORO_USER_LASTNAME)" \
+            -e ORO_ORGANIZATION_NAME="$(env_val ORO_ORGANIZATION_NAME)" \
+            -e ORO_LANGUAGE="$(env_val ORO_LANGUAGE)" \
+            -e ORO_FORMATTING_CODE="$(env_val ORO_FORMATTING_CODE)" \
+            orobox-runtime:local sleep infinity
+
+          # The install runs through exec rather than as the container command, so the steps that
+          # follow it can reuse this checkout: cloning and composer install are the expensive half
+          # of this step, and a second container would pay for them twice.
+          docker exec -w /var/www/oro seed-app bash -c '
+              set -e
+              git clone -b "$ORO_TAG" --depth 1 "$ORO_REPO" /tmp/oro-app
+              cp -rf /tmp/oro-app/. .
+              rm -rf /tmp/oro-app
+              composer install --no-interaction --no-progress
+              # What the entrypoint compares the project against before reusing the dump. The
+              # resolved oro/platform, not the tag asked for: the tag says nothing about a lock
+              # file, and it is the schema the platform version decides.
+              php -r "
+                \$lock = json_decode((string) file_get_contents(\"composer.lock\"), true);
+                foreach (\$lock[\"packages\"] as \$package) {
+                  if (\$package[\"name\"] === \"oro/platform\") {
+                    file_put_contents(\"/out/oro-platform.version\", ltrim(\$package[\"version\"], \"v\"));
+                  }
+                }
+              "
+              mkdir -p var/data var/cache var/logs public/uploads public/media/cache
+              php bin/console oro:install --no-interaction --sample-data=n --skip-translations \
+                --application-url=http://localhost/ \
+                --organization-name="$ORO_ORGANIZATION_NAME" \
+                --user-name="$ORO_USER_NAME" --user-email="$ORO_USER_EMAIL" \
+                --user-firstname="$ORO_USER_FIRSTNAME" --user-lastname="$ORO_USER_LASTNAME" \
+                --user-password="$ORO_USER_PASSWORD" \
+                --language="$ORO_LANGUAGE" --formatting-code="$ORO_FORMATTING_CODE"
+
+          '
+
+          # Both dumps are taken with the server's own client, from inside seed-db: the runtime image
+          # ships postgresql18-client, and a dump written by 18 carries settings a 16 server
+          # rejects on restore — the same mismatch SeedDumpPath puts the major in the file name
+          # for. They also run as separate host commands rather than inside the container-side
+          # bash -c: the reset between the two installs needs quoted SQL identifiers, and a single
+          # quote in that script closes it. That is not hypothetical — it truncated this step after
+          # the first dump, and the step still reported success.
+          docker exec seed-db pg_dump -U oro_db_user --no-owner --no-privileges oro_db \
+            | gzip -c > "seed-context/dump-pg${PG_MAJOR}.sql.gz"
+
+          # The second dump is the same application installed in the test environment, and it
+          # exists because reconciling the prod one towards test is what the pipeline used to do
+          # and what broke: oro:platform:update --env=test replays the unversioned
+          # Tests/Functional/Environment migrations over a schema that never had them, and
+          # UpdateExtendConfigMigration dies on the missing entity for the test_extended_entity
+          # table on Oro 6.0 and 6.1. Restored as-is, this dump needs no migration at all — only
+          # the extend entity classes regenerated, which live in var/cache and no dump can carry.
+          #
+          # Best effort inside a best-effort step: if any of it fails the prod dump stays, and the
+          # pipeline falls back to the ladder it used before.
+          # Everything up to the dump sits inside the if: the step runs under set -e, and a failure
+          # out here would skip the pg_major output at the end — which is what the push step reads
+          # to decide whether there is any seed to copy at all. A test dump that cannot be built
+          # must cost the prod one nothing.
+          if docker exec seed-db psql -U oro_db_user -d oro_db -v ON_ERROR_STOP=1 \
+               -c 'DROP SCHEMA IF EXISTS public CASCADE' \
+               -c 'CREATE SCHEMA public' \
+               -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"' \
+               -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm' \
+             && docker exec -w /var/www/oro seed-app rm -rf var/cache \
+             && docker exec -w /var/www/oro -e ORO_ENV=test -e APP_ENV=test seed-app \
+               php bin/console oro:install --no-interaction --env=test --sample-data=n \
+                 --skip-translations --application-url=http://localhost/ \
+                 --organization-name="$(env_val ORO_ORGANIZATION_NAME)" \
+                 --user-name="$(env_val ORO_USER_NAME)" --user-email="$(env_val ORO_USER_EMAIL)" \
+                 --user-firstname="$(env_val ORO_USER_FIRSTNAME)" \
+                 --user-lastname="$(env_val ORO_USER_LASTNAME)" \
+                 --user-password="$(env_val ORO_USER_PASSWORD)" \
+                 --language="$(env_val ORO_LANGUAGE)" \
+                 --formatting-code="$(env_val ORO_FORMATTING_CODE)"; then
+            docker exec seed-db pg_dump -U oro_db_user --no-owner --no-privileges oro_db \
+              | gzip -c > "seed-context/dump-test-pg${PG_MAJOR}.sql.gz"
+          else
+            echo "::warning::The test-environment install failed for ${{ matrix.oro-version }}; the image gets the prod dump only."
+          fi
+
+          docker rm -f seed-app >/dev/null
+
+          # The install is worthless without the version the entrypoint gates on: rather than ship
+          # a dump nothing will ever restore, fail here and let the image go out seedless.
+          test -s seed-context/oro-platform.version
+          mv seed-context/oro-platform.version "seed-context/dump-pg${PG_MAJOR}.version"
+          echo "Seeded from OroPlatform $(cat "seed-context/dump-pg${PG_MAJOR}.version")"
+
+          # The test dump gets the same version file: the pipeline restores it without running a
+          # single migration, so it must refuse a dump whose platform is not the project's.
+          if [ -f "seed-context/dump-test-pg${PG_MAJOR}.sql.gz" ]; then
+            cp "seed-context/dump-pg${PG_MAJOR}.version" "seed-context/dump-test-pg${PG_MAJOR}.version"
+          fi
+
+          # The identity the entrypoint compares against before reusing the dump: an install that
+          # asks for a different administrator or locale gets its own oro:install instead of a
+          # database that quietly disagrees with the options it was given. Field order must match
+          # seed_identity() in docker-entrypoint.sh.
+          printf '%s|%s|%s|%s|%s|%s|%s|%s' \
+            "$(env_val ORO_USER_NAME)" "$(env_val ORO_USER_PASSWORD)" "$(env_val ORO_USER_EMAIL)" \
+            "$(env_val ORO_USER_FIRSTNAME)" "$(env_val ORO_USER_LASTNAME)" \
+            "$(env_val ORO_ORGANIZATION_NAME)" "$(env_val ORO_LANGUAGE)" "$(env_val ORO_FORMATTING_CODE)" \
+            > "seed-context/dump-pg${PG_MAJOR}.identity"
+
+          ls -lh seed-context
+          echo "pg_major=${PG_MAJOR}" >> "$GITHUB_OUTPUT"
+
+      - name: Report a missing seed
+        if: steps.seed.outcome == 'failure'
+        run: echo "::warning::The database bake failed for ${{ matrix.oro-version }}-${{ matrix.type }}; the image is published without a seed and every install will run oro:install from scratch."
+
+      - name: Push
+        env:
+          TAG: ${{ secrets.DOCKERHUB_USERNAME }}/orobox:${{ matrix.oro-version }}-${{ matrix.type }}-latest
+          PG_MAJOR: ${{ steps.seed.outputs.pg_major }}
+        run: |
+          set -euo pipefail
+          if [ -n "${PG_MAJOR:-}" ] && [ -f "seed-context/dump-pg${PG_MAJOR}.sql.gz" ]; then
+            # Two instructions on top of the runtime image, so the seed never invalidates any of
+            # the layers the build cache holds.
+            cat > seed-context/Dockerfile <<EOF
+          FROM orobox-runtime:local
+          COPY dump-pg${PG_MAJOR}.sql.gz dump-pg${PG_MAJOR}.identity dump-pg${PG_MAJOR}.version /opt/orobox/seed/
+          EOF
+            # A separate COPY, and only when the file is there: the test dump is the best-effort
+            # half of a best-effort step, and naming a missing file would fail the whole build.
+            if [ -f "seed-context/dump-test-pg${PG_MAJOR}.sql.gz" ]; then
+              cat >> seed-context/Dockerfile <<EOF
+          COPY dump-test-pg${PG_MAJOR}.sql.gz dump-test-pg${PG_MAJOR}.version /opt/orobox/seed/
+          EOF
+            fi
+            docker build -t "$TAG" -f seed-context/Dockerfile seed-context
+          else
+            docker tag orobox-runtime:local "$TAG"
+          fi
+          docker push "$TAG"
