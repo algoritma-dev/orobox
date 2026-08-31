@@ -1,6 +1,7 @@
 package report
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -20,9 +21,13 @@ const rectorTool = "rector"
 // on stdout, which is the stream the report file captures, so the document arrives with a Symfony
 // warning block in front of it — the "invalid character 'W' looking for beginning of value" that
 // made the whole merged report fail. The warning cannot be silenced either, because `process`
-// defines no verbosity option. The `json` format raises no warning, and Rector puts its console
-// output in quiet mode for that format on purpose, so the file holds the document and nothing else.
-// It is also the format that outlives `gitlab`, which Rector says it removes in the next minor.
+// defines no verbosity option. The `json` format raises no warning, Rector puts its own console
+// output in quiet mode for it, and it is the format that outlives `gitlab`, which Rector says it
+// removes in the next minor.
+//
+// That still does not make the file the document alone — anything else printing on stdout inside
+// the container lands in it — so the document is located rather than assumed; see
+// decodeRectorDocument.
 //
 // rectorDocument is that format: a summary object rather than a list of findings.
 type rectorDocument struct {
@@ -53,8 +58,8 @@ var rectorHunkHeader = regexp.MustCompile(`@@[^0-9@]*([0-9]+)`)
 // first as minor and the second as blocking, which is the same split Rector's GitLab formatter
 // made.
 func rectorIssues(data []byte) ([]map[string]any, error) {
-	var document rectorDocument
-	if err := json.Unmarshal(data, &document); err != nil {
+	document, err := decodeRectorDocument(data)
+	if err != nil {
 		return nil, err
 	}
 
@@ -93,6 +98,88 @@ func rectorIssues(data []byte) ([]map[string]any, error) {
 	}
 
 	return issues, nil
+}
+
+// decodeRectorDocument reads Rector's document out of the file its stdout was captured into, which
+// is not always the document alone.
+//
+// Rector writes the JSON with `echo`, below the console it otherwise silences, so anything else
+// that reaches the same stream — a Symfony warning block, a PHP `Warning:` raised by an autoloaded
+// file, a bootstrap notice from the application — lands in the file next to it. That is the whole
+// history of this report file: first "invalid character 'W' looking for beginning of value" from
+// the `gitlab` format's deprecation block, then the same 'W' again with `json`, from something else
+// printing on the way. Which line it is differs per environment, and the QA step cannot control
+// every library the analysed application loads.
+//
+// So the document is located rather than assumed: the plain decode is tried first, and a file that
+// is not one JSON value is searched backwards for the last line that opens an object, which is
+// where Rector's own output begins. Trailing output is ignored the same way, because the decoder
+// stops at the end of the value. A file with no document in it at all is still an error — that is a
+// tool that did not report, and silently counting it as zero findings is the failure the report
+// package exists to prevent.
+func decodeRectorDocument(data []byte) (rectorDocument, error) {
+	var document rectorDocument
+	if err := json.Unmarshal(data, &document); err == nil {
+		return document, nil
+	}
+
+	for _, offset := range rectorDocumentStarts(data) {
+		var candidate rectorDocument
+		if err := json.NewDecoder(bytes.NewReader(data[offset:])).Decode(&candidate); err == nil {
+			return candidate, nil
+		}
+	}
+
+	return rectorDocument{}, fmt.Errorf("it starts with %q", rectorHead(data))
+}
+
+// rectorDocumentStarts lists the offsets a JSON object could begin at, last first: Rector's
+// document is the last thing it prints, and a `{` opening a line in the preamble is far more likely
+// to be noise than the report.
+func rectorDocumentStarts(data []byte) []int {
+	var offsets []int
+	// A line that opens an object at column 0 is the document: Rector pretty-prints it, so every
+	// nested object is indented and only the outermost one starts a line.
+	for start := 0; start < len(data); {
+		if data[start] == '{' {
+			offsets = append(offsets, start)
+		}
+		index := bytes.IndexByte(data[start:], '\n')
+		if index < 0 {
+			break
+		}
+		start += index + 1
+	}
+
+	// Reversed in place: the caller tries the last candidate first.
+	for i, j := 0, len(offsets)-1; i < j; i, j = i+1, j-1 {
+		offsets[i], offsets[j] = offsets[j], offsets[i]
+	}
+	return offsets
+}
+
+// rectorHead is the start of an unusable report, quoted in the error so the next occurrence names
+// what printed instead of leaving a character code to guess from. The tool's stdout is the report
+// file, so this text is the only trace of it anywhere — it never reaches the job log, which sees
+// stderr alone.
+func rectorHead(data []byte) string {
+	var lines []string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+		if len(lines) == 3 {
+			break
+		}
+	}
+
+	head := strings.Join(lines, " / ")
+	if len(head) > 300 {
+		head = head[:300] + "..."
+	}
+	return head
 }
 
 // rectorShortClasses drops the namespace from each applied rule, so a finding reads

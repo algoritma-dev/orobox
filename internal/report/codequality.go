@@ -111,7 +111,7 @@ func toolIssues(report ToolReport) ([]map[string]any, error) {
 	if report.Tool == rectorTool {
 		issues, err := rectorIssues(report.Data)
 		if err != nil {
-			return nil, fmt.Errorf("the %s report is not valid Rector JSON: %w", report.Tool, err)
+			return nil, fmt.Errorf("the %s report holds no Rector JSON document: %w", report.Tool, err)
 		}
 		return issues, nil
 	}

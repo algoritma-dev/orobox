@@ -103,18 +103,62 @@ func TestRectorEmptyRunIsNoFindings(t *testing.T) {
 	}
 }
 
-// TestRectorNonJSONIsAnError keeps the guarantee the merge exists for: a report file holding
-// something other than the document — a PHP fatal, a warning block printed ahead of it — is a
-// failure, not an empty result.
-func TestRectorNonJSONIsAnError(t *testing.T) {
+// TestRectorDocumentIsFoundUnderAnyPreamble is the failure this report file keeps producing, in
+// both of its shapes: the report is Rector's stdout, and whatever else printed on that stream — a
+// Symfony warning block, a PHP `Warning:` from an autoloaded file — arrives in the file ahead of
+// the document. The document is located rather than assumed, so a finding is still reported.
+func TestRectorDocumentIsFoundUnderAnyPreamble(t *testing.T) {
+	document := `{
+    "totals": {"changed_files": 1},
+    "file_diffs": [
+        {"file": "src/A.php", "diff": "@@ -3,4 +3,4 @@", "applied_rectors": ["Rector\\Foo\\BarRector"]}
+    ]
+}`
+
+	preambles := map[string]string{
+		"a Symfony warning block": " [WARNING] The \"gitlab\" output format is deprecated and will be removed in the\n           next minor version.\n\n",
+		"a PHP warning":           "Warning: Undefined array key 1 in /var/www/oro/vendor/acme/Thing.php on line 20\n",
+		"a deprecation notice":    "PHP Deprecated:  Implicit conversion in /var/www/oro/vendor/acme/Thing.php on line 8\n",
+	}
+
+	for name, preamble := range preambles {
+		t.Run(name, func(t *testing.T) {
+			issues, err := rectorIssues([]byte(preamble + document))
+			if err != nil {
+				t.Fatalf("rectorIssues returned %v", err)
+			}
+			if len(issues) != 1 {
+				t.Fatalf("found %d findings under %s, want the one the document holds", len(issues), name)
+			}
+		})
+	}
+
+	// Output printed after the document is ignored the same way: the decoder stops at the end of
+	// the value.
+	issues, err := rectorIssues([]byte(document + "\n [NOTE] 1 file would have changed\n"))
+	if err != nil {
+		t.Fatalf("rectorIssues returned %v", err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("found %d findings under a trailing note, want 1", len(issues))
+	}
+}
+
+// TestRectorReportWithNoDocumentIsAnError keeps the guarantee the merge exists for: a report file
+// with no document in it at all — a PHP fatal, a usage error — is a failure, not a clean run, and
+// the error quotes what was there instead so the next occurrence needs no log archaeology.
+func TestRectorReportWithNoDocumentIsAnError(t *testing.T) {
 	_, err := MergeCodeQuality([]ToolReport{
-		{Tool: "rector", Data: []byte("[WARNING] The \"gitlab\" output format is deprecated\n[]")},
+		{Tool: "rector", Data: []byte("Warning: something printed here\nThe \"--quiet\" option does not exist.\n")},
 	}, PathPrefix{})
 	if err == nil {
-		t.Fatal("a contaminated report must be an error")
+		t.Fatal("a report with no document must be an error")
 	}
 	if !strings.Contains(err.Error(), "rector") {
 		t.Errorf("error %q does not name the tool that produced it", err)
+	}
+	if !strings.Contains(err.Error(), "Warning: something printed here") {
+		t.Errorf("error %q does not quote what the tool wrote instead", err)
 	}
 }
 
