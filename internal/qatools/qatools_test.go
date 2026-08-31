@@ -470,47 +470,51 @@ func TestInstallPlanAlwaysCarriesTheGitLabFormatters(t *testing.T) {
 	}
 }
 
-// TestInstallPlanPinsStylelintToTheLineItsSharedConfigNeeds covers the combination that made
-// `orobox qa` report stylelint and stylelint-css as tools that could not run at all:
-// @oroinc/oro-stylelint-config carries its own stylelint dependency, and installing it next to a
-// stylelint from another major exits non-zero with an empty report instead of findings.
-func TestInstallPlanPinsStylelintToTheLineItsSharedConfigNeeds(t *testing.T) {
+// TestInstallPlanPicksTheStylelintFormatterForTheLinesStylelintMajor covers what is left of the
+// per-line stylelint decision now that stylelint itself comes from OroCommerce: the two stylelint
+// majors load a custom formatter differently — 15 `require()`s it, 16 `import()`s it — so the
+// formatter still has to match the major the Oro line installed, or the report comes back empty.
+func TestInstallPlanPicksTheStylelintFormatterForTheLinesStylelintMajor(t *testing.T) {
 	viper.Set("test.qa.stylelint", true)
 	defer viper.Set("test.qa.stylelint", nil)
 
 	for _, tc := range []struct {
-		version  string
-		packages []string
+		version   string
+		formatter string
 	}{
-		{version: "7.0", packages: []string{"stylelint@^16.26.1", "@oroinc/oro-stylelint-config@7.0.1", "@studiometa/stylelint-formatter-gitlab@^1.1.1"}},
-		{version: "6.1", packages: []string{"stylelint@^16.17.0", "@oroinc/oro-stylelint-config@6.1.0-lts001", "@studiometa/stylelint-formatter-gitlab@^1.1.1"}},
-		{version: "6.0", packages: []string{"stylelint@^15.11.0", "@oroinc/oro-stylelint-config@6.0.0-lts1", "stylelint-formatter-gitlab"}},
-		{version: "5.1", packages: []string{"stylelint@^15.11.0", "@oroinc/oro-stylelint-config@5.1.0-lts002", "stylelint-formatter-gitlab"}},
+		{version: "7.0", formatter: "@studiometa/stylelint-formatter-gitlab@^1.1.1"},
+		{version: "6.1", formatter: "@studiometa/stylelint-formatter-gitlab@^1.1.1"},
+		{version: "6.0", formatter: "stylelint-formatter-gitlab"},
+		{version: "5.1", formatter: "stylelint-formatter-gitlab"},
 	} {
 		t.Run(tc.version, func(t *testing.T) {
 			packages := NewInstallPlan(tc.version).JSPackages
-			for _, want := range tc.packages {
-				if !slices.Contains(packages, want) {
-					t.Errorf("Oro %s installs %v, want %s among them", tc.version, packages, want)
-				}
+			if !slices.Contains(packages, tc.formatter) {
+				t.Errorf("Oro %s installs %v, want %s among them", tc.version, packages, tc.formatter)
 			}
 		})
 	}
 }
 
-func TestInstallPlanCarriesTheConfigsOroCommercesEslintrcExtends(t *testing.T) {
+// TestInstallPlanLeavesTheLintersToOroCommerce is the pin problem stated as a test. The linters are
+// configured by files OroCommerce generates at the application root, extending packages its own
+// package.json declares, so a QA-local eslint or stylelint has to guess a version that satisfies a
+// ruleset it does not own — and a wrong guess exits non-zero with an empty report instead of with
+// findings. Nothing but the formatters is installed here; the binaries come from
+// <OroRoot>/node_modules, see BinaryPaths.
+func TestInstallPlanLeavesTheLintersToOroCommerce(t *testing.T) {
 	viper.Set("test.qa.eslint", true)
-	defer viper.Set("test.qa.eslint", nil)
+	viper.Set("test.qa.stylelint", true)
+	defer func() {
+		viper.Set("test.qa.eslint", nil)
+		viper.Set("test.qa.stylelint", nil)
+	}()
 
-	plan := NewInstallPlan("6.1")
-	packages := strings.Join(plan.JSPackages, " ")
+	packages := strings.Join(NewInstallPlan("6.1").JSPackages, " ")
 
-	// OroCommerce's generated .eslintrc.yml extends `google` and `plugin:oro/recommended`, and
-	// that file is the base of every merged ESLint config. Without the packages behind those two
-	// names ESLint exits 2 with "couldn't find the config" before linting a single file.
-	for _, pkg := range []string{"eslint-config-google@~0.14.0", "eslint-plugin-oro@~0.0.3"} {
-		if !strings.Contains(packages, pkg) {
-			t.Errorf("%s is missing from the JS packages: %s", pkg, packages)
+	for _, pkg := range []string{"eslint@", "stylelint@", "eslint-config-google", "eslint-plugin-oro", "@oroinc/oro-stylelint-config"} {
+		if strings.Contains(packages, pkg) {
+			t.Errorf("%s is installed in the QA tools dir; the linters and their configs are OroCommerce's: %s", pkg, packages)
 		}
 	}
 }
@@ -534,26 +538,48 @@ func TestJSInstallCommandPinsTheInstallToTheQaToolsDir(t *testing.T) {
 	if !strings.Contains(command, "cd "+config.QaToolsDir+" && npm install --save-dev") {
 		t.Errorf("the install does not run in the QA tools dir: %s", command)
 	}
-	if !strings.Contains(command, "eslint@^8.57.0") {
+	if !strings.Contains(command, "eslint-formatter-gitlab@^5.1.0") {
 		t.Errorf("the install does not carry the planned packages: %s", command)
 	}
 }
 
-func TestJSToolsResolveBareConfigNamesFromTheQaToolsDir(t *testing.T) {
+// TestJSToolsRunOroCommercesOwnLinters pins both halves of the decision: the binary is the
+// application's, and so is the tree the linters resolve bare names against. A QA-local linter has
+// to guess a version for a ruleset OroCommerce owns; the application's copy is the one that
+// ruleset was written for. The QA node_modules stays second on NODE_PATH for the formatters, the
+// only JS packages the QA namespace still installs.
+func TestJSToolsRunOroCommercesOwnLinters(t *testing.T) {
 	tools := Tools(ToolsOptions{SourceRoot: bundleRoot, AnalyzePath: bundleRoot})
 
-	want := "NODE_PATH=" + config.QaToolsDir + "/node_modules"
+	wantNodePath := "NODE_PATH=" + config.OroRootDir + "/node_modules:" + config.QaToolsDir + "/node_modules"
 	for _, name := range []string{"eslint", "stylelint", "stylelint-css"} {
 		tool := toolByName(t, tools, name)
-		if tool.Args[0] != want {
-			// A shareable config named in an `extends` list resolves relative to the file naming
-			// it, and OroCommerce's configs live at OroRoot, which has no node_modules of its own
-			// in a pipeline checkout.
-			t.Errorf("%s does not fall back to the QA node_modules: %v", name, tool.Args)
+		if tool.Args[0] != wantNodePath {
+			t.Errorf("%s NODE_PATH = %q, want %q", name, tool.Args[0], wantNodePath)
+		}
+		if want := config.OroRootDir + "/node_modules/.bin/"; !strings.Contains(tool.Args[1], want) {
+			t.Errorf("%s is not invoked through OroCommerce's node_modules: %v", name, tool.Args)
 		}
 		if !strings.Contains(strings.Join(tool.Args, " "), BinaryPaths[name]) {
 			t.Errorf("%s is not invoked through %s: %v", name, BinaryPaths[name], tool.Args)
 		}
+		// A missing linter is a tool that could not run, and the reason has to reach the log: the
+		// binary appears with the application's node_modules, which the asset install populates.
+		if !strings.Contains(tool.Setup, BinaryPaths[name]) {
+			t.Errorf("%s does not guard on its binary existing: %q", name, tool.Setup)
+		}
+	}
+}
+
+// TestEslintResolvesPluginsFromOroCommercesTree covers the flag NODE_PATH does not: ESLint resolves
+// plugins named in a config through --resolve-plugins-relative-to, and the plugins the generated
+// .eslintrc.yml names (eslint-plugin-oro, eslint-plugin-no-jquery) are the application's.
+func TestEslintResolvesPluginsFromOroCommercesTree(t *testing.T) {
+	tools := Tools(ToolsOptions{SourceRoot: bundleRoot, AnalyzePath: bundleRoot})
+
+	args := strings.Join(toolByName(t, tools, "eslint").Args, " ")
+	if want := "--resolve-plugins-relative-to " + config.OroRootDir + "/node_modules"; !strings.Contains(args, want) {
+		t.Errorf("eslint is missing %s: %s", want, args)
 	}
 }
 
@@ -889,7 +915,42 @@ func TestReportScriptRecordsEachToolsOwnExitCode(t *testing.T) {
 // directory, and OroCommerce ships a package.json at the application root. So `cd vendor-bin/qa &&
 // pnpm add` left only symlinks in vendor-bin/qa/node_modules pointing into <OroRoot>/node_modules,
 // and anything that rewrote the application's own node_modules afterwards — the QA step's Oro
-// install runs between the two — pruned the entries those symlinks named.
+// install runs between the two — pruned the entries those symlinks named. The linters have since
+// moved to OroCommerce's own installation, but the formatters still live here and are pruned the
+// same way, which reports the same "could not run" for a linter that ran fine.
+// TestOroLinterInstallCommandIsShellAndOnlyRunsWhenNeeded pins the three properties the pipeline
+// relies on: it is valid POSIX shell (it is generated, not written by hand), it does nothing when
+// the linters are already installed, and it is empty for a tool list that needs no node_modules.
+func TestOroLinterInstallCommandIsShellAndOnlyRunsWhenNeeded(t *testing.T) {
+	tools := Tools(ToolsOptions{SourceRoot: bundleRoot, AnalyzePath: bundleRoot})
+
+	command := OroLinterInstallCommand("npm", tools)
+	if command == "" {
+		t.Fatal("the full tool list needs OroCommerce's node_modules, got no command")
+	}
+	if out, err := exec.Command("sh", "-n", "-c", command).CombinedOutput(); err != nil {
+		t.Errorf("the generated command is not valid shell: %v\n%s\n%s", err, out, command)
+	}
+
+	// One `test` is the whole cost when the tree is already there, which is the full-install path.
+	if !strings.Contains(command, "[ -x "+BinaryPaths["eslint"]+" ] && [ -x "+BinaryPaths["stylelint"]+" ]") {
+		t.Errorf("the install is not guarded on the binaries already existing:\n%s", command)
+	}
+	if !strings.Contains(command, "cd "+config.OroRootDir+" && npm install") {
+		t.Errorf("the install does not run against OroCommerce's manifest:\n%s", command)
+	}
+	// pnpm gets the manifest the asset install regenerates, against a lockfile it does not.
+	if pnpm := OroLinterInstallCommand("pnpm", tools); !strings.Contains(pnpm, "pnpm install --no-frozen-lockfile") {
+		t.Errorf("pnpm would abort on a stale lockfile:\n%s", pnpm)
+	}
+
+	// PHP tools resolve to binaries outside node_modules, so a PHP-only list has nothing to
+	// prepare and must not pay for an npm install.
+	if got := OroLinterInstallCommand("npm", []Tool{toolByName(t, tools, "phpstan")}); got != "" {
+		t.Errorf("a PHP-only tool list prepares node_modules: %q", got)
+	}
+}
+
 func TestJSInstallCommandKeepsThePnpmStoreInsideTheQaToolsDir(t *testing.T) {
 	viper.Set("test.qa.eslint", true)
 	viper.Set("test.qa.stylelint", true)

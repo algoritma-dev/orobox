@@ -97,6 +97,19 @@ func checkMissingToolBinaries(workingDir string, tools []qatools.Tool) []string 
 	return missing
 }
 
+// missingJSLinters returns the missing tools that come from OroCommerce's node_modules rather than
+// from the QA tools directory, so the hint can name the install that actually provides them.
+func missingJSLinters(missing []string) []string {
+	var out []string
+	for _, name := range missing {
+		switch name {
+		case "eslint", "stylelint", "stylelint-css":
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // qaFlagFor maps a tool name to the CLI flag that selects it explicitly.
 func qaFlagFor(name string) bool {
 	switch name {
@@ -258,6 +271,13 @@ func runQaOnCompose(format qatools.Report, baseline string) {
 
 	if missing := checkMissingToolBinaries(workingDir, enabledTools); len(missing) > 0 {
 		utils.PrintWarning(fmt.Sprintf("The following QA tools are enabled but not installed: %s", strings.Join(missing, ", ")))
+		// ESLint and Stylelint are OroCommerce's own installation, not a QA-local one (see
+		// qatools.BinaryPaths), so `orobox qa-init` cannot put them there: they appear with the
+		// application's node_modules, which the asset install populates.
+		if jsMissing := missingJSLinters(missing); len(jsMissing) > 0 {
+			utils.PrintWarning(fmt.Sprintf("%s run OroCommerce's own installation: build the assets (php bin/console oro:assets:install) so %s/node_modules exists.",
+				strings.Join(jsMissing, ", "), config.OroRootDir))
+		}
 		utils.PrintWarning("Run 'orobox qa-init' to install the missing tools.")
 		os.Exit(1)
 	}

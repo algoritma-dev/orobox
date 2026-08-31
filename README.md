@@ -311,6 +311,19 @@ Configures and installs the necessary QA tools (PHPStan, coding standards, ESLin
 orobox qa-init
 ```
 
+ESLint and Stylelint are the exception to "installs": Orobox runs OroCommerce's own binaries from
+`/var/www/oro/node_modules/.bin`, in both `type: bundle` and `type: project`. The configuration
+those two linters are handed is OroCommerce's — `.eslintrc.yml` and `.stylelintrc.yml` at the
+application root, extending packages its `package.json` declares — so the only version guaranteed
+to satisfy it is the one the application installed for `npm run eslint-oro`. `qa-init` therefore
+installs only what the application has no reason to ship: the two GitLab Code Quality formatters.
+
+The linters appear with the application's `node_modules`, which the asset install populates. In CI
+the QA step installs them itself when they are not there — a cached or database-seeded Oro install
+never runs the asset install — so nothing extra is needed there. On a developer's stack, `orobox qa`
+stops with the reason when they are missing: build the assets once
+(`php bin/console oro:assets:install`).
+
 `qa-init` also writes a configuration stub for each enabled tool into your source root, when the
 file is not there yet. The stubs are yours from the first write on: Orobox layers them on top of the
 shared standard rather than replacing it — see
@@ -513,7 +526,8 @@ built, and two branches with different migrations do not invalidate each other.
 `--report=gitlab` makes every tool emit its own GitLab report; Orobox merges them into one
 document. Nothing is converted: each tool speaks the format natively, and the two JS tools do so
 through the `eslint-formatter-gitlab` and `stylelint-formatter-gitlab` packages `orobox qa-init`
-installs.
+installs — the linters themselves come from OroCommerce's `node_modules`, see
+[QA Tools Initialization](#8-qa-tools-initialization-qa-init).
 
 With `--report`, the QA tools no longer stop at the first failure — a Code Quality report listing
 only PHPStan's findings because Rector never ran would be worse than none. Every tool runs, and the

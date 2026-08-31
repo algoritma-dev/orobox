@@ -122,14 +122,22 @@ var reportEnvByTool = map[string]string{
 }
 
 // BinaryPaths maps tool names to the binaries the tools are installed as.
+//
+// The two linters are OroCommerce's own installation, not a QA-local one. Their configuration is
+// OroCommerce's too — .eslintrc.yml and .stylelintrc.yml at the application root, extending
+// packages the application's package.json declares — so the only linter whose version is
+// guaranteed to satisfy that configuration is the one the application installed for
+// `npm run eslint-oro`. A second copy in the QA namespace has to guess the pins instead, and the
+// guess is what kept breaking: the ruleset OroCommerce ships evolves per line, and a QA eslint or
+// stylelint from another major exits non-zero with an empty report rather than with findings.
 var BinaryPaths = map[string]string{
 	"phpstan":       config.OroRootDir + "/bin/phpstan",
 	"rector":        config.OroRootDir + "/bin/rector",
 	"php-cs-fixer":  config.OroRootDir + "/bin/php-cs-fixer",
 	"twig-cs-fixer": config.OroRootDir + "/bin/twig-cs-fixer",
-	"eslint":        config.QaToolsDir + "/node_modules/.bin/eslint",
-	"stylelint":     config.QaToolsDir + "/node_modules/.bin/stylelint",
-	"stylelint-css": config.QaToolsDir + "/node_modules/.bin/stylelint",
+	"eslint":        config.OroRootDir + "/node_modules/.bin/eslint",
+	"stylelint":     config.OroRootDir + "/node_modules/.bin/stylelint",
+	"stylelint-css": config.OroRootDir + "/node_modules/.bin/stylelint",
 }
 
 // Recursive globs, single-quoted so POSIX sh (no globstar) forwards the raw `**` to the
@@ -168,29 +176,33 @@ func Tools(opts ToolsOptions) []Tool {
 	// No positional path for twig-cs-fixer: a CLI path would override the config's Finder,
 	// which is what discovers bundle templates under src/**/Resources/views.
 	twigArgs := []string{oroRoot + "/bin/twig-cs-fixer", "lint", "--config=" + twigCSFixerConfig.Path}
-	// The linters are addressed by the absolute path they were installed at, never through
-	// `npx`. npx resolves a bare tool name against the working directory's node_modules and
-	// downloads the newest release when it finds nothing there — which is the common case, since
-	// the QA packages live in vendor-bin/qa and the tools run from the source root. That download
-	// ignores the pins in NewInstallPlan: it fetches ESLint 10 and Stylelint 17, both of which
-	// require Node >= 20 and abort with EBADENGINE on the image's Node 18.
+	// The linters are OroCommerce's own binaries, addressed by the absolute path the application
+	// installed them at, never through `npx`. npx resolves a bare tool name against the working
+	// directory's node_modules and downloads the newest release when it finds nothing there —
+	// which on a bundle install is the common case, since the tools run from the source root under
+	// <OroRoot>/bundles. That download fetches ESLint 10 and Stylelint 17, both of which require
+	// Node >= 20 and abort with EBADENGINE on the image's Node 18.
 	//
-	// NODE_PATH points both linters at the QA node_modules for everything they resolve by bare
-	// name from a config file. Their own `--resolve-plugins-relative-to` (ESLint) covers plugins
-	// only; a shareable config named in an `extends` list is resolved relative to the directory of
-	// the file naming it, and the file naming them is OroCommerce's — .eslintrc.yml at OroRoot
-	// extends `google`, .stylelintrc.yml extends `@oroinc/oro-stylelint-config`. Those packages
-	// are installed in the QA tools directory, and OroRoot has no node_modules of its own in a
-	// pipeline checkout, so without the fallback ESLint dies with "couldn't find the config".
-	nodePath := "NODE_PATH=" + qaDir + "/node_modules"
+	// Why OroCommerce's copy and not a QA-local one: see BinaryPaths. The configuration the two
+	// linters are handed is OroCommerce's, so the linter has to be the one that configuration was
+	// written for.
+	//
+	// NODE_PATH covers everything the linters resolve by bare name from a config file. Their own
+	// `--resolve-plugins-relative-to` (ESLint) covers plugins only; a shareable config named in an
+	// `extends` list is resolved relative to the directory of the file naming it, and the file
+	// naming them is OroCommerce's — .eslintrc.yml at OroRoot extends `google`, .stylelintrc.yml
+	// extends `@oroinc/oro-stylelint-config`. The application's node_modules comes first because
+	// those packages are its own; the QA node_modules stays on the path behind it for what only
+	// the QA namespace installs, the two GitLab formatters.
+	nodePath := "NODE_PATH=" + oroRoot + "/node_modules:" + qaDir + "/node_modules"
 	eslintArgs := []string{
 		nodePath,
-		qaDir + "/node_modules/.bin/eslint",
-		"--resolve-plugins-relative-to", qaDir + "/node_modules",
+		oroRoot + "/node_modules/.bin/eslint",
+		"--resolve-plugins-relative-to", oroRoot + "/node_modules",
 		"--config", eslintConfig.Path, "--ignore-path", eslintIgnore.Path,
 		"--quiet", "--no-error-on-unmatched-pattern",
 	}
-	stylelintBin := qaDir + "/node_modules/.bin/stylelint"
+	stylelintBin := oroRoot + "/node_modules/.bin/stylelint"
 	stylelintArgs := []string{nodePath, stylelintBin, scssTarget, "--config", stylelintConfig.Path, "--ignore-path", stylelintIgnore.Path, "--quiet", "--allow-empty-input"}
 	stylelintCSSArgs := []string{nodePath, stylelintBin, cssTarget, "--config", stylelintCSSConfig.Path, "--ignore-path", stylelintCSSIgnore.Path, "--quiet", "--allow-empty-input"}
 
@@ -275,9 +287,9 @@ func Tools(opts ToolsOptions) []Tool {
 		// on, since a stub written there would overwrite Oro's own file (see scaffold.QaStubs).
 		// Without the guard stylelint is handed a --config that names nothing, dies with an
 		// uncaught error and writes no report, which grades as a tool that could not run.
-		{Name: "eslint", Args: eslintArgs, Setup: eslintConfig.Setup, SkipUnless: configExists(eslintConfig)},
-		{Name: "stylelint", Args: stylelintArgs, Setup: stylelintConfig.Setup, SkipUnless: configExists(stylelintConfig)},
-		{Name: "stylelint-css", Args: stylelintCSSArgs, Setup: stylelintCSSConfig.Setup, SkipUnless: configExists(stylelintCSSConfig)},
+		{Name: "eslint", Args: eslintArgs, Setup: joinSetup(binaryGuard("eslint"), eslintConfig.Setup), SkipUnless: configExists(eslintConfig)},
+		{Name: "stylelint", Args: stylelintArgs, Setup: joinSetup(binaryGuard("stylelint"), stylelintConfig.Setup), SkipUnless: configExists(stylelintConfig)},
+		{Name: "stylelint-css", Args: stylelintCSSArgs, Setup: joinSetup(binaryGuard("stylelint-css"), stylelintCSSConfig.Setup), SkipUnless: configExists(stylelintCSSConfig)},
 	}
 
 	if opts.Report != ReportNone {
@@ -288,6 +300,18 @@ func Tools(opts ToolsOptions) []Tool {
 	}
 
 	return tools
+}
+
+// binaryGuard fails a JS tool with a readable reason when OroCommerce's linter is not there.
+//
+// The two linters are the application's own installation, populated by the asset install that
+// `oro:install` runs, so a container that never installed the assets has no node_modules at all.
+// Without the guard the shell reports a bare "not found" and exit 127 against a path nothing in
+// the output explains. It is a Setup line and not a SkipUnless, because a missing linter is a tool
+// that could not run — not one this Oro version has nothing to check with.
+func binaryGuard(tool string) string {
+	return fmt.Sprintf(`{ [ -x %s ] || { echo "orobox: %s is missing. The QA linters run OroCommerce's own installation; build the assets (oro:assets:install) so it exists."; false; }; }`,
+		BinaryPaths[tool], BinaryPaths[tool])
 }
 
 // configExists is the shell test behind Tool.SkipUnless: the resolved configuration is a path
@@ -454,33 +478,26 @@ func NewInstallPlan(oroVersion string) InstallPlan {
 		plan.JSManager, plan.JSInstallArg, plan.JSSaveDevFlag = "pnpm", "add", "-D"
 	}
 
-	// The GitLab formatters ship separately from the linters and are installed unconditionally:
-	// requiring them only when a report is asked for would make --report=gitlab fail at runtime on
-	// every environment initialised before the flag existed.
+	// The linters themselves are not installed here, and neither are the packages their
+	// configuration extends. Both come from OroCommerce's own node_modules — see BinaryPaths —
+	// which is also where `npm run eslint-oro` gets them, so the QA run resolves the same ruleset
+	// the application does instead of a second, guessed-at set of pins.
 	//
-	// The ^5.1.0 pin is not cosmetic. eslint-formatter-gitlab 6 and later declare a peer dependency
-	// on eslint >= 9 while this list pins eslint to ^8.57.0, so the unpinned package makes the whole
-	// npm install fail with ERESOLVE — taking the other JS tools down with it.
+	// What is left is the one thing the application has no reason to ship: the GitLab Code Quality
+	// formatters. They are installed unconditionally rather than only when a report is asked for,
+	// because requiring them lazily would make --report=gitlab fail at runtime on every
+	// environment initialised before the flag existed.
 	//
-	// eslint-config-google and eslint-plugin-oro are OroCommerce's, not Orobox's choice:
-	// the .eslintrc.yml OroCommerce generates at the application root extends `google` and
-	// `plugin:oro/recommended`, and that file is the base every merged ESLint config layers on.
-	// They are pinned to the constraints OroCommerce's own generated package.json declares, so the
-	// QA run resolves the same ruleset `npm run eslint-oro` would.
+	// The ^5.1.0 pin on the ESLint formatter stays: 6 and later dropped the ESLint 8 formatter
+	// signature, and OroCommerce's supported lines still install ESLint 8.
 	if needsEslint {
-		plan.JSPackages = append(plan.JSPackages,
-			"eslint@^8.57.0", "eslint-config-google@~0.14.0", "eslint-plugin-oro@~0.0.3",
-			"eslint-plugin-no-jquery", "eslint-plugin-import", "eslint-formatter-gitlab@^5.1.0")
+		plan.JSPackages = append(plan.JSPackages, "eslint-formatter-gitlab@^5.1.0")
 	}
-	// Stylelint, its shareable config and its formatter are pinned together per Oro line: the
-	// config declares the stylelint major it works with, and the formatter is the one that
-	// supports that major. See config.GetQaStylelint for what breaks when they disagree.
+	// Which stylelint formatter is installed still depends on the Oro line, because the two
+	// stylelint majors load a custom formatter differently — 15 `require()`s it, 16 `import()`s it —
+	// and the line decides which major OroCommerce installed. See config.GetQaStylelint.
 	if needsStylelint {
-		stylelint := config.GetQaStylelint(oroVersion)
-		plan.JSPackages = append(plan.JSPackages,
-			"stylelint@"+stylelint.Stylelint,
-			"@oroinc/oro-stylelint-config@"+stylelint.Config,
-			stylelint.FormatterRequirement())
+		plan.JSPackages = append(plan.JSPackages, config.GetQaStylelint(oroVersion).FormatterRequirement())
 	}
 
 	return plan
@@ -548,14 +565,18 @@ func ComposerInstallCommand(packages []string) string {
 
 // JSInstallCommand returns the shell line that installs the JS tools into the QA tools directory.
 //
+// What it installs is the GitLab formatters and nothing else; the linters are OroCommerce's own
+// installation, see BinaryPaths.
+//
 // The manifest it writes first is what pins the install location. npm and pnpm do not install into
 // the working directory, they install into the nearest package root — the first directory up the
 // tree holding a package.json (or a node_modules) — and OroCommerce generates a package.json at
 // the application root. Without a manifest of its own, `cd vendor-bin/qa && npm install` therefore
-// lands the tools in <OroRoot>/node_modules on a developer's stack while landing them in
-// vendor-bin/qa in a pipeline checkout, where the application root has neither file. BinaryPaths
-// and every invocation in Tools address one path, so the other one makes `orobox qa` report every
-// JS tool as not installed and exit before it runs anything.
+// writes into <OroRoot>/node_modules on a developer's stack while writing into vendor-bin/qa in a
+// pipeline checkout, where the application root has neither file. Two things break on the first of
+// those: the --format / --custom-formatter paths in Tools name the QA tree, so the formatter is not
+// where the linters are told to look, and the QA packages end up added to the application's own
+// dependency tree, which is exactly the coupling this change exists to remove.
 //
 // An existing manifest is left alone: a project that committed vendor-bin/qa/package.json pinned
 // the tool versions there on purpose, exactly as ComposerInstallCommand treats the Composer one.
@@ -588,6 +609,62 @@ func JSInstallCommand(plan InstallPlan) string {
 	return fmt.Sprintf(
 		`mkdir -p %[1]s && { [ -f %[2]s ] || printf '%%s' '{"name":"orobox-qa-tools","private":true}' > %[2]s; } && %[3]s %[4]s`,
 		qaDir, manifest, install, strings.Join(plan.JSPackages, " "))
+}
+
+// OroLinterInstallCommand returns the shell line that makes sure OroCommerce's own node_modules
+// holds the linters `tools` needs. It is empty when none of the tools comes from there.
+//
+// The linters are the application's installation (see BinaryPaths), and in a pipeline container
+// that tree exists only if something in the run created it. `oro:install` does, through its asset
+// install — but the QA step reaches an installed Oro three different ways, and two of them skip it:
+// a cached install is reused without reinstalling anything, and a seeded one is restored from a
+// database dump and reconciled with oro:platform:update. On those two paths the linters would be
+// missing and all three JS tools would be reported as tools that could not run.
+//
+// So the tree is installed here rather than assumed, and only when it is not already there — the
+// full-install path leaves it in place, and this then costs one `test`.
+//
+// `<manager> install` is the whole cost in the normal case: OroCommerce's package.json is what
+// declares the linters, their shareable configs and their plugins, so installing it is enough and
+// webpack never has to run. The console fallback is for the case where that file is not there yet;
+// only `oro:assets:install` knows how to produce it, and it builds the assets on the way.
+//
+// pnpm is asked not to insist on the lockfile: the manifest can be regenerated by the asset
+// install while a committed pnpm-lock.yaml is not, and a mismatch there would abort the step over
+// a lockfile no linter reads.
+func OroLinterInstallCommand(manager string, tools []Tool) string {
+	oroRoot := config.OroRootDir
+
+	var checks []string
+	seen := map[string]bool{}
+	for _, t := range tools {
+		bin, ok := BinaryPaths[t.Name]
+		if !ok || !strings.HasPrefix(bin, oroRoot+"/node_modules/") || seen[bin] {
+			continue
+		}
+		seen[bin] = true
+		checks = append(checks, fmt.Sprintf("[ -x %s ]", bin))
+	}
+	if len(checks) == 0 {
+		return ""
+	}
+
+	install := manager + " install --no-audit --no-fund"
+	if manager == "pnpm" {
+		install = manager + " install --no-frozen-lockfile"
+	}
+
+	return fmt.Sprintf(`# Preparing OroCommerce's node_modules: the QA linters are its own installation
+set -e
+if %[1]s; then
+  echo 'Reusing the linters OroCommerce already installed.'
+elif [ -f %[2]s/package.json ]; then
+  echo 'Installing OroCommerce'"'"'s JS dependencies: the QA linters come from them.'
+  (cd %[2]s && %[3]s)
+else
+  echo 'OroCommerce has no package.json yet: installing the assets, which generates it.'
+  php bin/console oro:assets:install --env=%[4]s --no-interaction
+fi`, strings.Join(checks, " && "), oroRoot, install, EnvTest)
 }
 
 // ManifestDirtyFile is written into the QA namespace by SharedVendorScript when it changed the

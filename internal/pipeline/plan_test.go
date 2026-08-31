@@ -961,6 +961,58 @@ func TestQaWarmupSeedsFromTheImageDump(t *testing.T) {
 	}
 }
 
+// TestQaStepInstallsOroCommercesNodeModules covers the two install paths that leave the QA step
+// without the linters: a cached install is reused untouched, and a seeded one is restored from a
+// database dump — neither runs the asset install that creates node_modules, and the linters are
+// OroCommerce's own installation.
+func TestQaStepInstallsOroCommercesNodeModules(t *testing.T) {
+	for _, oroVersion := range []string{"6.1", "7.0"} {
+		t.Run(oroVersion, func(t *testing.T) {
+			qa := joined(New(testConf(oroVersion, true), testStage(), "repo").QA.Commands)
+
+			manager := qatools.NewInstallPlan(oroVersion).JSManager
+			install := "cd " + config.OroRootDir + " && " + manager + " install"
+			for _, want := range []string{
+				"[ -x " + qatools.BinaryPaths["eslint"] + " ]",
+				"[ -x " + qatools.BinaryPaths["stylelint"] + " ]",
+				install,
+				// Only this produces the manifest when OroCommerce has not generated it yet.
+				"php bin/console oro:assets:install --env=test --no-interaction",
+			} {
+				if !strings.Contains(qa, want) {
+					t.Errorf("the QA step is missing %q:\n%s", want, qa)
+				}
+			}
+
+			// It has to run before the tools, and it must not undo the reuse: an install that is
+			// already there costs one `test`.
+			if prepare, run := strings.Index(qa, install), strings.Index(qa, "--- Running eslint ---"); prepare < 0 || run < 0 || prepare > run {
+				t.Errorf("node_modules is prepared at %d and eslint runs at %d:\n%s", prepare, run, qa)
+			}
+			if !strings.Contains(qa, "Reusing the linters OroCommerce already installed.") {
+				t.Errorf("the QA step reinstalls node_modules it already has:\n%s", qa)
+			}
+		})
+	}
+}
+
+// TestQaStepSkipsTheNodeModulesInstallWithoutJSTools keeps the preparation off the runs that have
+// nothing to prepare for: it is an npm install and an asset install, both paid for nothing.
+func TestQaStepSkipsTheNodeModulesInstallWithoutJSTools(t *testing.T) {
+	viper.Set("test.qa.eslint", false)
+	viper.Set("test.qa.stylelint", false)
+	defer func() {
+		viper.Set("test.qa.eslint", nil)
+		viper.Set("test.qa.stylelint", nil)
+	}()
+
+	qa := joined(New(testConf("6.1", true), testStage(), "repo").QA.Commands)
+
+	if strings.Contains(qa, "npm install") || strings.Contains(qa, "oro:assets:install") {
+		t.Errorf("the QA step prepares node_modules with no JS tool enabled:\n%s", qa)
+	}
+}
+
 func TestQaWarmupDropsTheTestCacheBetweenTheRestoreAndTheUpdate(t *testing.T) {
 	qa := joined(New(testConf("7.0", true), testStage(), "repo").QA.Commands)
 

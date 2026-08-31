@@ -838,6 +838,12 @@ func (p *Plan) qaCommands(oroVersion string) []string {
 		}
 	}
 	if len(enabled) > 0 {
+		// The JS linters are OroCommerce's own installation, and the QA step only sometimes gets
+		// one for free: a cached or database-seeded install never ran the asset install that
+		// creates node_modules. See qatools.OroLinterInstallCommand.
+		if js := qatools.OroLinterInstallCommand(plan.JSManager, enabled); js != "" {
+			commands = append(commands, js)
+		}
 		if p.Report == qatools.ReportNone {
 			commands = append(commands, qatools.Script(enabled))
 		} else {
