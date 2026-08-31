@@ -606,9 +606,28 @@ func JSInstallCommand(plan InstallPlan) string {
 		install += " --ignore-workspace --virtual-store-dir=" + qaDir + "/node_modules/.pnpm"
 	}
 
-	return fmt.Sprintf(
-		`mkdir -p %[1]s && { [ -f %[2]s ] || printf '%%s' '{"name":"orobox-qa-tools","private":true}' > %[2]s; } && %[3]s %[4]s`,
-		qaDir, manifest, install, strings.Join(plan.JSPackages, " "))
+	install += " " + strings.Join(plan.JSPackages, " ")
+
+	// A node_modules that is already there is reused, and when it cannot be it is rebuilt rather
+	// than reported. pnpm refuses to touch a tree linked from a different store than the one it is
+	// configured with — ERR_PNPM_UNEXPECTED_STORE — and that is the normal state here: the runtime
+	// image bakes its QA tree against a store inside the image, while the pipeline points pnpm at
+	// its own cache volume. The same refusal comes from a pnpm major change. Nothing in this
+	// directory is precious — it holds the two GitLab formatters and a lockfile for them — so the
+	// answer is to drop it and install again, which costs seconds.
+	//
+	// The retry is on any failure, not on that message: a store mismatch is only one of the ways a
+	// half-written tree stops an install, and both attempts print their own reason, so a genuine
+	// failure (an unreachable registry) still ends the command with its own error and status.
+	return fmt.Sprintf(`# Installing the QA JS packages: the GitLab Code Quality formatters
+set -e
+mkdir -p %[1]s
+[ -f %[2]s ] || printf '%%s' '{"name":"orobox-qa-tools","private":true}' > %[2]s
+if ! (%[3]s); then
+  echo 'The QA JS install failed; rebuilding %[1]s/node_modules from scratch and retrying.'
+  rm -rf %[1]s/node_modules
+  (%[3]s)
+fi`, qaDir, manifest, install)
 }
 
 // OroLinterInstallCommand returns the shell line that makes sure OroCommerce's own node_modules
@@ -649,9 +668,15 @@ func OroLinterInstallCommand(manager string, tools []Tool) string {
 		return ""
 	}
 
-	install := manager + " install --no-audit --no-fund"
+	install := "(cd " + oroRoot + " && " + manager + " install --no-audit --no-fund)"
 	if manager == "pnpm" {
-		install = manager + " install --no-frozen-lockfile"
+		base := "(cd " + oroRoot + " && pnpm install --no-frozen-lockfile"
+		// pnpm refuses a node_modules linked from a store other than the one it is configured
+		// with (ERR_PNPM_UNEXPECTED_STORE), which is the normal state in the pipeline: the image
+		// baked its tree against a store inside the image, and the run points pnpm at a cache
+		// volume. --force is pnpm's own answer to that — refetch and relink instead of refusing —
+		// and it is only paid when the plain install has already failed.
+		install = base + ") || " + base + " --force)"
 	}
 
 	return fmt.Sprintf(`# Preparing OroCommerce's node_modules: the QA linters are its own installation
@@ -660,7 +685,7 @@ if %[1]s; then
   echo 'Reusing the linters OroCommerce already installed.'
 elif [ -f %[2]s/package.json ]; then
   echo 'Installing OroCommerce'"'"'s JS dependencies: the QA linters come from them.'
-  (cd %[2]s && %[3]s)
+  %[3]s
 else
   echo 'OroCommerce has no package.json yet: installing the assets, which generates it.'
   php bin/console oro:assets:install --env=%[4]s --no-interaction

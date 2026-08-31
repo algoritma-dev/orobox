@@ -921,6 +921,56 @@ func TestReportScriptRecordsEachToolsOwnExitCode(t *testing.T) {
 // TestOroLinterInstallCommandIsShellAndOnlyRunsWhenNeeded pins the three properties the pipeline
 // relies on: it is valid POSIX shell (it is generated, not written by hand), it does nothing when
 // the linters are already installed, and it is empty for a tool list that needs no node_modules.
+// TestJSInstallCommandRebuildsANodeModulesItCannotUse covers the failure that stopped the pipeline's
+// qa-tools layer outright:
+//
+//	ERR_PNPM_UNEXPECTED_STORE
+//	The dependencies at ".../vendor-bin/qa/node_modules" are currently linked from the store at
+//	"/var/www/oro/.pnpm-store/v10". pnpm now wants to use the store at "/cache/js/pnpm/v10".
+//
+// The runtime image bakes its QA tree against a store inside the image; the pipeline points pnpm at
+// a cache volume. pnpm refuses rather than relinking, and the directory holds nothing worth saving,
+// so the install drops it and runs again.
+func TestJSInstallCommandRebuildsANodeModulesItCannotUse(t *testing.T) {
+	viper.Set("test.qa.eslint", true)
+	viper.Set("test.qa.stylelint", true)
+	defer func() {
+		viper.Set("test.qa.eslint", nil)
+		viper.Set("test.qa.stylelint", nil)
+	}()
+
+	command := JSInstallCommand(NewInstallPlan("7.0"))
+
+	if out, err := exec.Command("sh", "-n", "-c", command).CombinedOutput(); err != nil {
+		t.Errorf("the generated command is not valid shell: %v\n%s\n%s", err, out, command)
+	}
+	if !strings.Contains(command, "rm -rf "+config.QaToolsDir+"/node_modules") {
+		t.Errorf("a node_modules pnpm refuses is never rebuilt:\n%s", command)
+	}
+	// The rebuild is the fallback, not the rule: a reusable tree must be installed into as it is.
+	if first, retry := strings.Index(command, "pnpm add"), strings.Index(command, "rm -rf "+config.QaToolsDir+"/node_modules"); first < 0 || retry < first {
+		t.Errorf("the install wipes node_modules before trying to use it:\n%s", command)
+	}
+	if strings.Count(command, "pnpm add") != 2 {
+		t.Errorf("the install must try once and retry once, got %d attempts:\n%s", strings.Count(command, "pnpm add"), command)
+	}
+}
+
+// TestOroLinterInstallCommandFallsBackToAForcedPnpmInstall covers the same store refusal on the
+// application's own tree, where the answer is pnpm's --force — refetch and relink — rather than
+// deleting a node_modules the whole application is served from.
+func TestOroLinterInstallCommandFallsBackToAForcedPnpmInstall(t *testing.T) {
+	tools := Tools(ToolsOptions{SourceRoot: bundleRoot, AnalyzePath: bundleRoot})
+
+	command := OroLinterInstallCommand("pnpm", tools)
+	if !strings.Contains(command, "pnpm install --no-frozen-lockfile --force") {
+		t.Errorf("a store mismatch on OroCommerce's tree has no way out:\n%s", command)
+	}
+	if strings.Contains(command, "rm -rf "+config.OroRootDir+"/node_modules") {
+		t.Errorf("the application's node_modules must not be deleted:\n%s", command)
+	}
+}
+
 func TestOroLinterInstallCommandIsShellAndOnlyRunsWhenNeeded(t *testing.T) {
 	tools := Tools(ToolsOptions{SourceRoot: bundleRoot, AnalyzePath: bundleRoot})
 
