@@ -2,10 +2,10 @@ package qatools
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -322,9 +322,9 @@ func TestToolsReportModeAddsTheGitLabFlag(t *testing.T) {
 		OroVersion:  "6.0",
 	})
 
-	// Stylelint's formatter is named down to the module file: stylelint 16 imports it as an ES
-	// module, and a directory import fails with ERR_UNSUPPORTED_DIR_IMPORT.
-	stylelintFormatter := "--custom-formatter=" + config.QaToolsDir + "/node_modules/stylelint-formatter-gitlab/index.js"
+	// Stylelint's formatter is Orobox's own file, because no published one works across the
+	// stylelint majors OroCommerce installs; see stylelintformatter.go.
+	stylelintFormatter := "--custom-formatter=" + stylelintFormatterFile
 
 	want := map[string]string{
 		"phpstan": "--error-format=gitlab",
@@ -357,9 +357,7 @@ func TestToolsReportModeUsesAnEnvVarForTheJSTools(t *testing.T) {
 	})
 
 	want := map[string]string{
-		"eslint":        "ESLINT_CODE_QUALITY_REPORT",
-		"stylelint":     "STYLELINT_CODE_QUALITY_REPORT",
-		"stylelint-css": "STYLELINT_CODE_QUALITY_REPORT",
+		"eslint": "ESLINT_CODE_QUALITY_REPORT",
 	}
 	for name, variable := range want {
 		if got := toolByName(t, tools, name).ReportEnv; got != variable {
@@ -367,7 +365,9 @@ func TestToolsReportModeUsesAnEnvVarForTheJSTools(t *testing.T) {
 		}
 	}
 
-	for _, name := range []string{"phpstan", "rector", "php-cs-fixer", "twig-cs-fixer"} {
+	// The two stylelint tools are handed Orobox's own formatter, which prints the document to
+	// stdout, so they are reported by redirect like the PHP tools.
+	for _, name := range []string{"phpstan", "rector", "php-cs-fixer", "twig-cs-fixer", "stylelint", "stylelint-css"} {
 		if got := toolByName(t, tools, name).ReportEnv; got != "" {
 			t.Errorf("%s ReportEnv = %q, want empty: it writes to stdout", name, got)
 		}
@@ -464,36 +464,113 @@ func TestInstallPlanAlwaysCarriesTheGitLabFormatters(t *testing.T) {
 	plan := NewInstallPlan("6.1")
 	packages := strings.Join(plan.JSPackages, " ")
 
-	for _, pkg := range []string{"eslint-formatter-gitlab@^5.1.0", "@studiometa/stylelint-formatter-gitlab@^1.1.1"} {
-		if !strings.Contains(packages, pkg) {
-			t.Errorf("%s is missing from the JS packages: %s", pkg, packages)
-		}
+	if !strings.Contains(packages, "eslint-formatter-gitlab@^5.1.0") {
+		t.Errorf("the ESLint formatter is missing from the JS packages: %s", packages)
+	}
+	// Stylelint's is not a package at all; see the test below.
+	if strings.Contains(packages, "stylelint-formatter-gitlab") {
+		t.Errorf("a published stylelint formatter is still installed: %s", packages)
 	}
 }
 
-// TestInstallPlanPicksTheStylelintFormatterForTheLinesStylelintMajor covers what is left of the
-// per-line stylelint decision now that stylelint itself comes from OroCommerce: the two stylelint
-// majors load a custom formatter differently — 15 `require()`s it, 16 `import()`s it — so the
-// formatter still has to match the major the Oro line installed, or the report comes back empty.
-func TestInstallPlanPicksTheStylelintFormatterForTheLinesStylelintMajor(t *testing.T) {
+// TestStylelintFormatterIsOroboxsOwnFile covers the crash a published formatter kept producing:
+//
+//	TypeError: formatters[STYLELINT_FORMATTER] is not a function
+//
+// stylelint-formatter-gitlab calls stylelint's `formatters[name]` as a function and 16 turned those
+// into promises; @studiometa's replacement declares a `^16 || ^17` peer and breaks on 15. Which of
+// the two is right is not knowable here — the linter is OroCommerce's own installation, so its
+// major is the application's choice, and an Oro line's LTS patch can move it. A formatter is a
+// function of the results, so Orobox writes one that touches no stylelint API.
+func TestStylelintFormatterIsOroboxsOwnFile(t *testing.T) {
 	viper.Set("test.qa.stylelint", true)
 	defer viper.Set("test.qa.stylelint", nil)
 
-	for _, tc := range []struct {
-		version   string
-		formatter string
-	}{
-		{version: "7.0", formatter: "@studiometa/stylelint-formatter-gitlab@^1.1.1"},
-		{version: "6.1", formatter: "@studiometa/stylelint-formatter-gitlab@^1.1.1"},
-		{version: "6.0", formatter: "stylelint-formatter-gitlab"},
-		{version: "5.1", formatter: "stylelint-formatter-gitlab"},
-	} {
-		t.Run(tc.version, func(t *testing.T) {
-			packages := NewInstallPlan(tc.version).JSPackages
-			if !slices.Contains(packages, tc.formatter) {
-				t.Errorf("Oro %s installs %v, want %s among them", tc.version, packages, tc.formatter)
+	for _, version := range config.SupportedOroVersions {
+		t.Run(version, func(t *testing.T) {
+			packages := strings.Join(NewInstallPlan(version).JSPackages, " ")
+			if strings.Contains(packages, "stylelint-formatter-gitlab") {
+				t.Errorf("Oro %s still installs a published stylelint formatter: %s", version, packages)
+			}
+
+			tools := Tools(ToolsOptions{
+				SourceRoot: config.OroRootDir,
+				Report:     ReportGitLab,
+				ReportDir:  "/reports/qa",
+				OroVersion: version,
+			})
+			for _, name := range []string{"stylelint", "stylelint-css"} {
+				tool := toolByName(t, tools, name)
+				if !strings.Contains(strings.Join(tool.Args, " "), "--custom-formatter="+stylelintFormatterFile) {
+					t.Errorf("%s on Oro %s is not given Orobox's formatter: %s", name, version, strings.Join(tool.Args, " "))
+				}
+				// The file has to exist before the linter reads it, and the linter is the only
+				// thing that ever writes into that directory.
+				if !strings.Contains(tool.Setup, stylelintFormatterFile) {
+					t.Errorf("%s on Oro %s never writes the formatter: %s", name, version, tool.Setup)
+				}
 			}
 		})
+	}
+
+	// Without a report there is no document to format, so the file is not written at all.
+	plain := Tools(ToolsOptions{SourceRoot: config.OroRootDir, OroVersion: "6.1"})
+	if setup := toolByName(t, plain, "stylelint").Setup; strings.Contains(setup, stylelintFormatterFile) {
+		t.Errorf("the formatter is written for a run that reports to the terminal: %s", setup)
+	}
+}
+
+// TestStylelintFormatterIsValidJavaScript runs the formatter the way stylelint does — a function of
+// the results returning the document — because "the string is in the binary" is not the same claim
+// as "the report parses". It is skipped where node is not installed; CI has it.
+func TestStylelintFormatterIsValidJavaScript(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+
+	dir := t.TempDir()
+	formatter := dir + "/formatter.cjs"
+	if err := os.WriteFile(formatter, []byte(stylelintFormatterSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	results := `[{"source":"/var/www/oro/src/A.scss","warnings":[{"line":12,"rule":"color-no-invalid-hex","severity":"error","text":"Unexpected invalid hex color"}],"parseErrors":[],"invalidOptionWarnings":[]}]`
+	script := fmt.Sprintf(`process.stdout.write(require(%q)(%s))`, formatter, results)
+
+	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("running the formatter: %v\n%s", err, out)
+	}
+
+	var issues []map[string]any
+	if err := json.Unmarshal(out, &issues); err != nil {
+		t.Fatalf("the formatter did not print GitLab Code Quality JSON: %v\n%s", err, out)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("formatted %d issues, want the one warning", len(issues))
+	}
+
+	issue := issues[0]
+	if issue["severity"] != "major" {
+		t.Errorf("severity = %v, want major for a stylelint error", issue["severity"])
+	}
+	if issue["check_name"] != "color-no-invalid-hex" {
+		t.Errorf("check_name = %v, want the rule", issue["check_name"])
+	}
+	if fingerprint, _ := issue["fingerprint"].(string); fingerprint == "" {
+		t.Error("the finding has no fingerprint, so GitLab cannot deduplicate it")
+	}
+	location, ok := issue["location"].(map[string]any)
+	if !ok {
+		t.Fatalf("the finding has no location: %v", issue)
+	}
+	if location["path"] != "/var/www/oro/src/A.scss" {
+		t.Errorf("path = %v, want the file stylelint reported", location["path"])
+	}
+	lines, _ := location["lines"].(map[string]any)
+	if lines["begin"] != float64(12) {
+		t.Errorf("lines.begin = %v, want 12", lines["begin"])
 	}
 }
 

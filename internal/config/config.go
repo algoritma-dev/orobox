@@ -402,11 +402,13 @@ func GetQaSymfonyConstraints(oroVersion string) []string {
 // QaStylelint is the stylelint half of the JS tool set, resolved for one Oro line.
 //
 // The three packages are one decision, not three: @oroinc/oro-stylelint-config carries its own
-// stylelint dependency (^15.3 up to Oro 6.0, ^16 from 6.1), and the GitLab Code Quality formatter
-// is picked by that major because the two stylelint lines load a custom formatter differently —
-// 15 `require()`s it, 16 `import()`s it. Mixing the majors is not a warning but a crash: the
-// unmet-peer combination the pins here exist to prevent is what made `orobox qa` on Oro 7.0 exit
-// non-zero with an empty report for stylelint and stylelint-css.
+// stylelint dependency (^15.3 up to Oro 6.0, ^16 from 6.1).
+//
+// No formatter is named here any more. Which stylelint actually runs is OroCommerce's choice, not
+// this table's — the linters are the application's own installation — and a formatter picked from
+// a version table is what produced "formatters[STYLELINT_FORMATTER] is not a function" on an Oro
+// line whose LTS patch had moved on. The formatter is Orobox's own file instead; see
+// qatools/stylelintformatter.go.
 type QaStylelint struct {
 	// Stylelint is the npm constraint for stylelint itself.
 	Stylelint string
@@ -415,28 +417,6 @@ type QaStylelint struct {
 	// OroCommerce's choice, and `latest` resolves to whichever line Oro released most recently —
 	// which on a pnpm install is overridden anyway by the application's own workspace resolution.
 	Config string
-	// Formatter is the npm package that turns stylelint output into a GitLab Code Quality
-	// document, FormatterConstraint the version it is installed at, and FormatterEntry the
-	// module inside it that stylelint is pointed at. The entry is explicit because stylelint 16
-	// loads the formatter as an ES module, and importing a directory fails with
-	// ERR_UNSUPPORTED_DIR_IMPORT.
-	Formatter           string
-	FormatterConstraint string
-	FormatterEntry      string
-}
-
-// FormatterRequirement returns the formatter as the JS package manager takes it.
-func (s QaStylelint) FormatterRequirement() string {
-	if s.FormatterConstraint == "" {
-		return s.Formatter
-	}
-	return s.Formatter + "@" + s.FormatterConstraint
-}
-
-// FormatterModule returns the container path stylelint's --custom-formatter is given, rooted at
-// the QA tools directory the formatter was installed into.
-func (s QaStylelint) FormatterModule() string {
-	return QaToolsDir + "/node_modules/" + s.Formatter + "/" + s.FormatterEntry
 }
 
 // GetQaStylelint resolves the stylelint packages for an Oro version.
@@ -447,22 +427,10 @@ func (s QaStylelint) FormatterModule() string {
 func GetQaStylelint(oroVersion string) QaStylelint {
 	versions := GetVersionsForOro(oroVersion)
 
-	stylelint := QaStylelint{
+	return QaStylelint{
 		Stylelint: versions.Stylelint,
 		Config:    versions.StylelintConfig,
-		// stylelint-formatter-gitlab is unmaintained at 1.0.2 and calls stylelint's own
-		// `formatters[name]` as a function; in 16 those became promises, so it dies with
-		// "formatters[...] is not a function" whatever it was asked to lint. It carries no
-		// constraint because 1.0.2 is the only release there has ever been.
-		Formatter:      "stylelint-formatter-gitlab",
-		FormatterEntry: "index.js",
 	}
-	if strings.HasPrefix(stylelint.Stylelint, "^16") || strings.HasPrefix(stylelint.Stylelint, "^17") {
-		stylelint.Formatter = "@studiometa/stylelint-formatter-gitlab"
-		stylelint.FormatterConstraint = "^1.1.1"
-		stylelint.FormatterEntry = "src/index.js"
-	}
-	return stylelint
 }
 
 // GetHostBundlePath returns the absolute path to the bundle on the host.

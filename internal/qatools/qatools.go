@@ -113,12 +113,12 @@ type Tool struct {
 }
 
 // reportEnvByTool lists the tools whose GitLab formatter writes the document itself, to the file
-// named by an environment variable, and keeps the human-readable output on stdout. The four PHP
-// tools write the document to stdout instead, so a redirect is all they need.
+// named by an environment variable, and keeps the human-readable output on stdout. Everything else
+// writes the document to stdout, so a redirect is all it needs — the four PHP tools because their
+// formatters do, and the two stylelint tools because the formatter they are given is Orobox's own;
+// see stylelintformatter.go.
 var reportEnvByTool = map[string]string{
-	"eslint":        "ESLINT_CODE_QUALITY_REPORT",
-	"stylelint":     "STYLELINT_CODE_QUALITY_REPORT",
-	"stylelint-css": "STYLELINT_CODE_QUALITY_REPORT",
+	"eslint": "ESLINT_CODE_QUALITY_REPORT",
 }
 
 // BinaryPaths maps tool names to the binaries the tools are installed as.
@@ -170,6 +170,7 @@ func Tools(opts ToolsOptions) []Tool {
 	stylelintIgnore := mergedConfig(sourceRoot, oroRoot, ".stylelintignore", nil)
 	stylelintCSSConfig := mergedConfig(sourceRoot, oroRoot, ".stylelintrc-css.yml", yamlExtendsMerge)
 	stylelintCSSIgnore := mergedConfig(sourceRoot, oroRoot, ".stylelintignore-css", nil)
+	stylelintFormatter := stylelintFormatterRef()
 
 	rectorArgs := []string{oroRoot + "/bin/rector", "process", "--config=" + rectorConfig.Path}
 	phpCSFixerArgs := []string{oroRoot + "/bin/php-cs-fixer", "fix", "--config=" + phpCSFixerConfig.Path}
@@ -221,6 +222,10 @@ func Tools(opts ToolsOptions) []Tool {
 
 	eslintArgs = append(eslintArgs, jsTarget)
 
+	// The formatter file is only written when a report is asked for: without one stylelint prints
+	// its own human-readable output and there is nothing to format.
+	var stylelintFormatterSetup string
+
 	// Each tool's own GitLab reporter, so nothing needs converting anywhere — Rector excepted; see
 	// below. The flag names differ because their CLIs do; the document they produce is the same
 	// CodeClimate subset.
@@ -246,13 +251,13 @@ func Tools(opts ToolsOptions) []Tool {
 		// against lib/cli-engine/formatters inside its own installation and dies with
 		// "Cannot find module".
 		eslintArgs = append(eslintArgs, "--format="+qaDir+"/node_modules/eslint-formatter-gitlab")
-		// Stylelint's formatter is named down to the module file rather than by package
-		// directory, because stylelint 16 imports it as an ES module and a directory import
-		// fails with ERR_UNSUPPORTED_DIR_IMPORT. Which package that is depends on the Oro
-		// version; see config.GetQaStylelint.
-		stylelintFormatter := "--custom-formatter=" + config.GetQaStylelint(opts.OroVersion).FormatterModule()
-		stylelintArgs = append(stylelintArgs, stylelintFormatter)
-		stylelintCSSArgs = append(stylelintCSSArgs, stylelintFormatter)
+		// Stylelint's formatter is Orobox's own file rather than a published package, because the
+		// stylelint that loads it is OroCommerce's and its major is not knowable here; see
+		// stylelintformatter.go. It prints the document to stdout, so the two stylelint tools are
+		// reported by redirect like the PHP tools.
+		stylelintFormatterSetup = stylelintFormatter.Setup
+		stylelintArgs = append(stylelintArgs, "--custom-formatter="+stylelintFormatter.Path)
+		stylelintCSSArgs = append(stylelintCSSArgs, "--custom-formatter="+stylelintFormatter.Path)
 	}
 
 	// Generating a baseline replaces PHPStan's reporting rather than adding to it: the run's whole
@@ -301,8 +306,8 @@ func Tools(opts ToolsOptions) []Tool {
 		// Without the guard stylelint is handed a --config that names nothing, dies with an
 		// uncaught error and writes no report, which grades as a tool that could not run.
 		{Name: "eslint", Args: eslintArgs, Setup: joinSetup(binaryGuard("eslint"), eslintPluginLinks(), eslintConfig.Setup), SkipUnless: configExists(eslintConfig)},
-		{Name: "stylelint", Args: stylelintArgs, Setup: joinSetup(binaryGuard("stylelint"), stylelintConfig.Setup), SkipUnless: configExists(stylelintConfig)},
-		{Name: "stylelint-css", Args: stylelintCSSArgs, Setup: joinSetup(binaryGuard("stylelint-css"), stylelintCSSConfig.Setup), SkipUnless: configExists(stylelintCSSConfig)},
+		{Name: "stylelint", Args: stylelintArgs, Setup: joinSetup(binaryGuard("stylelint"), stylelintFormatterSetup, stylelintConfig.Setup), SkipUnless: configExists(stylelintConfig)},
+		{Name: "stylelint-css", Args: stylelintCSSArgs, Setup: joinSetup(binaryGuard("stylelint-css"), stylelintFormatterSetup, stylelintCSSConfig.Setup), SkipUnless: configExists(stylelintCSSConfig)},
 	}
 
 	if opts.Report != ReportNone {
@@ -551,12 +556,9 @@ func NewInstallPlan(oroVersion string) InstallPlan {
 			"eslint-config-google@~0.14.0", "eslint-plugin-oro@~0.0.3",
 			"eslint-plugin-no-jquery", "eslint-plugin-import")
 	}
-	// Which stylelint formatter is installed still depends on the Oro line, because the two
-	// stylelint majors load a custom formatter differently — 15 `require()`s it, 16 `import()`s it —
-	// and the line decides which major OroCommerce installed. See config.GetQaStylelint.
-	if needsStylelint {
-		plan.JSPackages = append(plan.JSPackages, config.GetQaStylelint(oroVersion).FormatterRequirement())
-	}
+	// Stylelint's formatter is not installed at all: it is a file Orobox writes, because no
+	// published formatter works across the stylelint majors OroCommerce installs. See
+	// stylelintformatter.go.
 
 	return plan
 }

@@ -20,7 +20,7 @@ deliberately broken files at `var/qa-probe/`.
 | ESLint | 8.57.1 |
 | Stylelint | 15.11.0 |
 | eslint-formatter-gitlab | 5.1.0 |
-| stylelint-formatter-gitlab | 1.0.2 |
+| stylelint-formatter-gitlab | 1.0.2 (replaced by Orobox's own formatter on 2026-08-31; see below) |
 
 ## How each report is requested
 
@@ -31,7 +31,7 @@ deliberately broken files at `var/qa-probe/`.
 | PHP CS Fixer | `--format=gitlab` | stdout |
 | Twig-CS-Fixer | `--report=gitlab` | stdout |
 | ESLint | `--format <abs path to eslint-formatter-gitlab>` | the file named by `ESLINT_CODE_QUALITY_REPORT` |
-| Stylelint | `--custom-formatter <abs path to stylelint-formatter-gitlab>` | the file named by `STYLELINT_CODE_QUALITY_REPORT` |
+| Stylelint | `--custom-formatter <abs path to Orobox's own formatter>` | stdout |
 
 ## Findings that contradict the original design
 
@@ -40,6 +40,14 @@ there and write the Code Quality document to the file named by an environment va
 their stdout into a report file therefore captures the wrong thing. They need the environment
 variable set to the destination instead, and their stdout left alone — which is a bonus: unlike the
 four PHP tools, their console output stays visible in the job log.
+
+This still holds for ESLint. It no longer holds for stylelint: no published formatter works across
+the stylelint majors OroCommerce installs — `stylelint-formatter-gitlab` calls stylelint's
+`formatters[name]` as a function, which 16 turned into a promise (`TypeError:
+formatters[STYLELINT_FORMATTER] is not a function`), and `@studiometa`'s replacement declares a
+`^16 || ^17` peer — so stylelint is handed a formatter Orobox writes, which prints the document to
+stdout like the PHP tools. The captured `stylelint.json` here predates that and is the same
+CodeClimate shape.
 
 **2. `eslint --format gitlab` does not resolve the formatter.** ESLint 8 looks for
 `lib/cli-engine/formatters/gitlab` inside its own installation and fails with

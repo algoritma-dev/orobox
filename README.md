@@ -527,11 +527,14 @@ built, and two branches with different migrations do not invalidate each other.
 
 #### Reports
 
-`--report=gitlab` makes every tool emit its own GitLab report; Orobox merges them into one
-document. Nothing is converted: each tool speaks the format natively, and the two JS tools do so
-through the `eslint-formatter-gitlab` and `stylelint-formatter-gitlab` packages `orobox qa-init`
-installs — the linters themselves come from OroCommerce's `node_modules`, see
-[QA Tools Initialization](#8-qa-tools-initialization-qa-init).
+`--report=gitlab` makes every tool emit its own report; Orobox merges them into one document. Most
+of them speak GitLab Code Quality natively — ESLint through the `eslint-formatter-gitlab` package
+`orobox qa-init` installs, the linters themselves coming from OroCommerce's `node_modules`, see
+[QA Tools Initialization](#8-qa-tools-initialization-qa-init). Two are converted by Orobox: Rector,
+whose `gitlab` format prints a deprecation warning into the report and is being removed anyway, so
+it reports its own JSON; and stylelint, which is handed a formatter Orobox writes, because the
+published ones are each pinned to a stylelint major and the major that runs is OroCommerce's
+choice.
 
 With `--report`, the QA tools no longer stop at the first failure — a Code Quality report listing
 only PHPStan's findings because Rector never ran would be worse than none. Every tool runs, and the
