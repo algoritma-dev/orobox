@@ -37,11 +37,11 @@ func decodeMerged(t *testing.T, setup string) string {
 }
 
 func TestMergedConfigPrefersTheMergeOverEitherHalf(t *testing.T) {
-	ref := mergedConfig("/src/root", config.QaToolsDir, "phpstan.neon", neonMerge)
+	ref := mergedConfig("/src/root", config.QaToolsDir, ".php-cs-fixer.dist.php", phpCSFixerMerge)
 
-	base := config.QaToolsDir + "/phpstan.neon"
-	project := "/src/root/phpstan.neon"
-	merged := mergedDir + "/phpstan.neon"
+	base := config.QaToolsDir + "/.php-cs-fixer.dist.php"
+	project := "/src/root/.php-cs-fixer.dist.php"
+	merged := mergedDir + "/.php-cs-fixer.dist.php"
 
 	// All three outcomes have to be reachable from the one expression: the container is the only
 	// place that knows whether the project ships a config, and a base config only exists once
@@ -94,11 +94,6 @@ func TestMergedDocumentsLayerProjectOverBase(t *testing.T) {
 		base string
 		want []string
 	}{
-		{
-			tool: "phpstan",
-			base: config.QaToolsDir + "/phpstan.neon",
-			want: []string{"includes:", config.QaToolsDir + "/phpstan.neon", bundleRoot + "/phpstan.neon"},
-		},
 		{
 			tool: "eslint",
 			base: config.OroRootDir + "/.eslintrc.yml",
@@ -157,8 +152,50 @@ func TestPhpstanSetupWritesTheMergedConfigBeforeWarmingTheCache(t *testing.T) {
 		t.Fatalf("phpstan setup must write the merged config before the warmup: %s", setup)
 	}
 	// Chained with && so a failed write stops the run instead of analysing against a stale config.
-	if !strings.Contains(setup, "fi && ") {
+	if !strings.Contains(setup, "> "+mergedDir+"/phpstan.neon && ") {
 		t.Errorf("phpstan setup lines are not chained: %s", setup)
+	}
+}
+
+// TestPhpstanConfigLayersBothHalvesAndExcludesTheVendoredTrees covers what the wrapper is for: the
+// two configs in precedence order, and Orobox's own excludes on top of them.
+func TestPhpstanConfigLayersBothHalvesAndExcludesTheVendoredTrees(t *testing.T) {
+	ref := phpstanConfigRef(bundleRoot, bundleRoot)
+
+	if ref.Path != mergedDir+"/phpstan.neon" {
+		t.Errorf("phpstan must always read the generated wrapper, got %s", ref.Path)
+	}
+
+	base := config.QaToolsDir + "/phpstan.neon"
+	project := bundleRoot + "/phpstan.neon"
+
+	// Each half is included only when it exists, because a NEON includes list cannot skip a
+	// missing entry and both halves are optional.
+	for _, want := range []string{
+		"if [ -f " + base + " ]; then echo '    - " + base + "'; fi",
+		"if [ -f " + project + " ]; then echo '    - " + project + "'; fi",
+	} {
+		if !strings.Contains(ref.Setup, want) {
+			t.Errorf("phpstan setup missing %q: %s", want, ref.Setup)
+		}
+	}
+
+	// Precedence is positional: the base is included first, so the project's file wins whatever
+	// the two disagree on.
+	if baseAt, projectAt := strings.Index(ref.Setup, base), strings.Index(ref.Setup, project); baseAt < 0 || projectAt < 0 || baseAt > projectAt {
+		t.Errorf("phpstan setup does not include the base before the project: %s", ref.Setup)
+	}
+
+	excludes := decodeMerged(t, ref.Setup)
+	if !strings.Contains(excludes, "excludePaths:\n        analyseAndScan:") {
+		t.Errorf("phpstan excludes are not written as analyseAndScan:\n%s", excludes)
+	}
+	// vendor-oro is the one that matters: a bundle checkout holds OroCommerce's whole installed
+	// tree under that name, and analysing it reports on Oro's vendors instead of the bundle.
+	for _, dir := range []string{"vendor", "vendor-oro", "node_modules"} {
+		if want := "- " + bundleRoot + "/" + dir + "/*"; !strings.Contains(excludes, want) {
+			t.Errorf("phpstan excludes missing %q:\n%s", want, excludes)
+		}
 	}
 }
 
@@ -183,9 +220,13 @@ func TestMergedSetupIsValidShell(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ref := mergedConfig(project, base, "phpstan.neon", neonMerge)
-	// mergedConfig addresses the real QA directory, which does not exist here.
+	ref := phpstanConfigRef(project, project)
+	// The generated wrapper addresses the real QA directory, which does not exist here.
+	// The merged directory lives inside the QA one, so it is redirected first: rewriting the QA
+	// path first would move it out of reach of the second replacement.
 	script := strings.ReplaceAll(ref.Setup, mergedDir, filepath.Join(dir, "merged"))
+	script = strings.ReplaceAll(script, config.QaToolsDir, base)
+	mergedFile := filepath.Join(dir, "merged", "phpstan.neon")
 	path := strings.ReplaceAll(ref.Path, mergedDir, filepath.Join(dir, "merged"))
 
 	run := func(t *testing.T) string {
@@ -198,24 +239,42 @@ func TestMergedSetupIsValidShell(t *testing.T) {
 		return strings.TrimSpace(string(out))
 	}
 
-	if got := run(t); got != filepath.Join(base, "phpstan.neon") {
-		t.Errorf("with no project config the base one must be used, got %q", got)
+	// The wrapper is the config in every case, so what changes with a project config in place is
+	// the document it holds, not the path handed to PHPStan.
+	if got := run(t); got != mergedFile {
+		t.Errorf("phpstan must read the generated wrapper, got %q", got)
+	}
+	written, err := os.ReadFile(mergedFile)
+	if err != nil {
+		t.Fatalf("wrapper was not written: %v", err)
+	}
+	if got := string(written); strings.Contains(got, filepath.Join(project, "phpstan.neon")) {
+		t.Errorf("a project config that does not exist must not be included: %s", got)
+	}
+	if got := string(written); !strings.Contains(got, filepath.Join(base, "phpstan.neon")) {
+		t.Errorf("wrapper does not include the base config: %s", got)
 	}
 
 	if err := os.WriteFile(filepath.Join(project, "phpstan.neon"), []byte("parameters:\n    level: 8\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	mergedFile := filepath.Join(dir, "merged", "phpstan.neon")
 	if got := run(t); got != mergedFile {
-		t.Errorf("with both configs present the merge must be used, got %q", got)
+		t.Errorf("phpstan must read the generated wrapper, got %q", got)
 	}
-	written, err := os.ReadFile(mergedFile)
+	written, err = os.ReadFile(mergedFile)
 	if err != nil {
-		t.Fatalf("merged config was not written: %v", err)
+		t.Fatalf("wrapper was not written: %v", err)
 	}
-	if !strings.Contains(string(written), filepath.Join(project, "phpstan.neon")) {
-		t.Errorf("merged config does not include the project's: %s", written)
+	for _, want := range []string{
+		filepath.Join(base, "phpstan.neon"),
+		filepath.Join(project, "phpstan.neon"),
+		"analyseAndScan:",
+		project + "/vendor-oro/*",
+	} {
+		if !strings.Contains(string(written), want) {
+			t.Errorf("wrapper missing %q: %s", want, written)
+		}
 	}
 }
 

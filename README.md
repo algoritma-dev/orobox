@@ -481,7 +481,7 @@ overwrites a file that is already there.
 
 | File | How it merges |
 | --- | --- |
-| `phpstan.neon` | NEON `includes`: base first, yours last. Relative paths in either file keep resolving against that file. |
+| `phpstan.neon` | NEON `includes`: base first, yours last, then Orobox's own excludes. Relative paths in either file keep resolving against that file. |
 | `rector.php` | Both configs are applied to the same `RectorConfig`, base first, then Orobox's own skip list. Either shape works — a `static function (RectorConfig $c)` or a `RectorConfig::configure()` builder. |
 | `.php-cs-fixer.dist.php` | Rules merge key by key, yours winning. Risky rules are allowed when either side allows them. Finder, cache file and indentation come from your config, minus the generated sources below. |
 | `.twig-cs-fixer.php` | Rulesets merge rule by rule (keyed by rule class), yours winning. Finder and the remaining `Config` settings come from your config. |
@@ -490,8 +490,17 @@ overwrites a file that is already there.
 
 The merged file is generated into `vendor-bin/qa/merged/` on every run; nothing is written to your
 checkout. When you ship no config of your own, the base one is used directly — except for
-`rector.php`, which always goes through the generated wrapper because Orobox has a skip list of its
-own to add to it (see below).
+`rector.php` and `phpstan.neon`, which always go through the generated wrapper because Orobox has
+something of its own to add to each: a skip list for Rector, the excluded trees for PHPStan (see
+below).
+
+**Vendored trees are excluded from the analysis.** `vendor`, `vendor-oro` and `node_modules` hold
+code the project did not write, so PHPStan's `excludePaths` drops them and the PHP-CS-Fixer and
+Twig-CS-Fixer finders never walk them. `vendor-oro` is why this is a correctness matter and not a
+speed one: a bundle checkout holds OroCommerce's whole installed tree under that name, so analysing
+the bundle root analysed the platform and every dependency it ships — thirteen findings against
+faker, gedmo, symfony/cache and friends, closing with "Result is incomplete because of severe
+errors", none of it about the bundle.
 
 **Sources OroCommerce generates are excluded.** `src/AppKernel.php` is written by the OroCommerce
 application skeleton and shipped again with every release, so reformatting it is work the next

@@ -77,10 +77,16 @@ func TestToolsAreOrderedAndSelfContained(t *testing.T) {
 		}
 	}
 
-	// The project's own config must be preferred over the generated one for every tool.
-	phpstan := strings.Join(toolByName(t, tools, "phpstan").Args, " ")
-	if !strings.Contains(phpstan, "/src/root/phpstan.neon") || !strings.Contains(phpstan, config.QaToolsDir+"/phpstan.neon") {
-		t.Errorf("phpstan args do not implement the project-first config fallback: %s", phpstan)
+	// The project's own config must be preferred over the generated one for every tool. PHPStan
+	// reads a wrapper that layers both and adds Orobox's excludes, so the two halves are named by
+	// its setup line rather than on the command line; see phpstanConfigRef.
+	phpstanTool := toolByName(t, tools, "phpstan")
+	phpstan := strings.Join(phpstanTool.Args, " ")
+	if !strings.Contains(phpstan, "--configuration="+mergedDir+"/phpstan.neon") {
+		t.Errorf("phpstan does not read the generated wrapper: %s", phpstan)
+	}
+	if !strings.Contains(phpstanTool.Setup, "/src/root/phpstan.neon") || !strings.Contains(phpstanTool.Setup, config.QaToolsDir+"/phpstan.neon") {
+		t.Errorf("phpstan setup does not implement the project-first config fallback: %s", phpstanTool.Setup)
 	}
 	if !strings.Contains(phpstan, "/src/root/src") {
 		t.Errorf("phpstan does not analyze the requested path: %s", phpstan)

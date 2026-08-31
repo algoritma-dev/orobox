@@ -5,7 +5,9 @@
 # standard's. Do not copy the standard's settings in — only what this project changes.
 #
 # The analysed path is not set here: `orobox qa` passes it on the PHPStan command line, so it
-# always matches the install type.
+# always matches the install type. Orobox excludes the vendored trees under it — `vendor`,
+# `vendor-oro` and `node_modules` — in a layer of its own on top of this file, so a bundle install
+# reports on the bundle rather than on OroCommerce's dependencies.
 #
 # To take an existing codebase on without fixing everything first, run
 # `orobox qa --generate-baseline`: PHPStan records what it finds today in a baseline file next to

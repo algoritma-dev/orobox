@@ -79,11 +79,73 @@ func joinSetup(lines ...string) string {
 	return strings.Join(kept, " && ")
 }
 
-// neonMerge layers two PHPStan configs through NEON includes. Later includes win on scalars and
-// merge into the arrays of earlier ones, which is exactly the precedence wanted. Relative paths
-// inside either file keep resolving against that file, so neither has to know it was included.
-func neonMerge(baseFile, projectFile string) string {
-	return fmt.Sprintf("includes:\n    - %s\n    - %s\n", baseFile, projectFile)
+// phpstanConfigRef resolves PHPStan's configuration. Like Rector's it is always the generated
+// wrapper, never the base or the project file directly, because Orobox has something of its own to
+// contribute to it: the excludes that keep the analysis inside the code the project actually owns
+// (see phpstanExcludedTrees). Falling back to either file as-is would drop those excludes exactly
+// where they matter most — a bundle checkout with no phpstan.neon of its own, and the pipeline
+// engine, which installs the tools itself and never runs `orobox qa-init` at all.
+//
+// The two configs are layered through NEON includes: later includes win on scalars and merge into
+// the arrays of earlier ones, which is the precedence wanted, and relative paths inside either
+// file keep resolving against that file, so neither has to know it was included. The list is built
+// by the shell rather than written out here because a NEON `includes` list cannot skip a missing
+// entry, and both halves are optional: the base one exists only once the tools are installed, the
+// project's one only once a developer wrote it.
+func phpstanConfigRef(sourceRoot, analyzePath string) configRef {
+	baseFile := config.QaToolsDir + "/phpstan.neon"
+	projectFile := sourceRoot + "/phpstan.neon"
+	mergedFile := mergedDir + "/phpstan.neon"
+
+	b64 := base64.StdEncoding.EncodeToString([]byte(phpstanExcludes(analyzePath)))
+
+	return configRef{
+		Path: mergedFile,
+		Setup: fmt.Sprintf(
+			"mkdir -p %[3]s && { if [ -f %[1]s ] || [ -f %[2]s ]; then echo 'includes:'; "+
+				"if [ -f %[1]s ]; then echo '    - %[1]s'; fi; "+
+				"if [ -f %[2]s ]; then echo '    - %[2]s'; fi; echo; fi; "+
+				"printf '%%s' '%[5]s' | base64 -d; } > %[4]s",
+			baseFile, projectFile, mergedDir, mergedFile, b64),
+	}
+}
+
+// phpstanExcludedTrees are the directories under the analysed tree that hold code the project did
+// not write. They are the same three the PHP-CS-Fixer and Twig-CS-Fixer stubs exclude from their
+// finders (see scaffold.QaStubDataFor) — PHPStan takes an analysed path on the command line rather
+// than a finder, so it needs the same list expressed as configuration.
+//
+// vendor-oro is the one that makes this a correctness matter rather than a speed one. A bundle
+// checkout holds OroCommerce's whole installed tree under that name, so analysing the bundle root
+// analyses the platform and every dependency it ships: PHPStan then reports thirteen findings
+// against faker, behat/transliterator, gedmo, liip/imagine-bundle and symfony/cache — internal
+// errors for optional classes those packages declare against and a PHP 8.4 fatal from
+// doctrine/cache's Psr6 adapter, reached by autoload while analysing them — and closes with
+// "Result is incomplete because of severe errors", which is a report on OroCommerce's vendors that
+// says nothing about the bundle.
+func phpstanExcludedTrees() []string {
+	return []string{"vendor", "vendor-oro", "node_modules"}
+}
+
+// phpstanExcludes renders Orobox's own layer of the PHPStan config: the excluded trees under the
+// analysed path.
+//
+// analyseAndScan rather than analyse, because the point is for PHPStan never to parse those files
+// at all; the classes in them stay reachable through the `--autoload-file` composer autoloader,
+// which is how PHPStan resolves every other symbol it does not index.
+//
+// Each entry ends in a wildcard so PHPStan reads it as a pattern and does not check that the
+// directory exists. A project install analyses OroRoot/src, which holds none of these, and an
+// exact path that is missing aborts the run with "excludePaths ... does not exist".
+func phpstanExcludes(analyzePath string) string {
+	var b strings.Builder
+
+	b.WriteString("parameters:\n    excludePaths:\n        analyseAndScan:\n")
+	for _, dir := range phpstanExcludedTrees() {
+		fmt.Fprintf(&b, "            - %s/%s/*\n", analyzePath, dir)
+	}
+
+	return b.String()
 }
 
 // yamlExtendsMerge layers two ESLint or Stylelint configs through `extends`, which both tools
