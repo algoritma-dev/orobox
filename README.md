@@ -244,7 +244,7 @@ The argument is the bundle **namespace**, and where the bundle lands is read fro
 discovers the generated `Resources/config/oro/bundles.yml`, so the bundle needs no
 `composer.json` of its own — clear the cache and it is loaded:
 
-```
+```text
 src/Acme/Bundle/FooBundle/
 ├── AcmeFooBundle.php
 ├── DependencyInjection/

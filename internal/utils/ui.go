@@ -91,6 +91,20 @@ func AskYesNo(reader *bufio.Reader, question string, defaultValue bool) bool {
 	return input == "y" || input == "yes"
 }
 
+// IsInteractiveInput reports whether r is a terminal a question can actually be answered on.
+//
+// AskYesNo blocks in ReadString until a newline arrives, so it returns its default only when
+// the reader is at EOF. A CI or daemon process that inherits an open pipe on stdin never
+// reaches EOF and would hang forever on a prompt. Call this before asking anything whose
+// default is the safe answer, and take the default when it reports false.
+func IsInteractiveInput(r io.Reader) bool {
+	f, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	return term.IsTerminal(int(f.Fd()))
+}
+
 // AskSelection asks a multiple choice question to the user and returns the selected value.
 func AskSelection(reader *bufio.Reader, question string, options []string, defaultValue string) string {
 	fmt.Printf("%s%s%s\n", colorCyan, question, colorReset)

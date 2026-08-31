@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"unicode"
 )
@@ -44,6 +45,9 @@ func ParseBundleArg(arg, classOverride, packageOverride string) (BundleOptions, 
 		if s == "" {
 			return BundleOptions{}, fmt.Errorf("bundle namespace %q has an empty segment", arg)
 		}
+		if !isPHPIdentifier(s) {
+			return BundleOptions{}, fmt.Errorf("bundle namespace %q has an invalid segment %q: segments must be PHP identifiers", arg, s)
+		}
 	}
 
 	namespace := arg
@@ -55,6 +59,9 @@ func ParseBundleArg(arg, classOverride, packageOverride string) (BundleOptions, 
 	}
 
 	if classOverride != "" {
+		if !isPHPIdentifier(classOverride) {
+			return BundleOptions{}, fmt.Errorf("bundle class %q is not a PHP identifier", classOverride)
+		}
 		className = classOverride
 	}
 	if className == "" {
@@ -67,6 +74,9 @@ func ParseBundleArg(arg, classOverride, packageOverride string) (BundleOptions, 
 	}
 
 	packageName := packageOverride
+	if packageName != "" && !composerPackagePattern.MatchString(packageName) {
+		return BundleOptions{}, fmt.Errorf(`composer package name %q is not valid (expected "vendor/package")`, packageName)
+	}
 	if packageName == "" {
 		packageName = derivePackageName(segments, className)
 	}
@@ -87,6 +97,31 @@ func ParseBundleArg(arg, classOverride, packageOverride string) (BundleOptions, 
 func looksLikeBundleNamespace(segment string) bool {
 	return segment != "Bundle" && strings.HasSuffix(segment, "Bundle")
 }
+
+// isPHPIdentifier reports whether a string is a legal PHP label, which is what both a
+// namespace segment and a class name have to be. This is also the guard that keeps a bundle
+// inside the project: a segment becomes a directory component further down, so `..` or a
+// segment carrying a path separator would otherwise place the skeleton outside the project
+// root. PHP allows bytes 0x80-0xFF in identifiers, so non-ASCII letters pass.
+func isPHPIdentifier(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c == '_', c >= 0x80:
+		case c >= '0' && c <= '9':
+			if i == 0 {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return s != ""
+}
+
+// composerPackagePattern is composer's own name rule, applied to --package so an override
+// cannot break the generated composer.json or become an unusable package name.
+var composerPackagePattern = regexp.MustCompile(`^[a-z0-9]([_.-]?[a-z0-9]+)*/[a-z0-9](([_.]|-{1,2})?[a-z0-9]+)*$`)
 
 // deriveClassName builds the Oro-conventional class name from the namespace: the vendor
 // segment prepended to the bundle segment, so `Acme\Bundle\FooBundle` yields `AcmeFooBundle`

@@ -132,6 +132,28 @@ func TestParseBundleArg(t *testing.T) {
 		},
 		{name: "empty arg errors", arg: "", wantErr: true},
 		{name: "empty segment errors", arg: `Acme\\FooBundle`, wantErr: true},
+		// A namespace segment becomes a directory component, so anything that is not a PHP
+		// identifier is refused before it can steer the skeleton out of the project.
+		{name: "dot-dot segment errors", arg: `Acme\..\..\out`, wantErr: true},
+		{name: "dot segment errors", arg: `Acme\.\FooBundle`, wantErr: true},
+		{name: "slash in segment errors", arg: `Acme/Bundle/FooBundle`, wantErr: true},
+		{name: "segment starting with a digit errors", arg: `Acme\1Bundle`, wantErr: true},
+		{name: "class override with a path errors", arg: `Acme\Bundle\FooBundle`, classFlag: `../../evil`, wantErr: true},
+		{name: "class override with a quote errors", arg: `Acme\Bundle\FooBundle`, classFlag: `Foo"Bundle`, wantErr: true},
+		{name: "package override with a quote errors", arg: `Acme\Bundle\FooBundle`, packageFlag: `acme/foo","type":"library`, wantErr: true},
+		{name: "package override without a slash errors", arg: `Acme\Bundle\FooBundle`, packageFlag: "acmefoo", wantErr: true},
+		{
+			name:        "valid package override is kept",
+			arg:         `Acme\Bundle\FooBundle`,
+			packageFlag: "acme-corp/foo-bundle",
+			want: BundleOptions{
+				ClassName:   "AcmeFooBundle",
+				Namespace:   `Acme\Bundle\FooBundle`,
+				Prefix:      "AcmeFoo",
+				Alias:       "acme_foo",
+				PackageName: "acme-corp/foo-bundle",
+			},
+		},
 	}
 
 	for _, tt := range tests {

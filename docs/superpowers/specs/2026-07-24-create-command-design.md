@@ -97,6 +97,16 @@ The class form is told apart from the namespace form by the segment before the l
 the class form it is itself a `*Bundle` namespace segment, while in the namespace form it is
 either a vendor or Oro's literal `Bundle` separator.
 
+**Input validation:** every namespace segment must be a PHP identifier
+(`[A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*`), and so must a `--class` override. Segments
+become directory components under the PSR-4 root, so `.`, `..` or a segment carrying a path
+separator would place the skeleton outside the project root — `Acme\..\..\out` resolving to
+`../out` — and a `--class` override additionally becomes an artifact filename. A `--package`
+override must match composer's own name rule
+(`^[a-z0-9]([_.-]?[a-z0-9]+)*/[a-z0-9](([_.]|-{1,2})?[a-z0-9]+)*$`). Values reaching a
+template are JSON-escaped by the `json` template function on top of that, so a generated
+`composer.json` stays structurally valid regardless of input.
+
 - `Prefix` = ClassName with a trailing `Bundle` stripped (`AcmeFoo`).
 - `Alias` = snake_case of `Prefix` (`acme_foo`), used as the DI config tree name. It has to
   equal what Symfony derives from the Extension class name, or the container fails to build.
@@ -105,7 +115,7 @@ either a vendor or Oro's literal `Bundle` separator.
 
 **Generated skeleton (`<dir>/`):**
 
-```
+```text
 <ClassName>.php
 DependencyInjection/<Prefix>Extension.php
 DependencyInjection/Configuration.php

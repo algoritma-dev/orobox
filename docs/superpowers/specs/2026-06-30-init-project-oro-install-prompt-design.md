@@ -56,10 +56,14 @@ package-level `stdin io.Reader = os.Stdin` seam used elsewhere in this file).
 
 ### Non-interactive behavior
 
-No explicit TTY detection. In CI / no-TTY runs the reader hits EOF, `AskYesNo`
-receives empty input and returns its default (`false`), so `oro:install` is
-skipped — matching the conservative default. `--force-install` is the escape
-hatch for scripted reinstall.
+The prompt is only asked on a terminal. `AskYesNo` blocks in `ReadString` until
+a newline arrives, so it yields its default only at EOF; a CI or daemon process
+that inherits an open pipe on stdin never reaches EOF and would hang there
+forever. `utils.IsInteractiveInput(stdin)` reports whether stdin is a terminal
+(`term.IsTerminal` on the underlying `*os.File`); when it is not, the answer is
+the safe default (`false`) and `oro:install` is skipped without reading. The
+non-interactive default is the conservative one, and `--force-install` is the
+escape hatch for scripted reinstall.
 
 ### Gating step 5
 
@@ -81,6 +85,10 @@ composer-install steps run as before regardless of `runOroInstall`.
 - `init_test.go` continues to pass.
 - Add a test asserting the `--force-install` flag is registered on `initCmd`
   and binds to `forceInstall`.
+- Add a `utils.IsInteractiveInput` test covering a `strings.Reader`, an
+  `os.Pipe` read end and `os.DevNull` — the three shapes stdin takes in a
+  non-interactive run — all of which must report false so the prompt is skipped
+  rather than blocked on.
 - `performInstallation` requires Docker and remains integration-level (not unit
   tested here).
 

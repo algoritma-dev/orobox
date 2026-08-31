@@ -9,6 +9,7 @@ package scaffold
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -31,9 +32,21 @@ const (
 
 // templateFuncs are available to every scaffold template. "esc" doubles backslashes so a PHP
 // namespace can be embedded inside a JSON string — composer.json's PSR-4 keys are the case
-// that needs it.
+// that needs it. "json" is the general form: it escapes any value for a JSON string body, so
+// a CLI override cannot break the structure of a generated composer.json.
 var templateFuncs = template.FuncMap{
-	"esc": func(s string) string { return strings.ReplaceAll(s, `\`, `\\`) },
+	"esc":  func(s string) string { return strings.ReplaceAll(s, `\`, `\\`) },
+	"json": jsonString,
+}
+
+// jsonString encodes s as a JSON string and strips the surrounding quotes, so the result can
+// be dropped inside a quoted string already present in a template.
+func jsonString(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		return s
+	}
+	return string(b[1 : len(b)-1])
 }
 
 // Ownership says what an already existing target file means.

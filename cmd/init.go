@@ -205,11 +205,16 @@ var performInstallation = func() bool {
 		// Sources present. For project installs the source root is the user's
 		// bind-mounted checkout; running oro:install would reset an existing
 		// database. Ask before doing so (default no), unless --force-install.
-		// In non-interactive runs the reader hits EOF, AskYesNo returns its
-		// default (false), so oro:install is skipped.
+		// The question is only asked on a terminal: a non-interactive run may
+		// inherit a pipe that never reaches EOF, and waiting on it would hang
+		// the command instead of yielding the default. There the answer is the
+		// safe one — skip oro:install — and --force-install is the way to opt in.
 		if strategy.BindWholeRepo() && !forceInstall {
-			reader := bufio.NewReader(stdin)
-			runOroInstall = utils.AskYesNo(reader, "OroCommerce already present (composer.json found). Run oro:install? This resets the database", false)
+			runOroInstall = false
+			if utils.IsInteractiveInput(stdin) {
+				reader := bufio.NewReader(stdin)
+				runOroInstall = utils.AskYesNo(reader, "OroCommerce already present (composer.json found). Run oro:install? This resets the database", false)
+			}
 		}
 
 		// Sources present: check for vendors (especially if vendor-oro was just added)
