@@ -430,9 +430,21 @@ func assertCreatedBundleIsLoaded(t *testing.T, box *Box) {
 	// autoloadable, fails here rather than at the assertion below.
 	box.Run("console", "cache:clear")
 
-	res := box.Run("console", "debug:config")
-	if !strings.Contains(res.Stdout, e2eCreatedBundleAlias) {
-		t.Errorf("Oro did not register the generated bundle (no %q extension alias in debug:config):\n%s",
-			e2eCreatedBundleAlias, res.Stdout)
+	// debug:config is asked for the bundle by name rather than for the bundle list, and that is
+	// the whole assertion: the command resolves the name through the kernel's bundles, looks up
+	// the extension it registered, asks that extension for its Configuration and dumps the
+	// processed tree rooted at the alias. A bundle the kernel never loaded, an extension whose
+	// alias disagrees with its Configuration, or a Configuration that is not autoloadable each
+	// make the command fail, and box.Run turns that into a failed case on its own.
+	//
+	// The bundle list the bare command prints is deliberately not used: Symfony writes it to the
+	// error output, not stdout, so the assertion below silently matched an empty string and every
+	// project case failed with the alias plainly registered in the log.
+	res := box.Run("console", "debug:config", e2eCreatedBundleClass)
+	// Matched over both streams so a Symfony version that moves the dump to the error output
+	// fails the run for a real reason and not for where it wrote.
+	if out := res.Stdout + res.Stderr; !strings.Contains(out, e2eCreatedBundleAlias) {
+		t.Errorf("Oro did not register the generated bundle (no %q extension alias in debug:config %s):\n%s",
+			e2eCreatedBundleAlias, e2eCreatedBundleClass, out)
 	}
 }
