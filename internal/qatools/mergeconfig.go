@@ -169,6 +169,34 @@ func oroGeneratedSources() []string {
 	return []string{config.OroRootDir + "/src/AppKernel.php"}
 }
 
+// phpUnitAttributeRules are the PHP-CS-Fixer rules Orobox turns off for every project, because
+// what they produce does not run on the PHPUnit the application ships.
+//
+// php_unit_attributes rewrites PHPUnit's docblock annotations into the PHPUnit 10 attributes and
+// removes the annotation it replaced — `@dataProvider giveMeData` becomes
+// `#[PHPUnit\Framework\Attributes\DataProvider('giveMeData')]`. Every Oro line Orobox supports
+// pins PHPUnit 9.6 (oro/commerce-crm-application 7.0.3 requires phpunit/phpunit ~9.6.33 for
+// development), and PHPUnit 9 reads neither of those attributes: the annotation is gone, the
+// attribute means nothing, and the test that had a data provider now runs once with no arguments —
+// or errors on the missing arguments. The rule arrives through the shared standard's
+// @PHPUnit100Migration:risky set, so a project cannot avoid it by not asking for it.
+//
+// The rules are layered between the base standard and the project config, so a project that has
+// moved to PHPUnit 10 takes them back simply by naming them in its own .php-cs-fixer.dist.php.
+func phpUnitAttributeRules() []string {
+	return []string{"php_unit_attributes"}
+}
+
+// phpDisabledRules renders rule names as a PHP array body of rules set to false, ready to be
+// interpolated between brackets.
+func phpDisabledRules(rules []string) string {
+	disabled := make([]string, 0, len(rules))
+	for _, rule := range rules {
+		disabled = append(disabled, "'"+rule+"' => false")
+	}
+	return strings.Join(disabled, ", ")
+}
+
 // phpList renders paths as a PHP array body, ready to be interpolated between brackets.
 func phpList(paths []string) string {
 	quoted := make([]string, 0, len(paths))
@@ -247,7 +275,7 @@ return static function (RectorConfig $rectorConfig): void {
 }
 
 // phpCSFixerMerge merges the two PHP-CS-Fixer configs rule by rule, the project's winning on the
-// rules it names.
+// rules it names, with Orobox's own rule overrides in between (see phpUnitAttributeRules).
 //
 // Everything that is not a rule — the finder, the cache file, the indentation — comes from the
 // project config, because Config::getFinder() lazily builds a default one and "the project set a
@@ -287,7 +315,9 @@ $load = static function (string $file): ConfigInterface {
 $base = $load('%s');
 $project = $load('%s');
 
-$project->setRules(array_merge($base->getRules(), $project->getRules()));
+// See phpUnitAttributeRules: between the two sides, so the shared standard cannot switch the
+// rules on and the project can still switch them back.
+$project->setRules(array_merge($base->getRules(), [%s], $project->getRules()));
 $project->setRiskyAllowed($base->getRiskyAllowed() || $project->getRiskyAllowed());
 
 $finder = $project->getFinder();
@@ -302,7 +332,7 @@ if ($finder instanceof Finder) {
 }
 
 return $project;
-`, baseFile, projectFile, phpList(oroGeneratedSources()))
+`, baseFile, projectFile, phpDisabledRules(phpUnitAttributeRules()), phpList(oroGeneratedSources()))
 }
 
 // twigCSFixerMerge merges the two Twig-CS-Fixer rulesets into a fresh one, the project's rules
