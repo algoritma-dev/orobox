@@ -550,7 +550,7 @@ overwrites a file that is already there.
 | --- | --- |
 | `phpstan.neon` | NEON `includes`: base first, yours last, then Orobox's own excludes. Relative paths in either file keep resolving against that file. |
 | `rector.php` | Both configs are applied to the same `RectorConfig`, base first, then Orobox's own skip list. Either shape works — a `static function (RectorConfig $c)` or a `RectorConfig::configure()` builder. |
-| `.php-cs-fixer.dist.php` | Rules merge key by key, yours winning. Risky rules are allowed when either side allows them. Finder, cache file and indentation come from your config, minus the generated sources below. |
+| `.php-cs-fixer.dist.php` | Rules merge key by key, yours winning, with Orobox's PHPUnit override in between (see below). Risky rules are allowed when either side allows them. Finder, cache file and indentation come from your config, minus the generated sources below. |
 | `.twig-cs-fixer.php` | Rulesets merge rule by rule (keyed by rule class), yours winning. Finder and the remaining `Config` settings come from your config. |
 | `.eslintrc.yml`, `.stylelintrc.yml`, `.stylelintrc-css.yml` | `extends`: base first, yours last. |
 | `.eslintignore`, `.stylelintignore`, `.stylelintignore-css` | **Not merged** — yours replaces the base one. Ignore patterns resolve against the directory of the file holding them, so a merged copy would re-anchor every inherited pattern. |
@@ -568,6 +568,14 @@ speed one: a bundle checkout holds OroCommerce's whole installed tree under that
 the bundle root analysed the platform and every dependency it ships — thirteen findings against
 faker, gedmo, symfony/cache and friends, closing with "Result is incomplete because of severe
 errors", none of it about the bundle.
+
+**`php_unit_attributes` is off.** The shared standard enables PHP-CS-Fixer's
+`@PHPUnit100Migration:risky` set, whose `php_unit_attributes` rule rewrites PHPUnit's docblock
+annotations into PHPUnit 10 attributes and deletes the annotation it replaced — `@dataProvider
+giveMeData` becomes `#[PHPUnit\Framework\Attributes\DataProvider('giveMeData')]`. Every Oro line
+pins PHPUnit 9.6, which reads neither, so the rewritten test loses its data provider. Orobox turns
+the rule off between the base standard and your config: name it in your own
+`.php-cs-fixer.dist.php` to take it back once your tests run on PHPUnit 10.
 
 **Sources OroCommerce generates are excluded.** `src/AppKernel.php` is written by the OroCommerce
 application skeleton and shipped again with every release, so reformatting it is work the next

@@ -117,7 +117,7 @@ func TestMergedDocumentsLayerProjectOverBase(t *testing.T) {
 		{
 			tool: "php-cs-fixer",
 			base: config.QaToolsDir + "/.php-cs-fixer.dist.php",
-			want: []string{"ConfigInterface", "array_merge($base->getRules(), $project->getRules())", "setRiskyAllowed"},
+			want: []string{"ConfigInterface", "array_merge($base->getRules(), [", "], $project->getRules())", "setRiskyAllowed"},
 		},
 		{
 			tool: "twig-cs-fixer",
@@ -329,6 +329,26 @@ func TestRectorAlwaysUsesTheGeneratedWrapper(t *testing.T) {
 		if !strings.Contains(doc, "$rectorConfig->skip([") || !strings.Contains(doc, "'"+want+"'") {
 			t.Errorf("the wrapper does not skip %s:\n%s", want, doc)
 		}
+	}
+}
+
+// TestPhpCSFixerMergeDisablesThePHPUnitAttributeRules covers the regression in issue #11: the
+// shared standard's @PHPUnit100Migration:risky set rewrote `@dataProvider` annotations into PHPUnit
+// 10 attributes and removed the annotation, on applications that pin PHPUnit 9.6 and read neither.
+// The overrides have to sit between the two sides — after the base so the standard cannot switch
+// them on, before the project so a project on PHPUnit 10 can switch them back.
+func TestPhpCSFixerMergeDisablesThePHPUnitAttributeRules(t *testing.T) {
+	doc := phpCSFixerMerge(config.QaToolsDir+"/.php-cs-fixer.dist.php", bundleRoot+"/.php-cs-fixer.dist.php")
+
+	for _, rule := range phpUnitAttributeRules() {
+		if !strings.Contains(doc, "'"+rule+"' => false") {
+			t.Errorf("the merged config does not disable %s:\n%s", rule, doc)
+		}
+	}
+
+	want := "array_merge($base->getRules(), [" + phpDisabledRules(phpUnitAttributeRules()) + "], $project->getRules())"
+	if !strings.Contains(doc, want) {
+		t.Errorf("the overrides are not layered between the base and the project rules, want %q:\n%s", want, doc)
 	}
 }
 
