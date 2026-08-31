@@ -878,3 +878,41 @@ func TestReportScriptRecordsEachToolsOwnExitCode(t *testing.T) {
 		t.Errorf("a failed setup must give the line a non-zero code of its own:\n%s", script)
 	}
 }
+
+// TestJSInstallCommandKeepsThePnpmStoreInsideTheQaToolsDir covers the failure that made `orobox qa`
+// report eslint, stylelint and stylelint-css as tools that could not run on Oro 7.0 — the only line
+// installed with pnpm:
+//
+//	Error: Cannot find module '/var/www/oro/node_modules/.pnpm/eslint@8.57.1/node_modules/eslint/bin/eslint.js'
+//
+// pnpm resolves its lockfile and virtual store against the workspace root, not the working
+// directory, and OroCommerce ships a package.json at the application root. So `cd vendor-bin/qa &&
+// pnpm add` left only symlinks in vendor-bin/qa/node_modules pointing into <OroRoot>/node_modules,
+// and anything that rewrote the application's own node_modules afterwards — the QA step's Oro
+// install runs between the two — pruned the entries those symlinks named.
+func TestJSInstallCommandKeepsThePnpmStoreInsideTheQaToolsDir(t *testing.T) {
+	viper.Set("test.qa.eslint", true)
+	viper.Set("test.qa.stylelint", true)
+	defer func() {
+		viper.Set("test.qa.eslint", nil)
+		viper.Set("test.qa.stylelint", nil)
+	}()
+
+	plan := NewInstallPlan("7.0")
+	if plan.JSManager != "pnpm" {
+		t.Fatalf("7.0 is expected to install with pnpm, got %q", plan.JSManager)
+	}
+
+	command := JSInstallCommand(plan)
+
+	// The trailing space matters: --ignore-workspace-root-check, which this replaces, contains the
+	// flag name as a prefix and would satisfy a bare substring check while changing nothing.
+	if !strings.Contains(command, "--ignore-workspace ") {
+		t.Errorf("the install still resolves the application root as its workspace: %s", command)
+	}
+	// Belt and braces: --ignore-workspace decides where the lockfile goes, this decides where the
+	// packages themselves land, and only the second one is what the .bin symlinks point into.
+	if !strings.Contains(command, "--virtual-store-dir="+config.QaToolsDir+"/node_modules/.pnpm") {
+		t.Errorf("the virtual store is not pinned inside the QA tools dir: %s", command)
+	}
+}

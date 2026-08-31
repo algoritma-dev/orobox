@@ -565,9 +565,24 @@ func JSInstallCommand(plan InstallPlan) string {
 
 	install := fmt.Sprintf("cd %s && %s %s %s", qaDir, plan.JSManager, plan.JSInstallArg, plan.JSSaveDevFlag)
 	if plan.JSManager == "pnpm" {
-		// pnpm refuses to add deps to a workspace root unless told it is intentional
-		// (ERR_PNPM_ADDING_TO_ROOT). The QA tools dir is such a root.
-		install += " --ignore-workspace-root-check"
+		// A manifest is enough for npm, and not enough for pnpm: pnpm keeps one lockfile and one
+		// virtual store per *workspace*, resolved by walking up from the working directory, and
+		// OroCommerce's application root is what it finds. Left alone it writes the packages into
+		// <OroRoot>/node_modules/.pnpm and leaves vendor-bin/qa/node_modules holding nothing but
+		// symlinks into it — which is also why it then refused the install outright with
+		// ERR_PNPM_ADDING_TO_ROOT, the error --ignore-workspace-root-check used to silence here.
+		//
+		// Those symlinks are what broke Oro 7.0, the only line pnpm installs: the QA step's Oro
+		// install runs after this one and rewrites the application's own node_modules, pruning
+		// every virtual-store entry its package.json does not name. The QA symlinks then point at
+		// nothing, and eslint, stylelint and stylelint-css fail with MODULE_NOT_FOUND before they
+		// can write a report, so `orobox qa` reports all three as tools that could not run.
+		//
+		// --ignore-workspace makes the QA tools dir its own project, which puts the lockfile
+		// there; --virtual-store-dir puts the packages themselves there, which is the half the
+		// .bin symlinks actually resolve through. Both are pinned rather than relying on the
+		// first to imply the second.
+		install += " --ignore-workspace --virtual-store-dir=" + qaDir + "/node_modules/.pnpm"
 	}
 
 	return fmt.Sprintf(
