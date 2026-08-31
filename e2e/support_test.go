@@ -403,7 +403,9 @@ func TestReadQaOutcomesSeparatesFindingsFromToolsThatCouldNotRun(t *testing.T) {
 	write(qatools.ToolStatusFile("phpstan"), "1")
 	write("phpstan.json", `[{"description":"x","location":{"path":"src/A.php"}}]`)
 	write(qatools.ToolStatusFile("rector"), "0")
-	write("rector.json", "[]")
+	// Rector's report is its own JSON, not a Code Quality document; this is what it writes for a
+	// clean run.
+	write("rector.json", `{"totals":{"changed_files":0,"errors":0}}`)
 	write(qatools.ToolStatusFile("php-cs-fixer"), "255")
 	write("php-cs-fixer.json", "")
 	write(qatools.ToolStatusFile("twig-cs-fixer"), "1")

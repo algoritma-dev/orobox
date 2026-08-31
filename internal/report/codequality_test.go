@@ -63,7 +63,7 @@ func TestMergeCodeQualityConcatenatesAndCounts(t *testing.T) {
 
 	result, err := MergeCodeQuality([]ToolReport{
 		{Tool: "phpstan", Data: first},
-		{Tool: "rector", Data: second},
+		{Tool: "php-cs-fixer", Data: second},
 	}, PathPrefix{ContainerRoot: "/var/www/oro"})
 	if err != nil {
 		t.Fatalf("MergeCodeQuality returned %v", err)
@@ -81,8 +81,8 @@ func TestMergeCodeQualityConcatenatesAndCounts(t *testing.T) {
 	if got := location["path"]; got != "src/A.php" {
 		t.Errorf("first issue path = %v, want src/A.php", got)
 	}
-	if result.Counts["phpstan"] != 1 || result.Counts["rector"] != 2 {
-		t.Errorf("Counts = %v, want phpstan:1 rector:2", result.Counts)
+	if result.Counts["phpstan"] != 1 || result.Counts["php-cs-fixer"] != 2 {
+		t.Errorf("Counts = %v, want phpstan:1 php-cs-fixer:2", result.Counts)
 	}
 }
 

@@ -327,8 +327,9 @@ func TestToolsReportModeAddsTheGitLabFlag(t *testing.T) {
 	stylelintFormatter := "--custom-formatter=" + config.QaToolsDir + "/node_modules/stylelint-formatter-gitlab/index.js"
 
 	want := map[string]string{
-		"phpstan":       "--error-format=gitlab",
-		"rector":        "--output-format=gitlab",
+		"phpstan": "--error-format=gitlab",
+		// Rector reports its own JSON, which report.MergeCodeQuality converts; see the test below.
+		"rector":        "--output-format=json",
 		"php-cs-fixer":  "--format=gitlab",
 		"twig-cs-fixer": "--report=gitlab",
 		// ESLint 8 resolves a bare --format=gitlab against its own installation and fails, so the
@@ -500,8 +501,7 @@ func TestInstallPlanPicksTheStylelintFormatterForTheLinesStylelintMajor(t *testi
 // configured by files OroCommerce generates at the application root, extending packages its own
 // package.json declares, so a QA-local eslint or stylelint has to guess a version that satisfies a
 // ruleset it does not own — and a wrong guess exits non-zero with an empty report instead of with
-// findings. Nothing but the formatters is installed here; the binaries come from
-// <OroRoot>/node_modules, see BinaryPaths.
+// findings. The binaries come from <OroRoot>/node_modules, see BinaryPaths.
 func TestInstallPlanLeavesTheLintersToOroCommerce(t *testing.T) {
 	viper.Set("test.qa.eslint", true)
 	viper.Set("test.qa.stylelint", true)
@@ -512,9 +512,64 @@ func TestInstallPlanLeavesTheLintersToOroCommerce(t *testing.T) {
 
 	packages := strings.Join(NewInstallPlan("6.1").JSPackages, " ")
 
-	for _, pkg := range []string{"eslint@", "stylelint@", "eslint-config-google", "eslint-plugin-oro", "@oroinc/oro-stylelint-config"} {
+	// Stylelint's side needs nothing else: its shareable config is one OroCommerce installs, and
+	// the QA run resolves it from the application's tree.
+	for _, pkg := range []string{"eslint@", "stylelint@", "@oroinc/oro-stylelint-config"} {
 		if strings.Contains(packages, pkg) {
 			t.Errorf("%s is installed in the QA tools dir; the linters and their configs are OroCommerce's: %s", pkg, packages)
+		}
+	}
+}
+
+// TestInstallPlanFillsTheGapsOroCommercesEslintrcLeaves covers what the move to OroCommerce's
+// binaries broke: its generated .eslintrc.yml names plugins its generated package.json does not
+// install, and ESLint stops at the first one it cannot find —
+//
+//	ESLint couldn't find the plugin "eslint-plugin-no-jquery".
+//
+// so the QA step reported eslint as a tool that could not run.
+func TestInstallPlanFillsTheGapsOroCommercesEslintrcLeaves(t *testing.T) {
+	viper.Set("test.qa.eslint", true)
+	defer viper.Set("test.qa.eslint", nil)
+
+	packages := strings.Join(NewInstallPlan("7.0").JSPackages, " ")
+
+	for _, pkg := range []string{"eslint-config-google@~0.14.0", "eslint-plugin-oro@~0.0.3", "eslint-plugin-no-jquery", "eslint-plugin-import"} {
+		if !strings.Contains(packages, pkg) {
+			t.Errorf("%s is missing from the JS packages: %s", pkg, packages)
+		}
+	}
+}
+
+// TestEslintPluginLinksBridgeTheResolutionFlag pins the mechanism. A shareable config named in
+// `extends` goes through Node's own resolution, which NODE_PATH's second entry covers; a plugin goes
+// through --resolve-plugins-relative-to, which is a single directory and has to be the
+// application's, so a package the application is missing is unreachable there. The gap fillers are
+// therefore linked in, and only where the application has nothing of its own.
+func TestEslintPluginLinksBridgeTheResolutionFlag(t *testing.T) {
+	setup := toolByName(t, Tools(ToolsOptions{SourceRoot: bundleRoot, AnalyzePath: bundleRoot}), "eslint").Setup
+
+	if out, err := exec.Command("sh", "-n", "-c", setup).CombinedOutput(); err != nil {
+		t.Fatalf("the eslint setup is not valid shell: %v\n%s\n%s", err, out, setup)
+	}
+	for _, plugin := range oroEslintPluginGaps {
+		if !strings.Contains(setup, plugin) {
+			t.Errorf("%s is never linked into the tree ESLint resolves plugins in: %s", plugin, setup)
+		}
+	}
+	// The application's own copy always wins, and a gap filler that was never installed is not
+	// linked to nothing.
+	if !strings.Contains(setup, `[ -e `+config.OroRootDir+`/node_modules/"$plugin" ] && continue`) {
+		t.Errorf("the link would override the application's own plugin: %s", setup)
+	}
+	if !strings.Contains(setup, `[ -d `+config.QaToolsDir+`/node_modules/"$plugin" ] || continue`) {
+		t.Errorf("the link is not guarded on the QA copy existing: %s", setup)
+	}
+	// Nothing may write to the application's package.json: on a project install <OroRoot> is the
+	// developer's own bind-mounted repository.
+	for _, forbidden := range []string{"pnpm add", "npm install", "package.json"} {
+		if strings.Contains(setup, forbidden) {
+			t.Errorf("the eslint setup reaches for %q instead of linking: %s", forbidden, setup)
 		}
 	}
 }
@@ -1077,31 +1132,36 @@ func TestOroLinterInstallCommandAddsThePluginsOroDeclaresButDoesNotShip(t *testi
 	}
 }
 
-// TestRectorIsQuietedWhenItReportsGitLab covers the failure that made the whole QA run unreadable
-// even though every tool had run:
+// TestRectorReportsItsOwnJSONRatherThanGitLabs covers the failure that made the whole QA run
+// unreadable even though every tool had run:
 //
 //	the rector report is not valid GitLab Code Quality JSON: invalid character 'W' looking for
 //	beginning of value
 //
-// Rector 2.6 warns that the "gitlab" output format is deprecated, and the warning lands next to the
-// document in the report file, which is Rector's stdout. --quiet silences it without costing the
-// report: the GitLab formatter `echo`s its JSON directly rather than writing it through the
-// console, so Symfony's verbosity does not reach it.
-func TestRectorIsQuietedWhenItReportsGitLab(t *testing.T) {
+// The 'W' is the "[WARNING]" of the Symfony block Rector prints for its deprecated `gitlab` output
+// format, on the same stdout the report file captures. It cannot be silenced — `process` defines no
+// verbosity option, so `--quiet` aborts the command with "The "--quiet" option does not exist" and
+// Rector never runs — and the format is being removed in the next minor anyway. The `json` format
+// raises no warning and Rector forces its console output quiet for it, so the file holds the
+// document alone. report.MergeCodeQuality converts it.
+func TestRectorReportsItsOwnJSONRatherThanGitLabs(t *testing.T) {
 	gitlab := Tools(ToolsOptions{SourceRoot: bundleRoot, AnalyzePath: bundleRoot, Report: ReportGitLab})
 	rector := strings.Join(toolByName(t, gitlab, "rector").Args, " ")
 
-	if !strings.Contains(rector, "--output-format=gitlab") {
-		t.Fatalf("rector does not report GitLab Code Quality: %s", rector)
+	if !strings.Contains(rector, "--output-format=json") {
+		t.Errorf("rector does not report the format it can write cleanly: %s", rector)
 	}
-	if !strings.Contains(rector, "--quiet") {
+	if strings.Contains(rector, "--output-format=gitlab") {
 		t.Errorf("rector's deprecation warning still reaches the report file: %s", rector)
 	}
+	if strings.Contains(rector, "--quiet") {
+		t.Errorf("rector is handed an option its process command does not define: %s", rector)
+	}
 
-	// Without a report there is no file to keep clean, and the console output is what the user
-	// reads, so quieting it there would hide the findings themselves.
-	plain := Tools(ToolsOptions{SourceRoot: bundleRoot, AnalyzePath: bundleRoot})
-	if args := strings.Join(toolByName(t, plain, "rector").Args, " "); strings.Contains(args, "--quiet") {
-		t.Errorf("rector is silenced when it reports to the terminal: %s", args)
+	// Without a report the console output is what the user reads, and Rector's own format is what
+	// says anything readable there.
+	plain := strings.Join(toolByName(t, Tools(ToolsOptions{SourceRoot: bundleRoot, AnalyzePath: bundleRoot}), "rector").Args, " ")
+	if strings.Contains(plain, "--output-format") {
+		t.Errorf("rector reports a machine format to the terminal: %s", plain)
 	}
 }

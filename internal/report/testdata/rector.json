@@ -1,21 +1,26 @@
-[
-    {
-        "fingerprint": "d4fe709c6adfd142183e43d5f979bbe1",
-        "type": "issue",
-        "categories": [
-            "Style"
-        ],
-        "severity": "minor",
-        "description": "RemoveUnusedVariableAssignRector / RemoveExtraParametersRector / ReturnTypeFromStrictTypedCallRector",
-        "content": {
-            "body": "--- Original\n+++ New\n@@ -1,8 +1,7 @@\n <?php\n class Bad {\n-    public function run( $x ) {\n-        $unused = 1;\n+    public function run( $x ): string|int {\n         if ($x == null) { return \"nope\"; }\n-        return strlen($x, \"extra\");\n+        return strlen($x);\n     }\n }\n"
-        },
-        "check_name": "RemoveUnusedVariableAssignRector / RemoveExtraParametersRector / ReturnTypeFromStrictTypedCallRector",
-        "location": {
-            "path": "var/qa-probe/Bad.php",
-            "lines": {
-                "begin": 1
-            }
+{
+    "totals": {
+        "changed_files": 1,
+        "errors": 1
+    },
+    "file_diffs": [
+        {
+            "file": "var/qa-probe/Bad.php",
+            "diff": "--- Original\n+++ New\n@@ -1,7 +1,6 @@\n <?php\n class Bad {\n-    public function run( $x ) {\n-        $unused = 1;\n+    public function run( $x ): string|int {\n         if ($x == null) { return \"nope\"; }\n         return strlen($x, \"extra\");\n     }\n",
+            "applied_rectors": [
+                "Rector\\DeadCode\\Rector\\Assign\\RemoveUnusedVariableAssignRector",
+                "Rector\\TypeDeclaration\\Rector\\ClassMethod\\ReturnTypeFromStrictTypedCallRector"
+            ]
         }
-    }
-]
+    ],
+    "changed_files": [
+        "var/qa-probe/Bad.php"
+    ],
+    "errors": [
+        {
+            "message": "Syntax error, unexpected '{', expecting T_VARIABLE",
+            "file": "var/qa-probe/Broken.php",
+            "line": 3
+        }
+    ]
+}

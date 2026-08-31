@@ -1,6 +1,7 @@
 // Package report turns the QA tools' and PHPUnit's own machine-readable output into the single
-// document GitLab expects. It converts nothing: every tool already emits GitLab Code Quality
-// JSON, so the work here is concatenation and path normalisation.
+// document GitLab expects. Almost nothing is converted: every tool but Rector already emits GitLab
+// Code Quality JSON, so the work here is concatenation and path normalisation. Rector is the one
+// exception, for the reason rector.go gives.
 //
 // The package deliberately knows nothing about Docker, Dagger or the filesystem layout of a
 // pipeline run: it takes bytes and returns bytes, which is what makes it testable against
@@ -83,9 +84,9 @@ func MergeCodeQuality(reports []ToolReport, prefix PathPrefix) (CodeQualityResul
 			continue
 		}
 
-		var issues []map[string]any
-		if err := json.Unmarshal(report.Data, &issues); err != nil {
-			return CodeQualityResult{}, fmt.Errorf("the %s report is not valid GitLab Code Quality JSON: %w", report.Tool, err)
+		issues, err := toolIssues(report)
+		if err != nil {
+			return CodeQualityResult{}, err
 		}
 
 		for _, issue := range issues {
@@ -101,6 +102,25 @@ func MergeCodeQuality(reports []ToolReport, prefix PathPrefix) (CodeQualityResul
 	}
 	result.Data = data
 	return result, nil
+}
+
+// toolIssues reads one tool's report file as a list of CodeClimate issues. Every tool but Rector
+// wrote that document itself; Rector's own format is converted here, for the reason rector.go
+// gives.
+func toolIssues(report ToolReport) ([]map[string]any, error) {
+	if report.Tool == rectorTool {
+		issues, err := rectorIssues(report.Data)
+		if err != nil {
+			return nil, fmt.Errorf("the %s report is not valid Rector JSON: %w", report.Tool, err)
+		}
+		return issues, nil
+	}
+
+	var issues []map[string]any
+	if err := json.Unmarshal(report.Data, &issues); err != nil {
+		return nil, fmt.Errorf("the %s report is not valid GitLab Code Quality JSON: %w", report.Tool, err)
+	}
+	return issues, nil
 }
 
 // rewriteIssuePath normalises location.path in place, leaving an issue whose shape it does not

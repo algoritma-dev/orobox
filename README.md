@@ -316,7 +316,11 @@ ESLint and Stylelint are the exception to "installs": Orobox runs OroCommerce's 
 those two linters are handed is OroCommerce's — `.eslintrc.yml` and `.stylelintrc.yml` at the
 application root, extending packages its `package.json` declares — so the only version guaranteed
 to satisfy it is the one the application installed for `npm run eslint-oro`. `qa-init` therefore
-installs only what the application has no reason to ship: the two GitLab Code Quality formatters.
+installs only what the application does not provide itself: the two GitLab Code Quality formatters,
+plus the ESLint plugins and shareable config OroCommerce's own `.eslintrc.yml` names but its
+generated `package.json` does not install (`eslint-plugin-no-jquery` is one). Those fillers are
+symlinked into `/var/www/oro/node_modules` at run time, and only where the application has nothing
+of its own there — nothing is ever written to its `package.json`.
 
 The linters appear with the application's `node_modules`, which the asset install populates. In CI
 the QA step installs them itself when they are not there — a cached or database-seeded Oro install

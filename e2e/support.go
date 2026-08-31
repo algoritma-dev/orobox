@@ -3,7 +3,6 @@ package e2e
 
 import (
 	"bytes"
-	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"os"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/qatools"
+	"github.com/algoritma-dev/orobox/internal/report"
 )
 
 // InstallType is an orobox install type exercised by the suite.
@@ -433,7 +433,7 @@ func ReadQaOutcomes(rawDir string) ([]QaToolOutcome, error) {
 			return nil, fmt.Errorf("the status of %s is not an exit code: %q", tool, string(data))
 		}
 		outcome.ExitCode = code
-		outcome.Findings, outcome.ReportErr = qaFindings(filepath.Join(rawDir, tool+".json"))
+		outcome.Findings, outcome.ReportErr = qaFindings(tool, filepath.Join(rawDir, tool+".json"))
 
 		outcomes = append(outcomes, outcome)
 	}
@@ -442,10 +442,14 @@ func ReadQaOutcomes(rawDir string) ([]QaToolOutcome, error) {
 	return outcomes, nil
 }
 
-// qaFindings counts the issues in one tool's Code Quality report. A missing or empty file is zero
-// findings: the tools that write the report themselves skip the file when they have nothing to
-// say, and a redirect leaves an empty one.
-func qaFindings(path string) (int, error) {
+// qaFindings counts the issues in one tool's report. A missing or empty file is zero findings: the
+// tools that write the report themselves skip the file when they have nothing to say, and a
+// redirect leaves an empty one.
+//
+// The count goes through report.MergeCodeQuality rather than a decode here, so the suite grades a
+// tool by the same reading `orobox qa` gives it — which for Rector is a conversion from its own
+// JSON, not a Code Quality document; see the report package.
+func qaFindings(tool, path string) (int, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		// Not the same as an empty report, and worth saying so: a tool that was asked for a
@@ -460,9 +464,9 @@ func qaFindings(path string) (int, error) {
 		return 0, nil
 	}
 
-	var issues []map[string]any
-	if err := json.Unmarshal(data, &issues); err != nil {
-		return 0, fmt.Errorf("the report is not GitLab Code Quality JSON: %w", err)
+	result, err := report.MergeCodeQuality([]report.ToolReport{{Tool: tool, Data: data}}, report.PathPrefix{ContainerRoot: config.OroRootDir})
+	if err != nil {
+		return 0, err
 	}
-	return len(issues), nil
+	return result.Counts[tool], nil
 }

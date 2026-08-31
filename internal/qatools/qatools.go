@@ -221,18 +221,25 @@ func Tools(opts ToolsOptions) []Tool {
 
 	eslintArgs = append(eslintArgs, jsTarget)
 
-	// Each tool's own GitLab reporter, so nothing needs converting anywhere. The flag names differ
-	// because their CLIs do; the document they produce is the same CodeClimate subset.
+	// Each tool's own GitLab reporter, so nothing needs converting anywhere — Rector excepted; see
+	// below. The flag names differ because their CLIs do; the document they produce is the same
+	// CodeClimate subset.
 	var phpstanExtraArgs []string
 	if opts.Report == ReportGitLab {
 		phpstanExtraArgs = []string{"--error-format=gitlab"}
-		// --quiet is not an optimization: Rector 2.6 prints a Symfony warning block saying the
-		// gitlab output format is deprecated, and it ends up in the report file next to the
-		// document, which made the merge reject the whole run with "invalid character 'W' looking
-		// for beginning of value". Quieting the console does not cost the report, because the
-		// GitLab formatter `echo`s its JSON rather than writing it through the console, so
-		// Symfony's verbosity never reaches it.
-		rectorArgs = append(rectorArgs, "--output-format=gitlab", "--quiet")
+		// Rector reports its own JSON, not GitLab's, and report.MergeCodeQuality converts it.
+		//
+		// Its `gitlab` formatter cannot be used even though it exists. Rector warns that the
+		// format is deprecated and will be removed in the next minor version, and that Symfony
+		// warning block is written to stdout — the same stream the formatter `echo`s the document
+		// to, and the stream the report file captures. The merge then rejected the whole run with
+		// "invalid character 'W' looking for beginning of value", the 'W' of "[WARNING]".
+		//
+		// Silencing the warning is not an option either: `process` defines its own option set with
+		// no verbosity flag, so `--quiet` aborts the command with "The "--quiet" option does not
+		// exist" and Rector never runs at all. The warning is raised only for the `github` and
+		// `gitlab` formats, so `json` — which is also what survives the removal — avoids it.
+		rectorArgs = append(rectorArgs, "--output-format=json")
 		phpCSFixerArgs = append(phpCSFixerArgs, "--format=gitlab")
 		twigArgs = append(twigArgs, "--report=gitlab")
 		// The formatter is addressed by absolute path: ESLint 8 resolves a bare --format=gitlab
@@ -293,7 +300,7 @@ func Tools(opts ToolsOptions) []Tool {
 		// on, since a stub written there would overwrite Oro's own file (see scaffold.QaStubs).
 		// Without the guard stylelint is handed a --config that names nothing, dies with an
 		// uncaught error and writes no report, which grades as a tool that could not run.
-		{Name: "eslint", Args: eslintArgs, Setup: joinSetup(binaryGuard("eslint"), eslintConfig.Setup), SkipUnless: configExists(eslintConfig)},
+		{Name: "eslint", Args: eslintArgs, Setup: joinSetup(binaryGuard("eslint"), eslintPluginLinks(), eslintConfig.Setup), SkipUnless: configExists(eslintConfig)},
 		{Name: "stylelint", Args: stylelintArgs, Setup: joinSetup(binaryGuard("stylelint"), stylelintConfig.Setup), SkipUnless: configExists(stylelintConfig)},
 		{Name: "stylelint-css", Args: stylelintCSSArgs, Setup: joinSetup(binaryGuard("stylelint-css"), stylelintCSSConfig.Setup), SkipUnless: configExists(stylelintCSSConfig)},
 	}
@@ -318,6 +325,37 @@ func Tools(opts ToolsOptions) []Tool {
 func binaryGuard(tool string) string {
 	return fmt.Sprintf(`{ [ -x %s ] || { echo "orobox: %s is missing. The QA linters run OroCommerce's own installation; build the assets (oro:assets:install) so it exists."; false; }; }`,
 		BinaryPaths[tool], BinaryPaths[tool])
+}
+
+// oroEslintPluginGaps are the ESLint plugins OroCommerce's configuration references but its
+// generated package.json does not always install. Anything the application does ship is used from
+// its own tree; these are only the fallbacks.
+var oroEslintPluginGaps = []string{"eslint-plugin-no-jquery", "eslint-plugin-import", "eslint-plugin-oro"}
+
+// eslintPluginLinks makes the gap fillers reachable from the tree ESLint resolves plugins in.
+//
+// A plugin is not resolved the way a shareable config is. `extends` goes through Node's own
+// resolution, so NODE_PATH's second entry — the QA tools directory — covers it. A plugin goes
+// through --resolve-plugins-relative-to, which is one directory and one directory only, and it has
+// to be the application's node_modules so the plugins OroCommerce does install are its own
+// versions. A package the application is missing is then simply not findable, and ESLint stops.
+//
+// Linking is what bridges the two without a second install: the QA copy is symlinked into the
+// application's node_modules under the name ESLint looks for, and only when the application has
+// nothing there. Nothing is written to the application's package.json — which matters on a project
+// install, where <OroRoot> is the developer's own bind-mounted repository and node_modules is the
+// one directory in it that is generated rather than authored.
+func eslintPluginLinks() string {
+	var b strings.Builder
+	b.WriteString("{ for plugin in " + strings.Join(oroEslintPluginGaps, " ") + "; do ")
+	fmt.Fprintf(&b, `[ -e %s/node_modules/"$plugin" ] && continue; `, config.OroRootDir)
+	fmt.Fprintf(&b, `[ -d %s/node_modules/"$plugin" ] || continue; `, config.QaToolsDir)
+	fmt.Fprintf(&b, `ln -sfn %s/node_modules/"$plugin" %s/node_modules/"$plugin"; `, config.QaToolsDir, config.OroRootDir)
+	// The loop's own status is whatever the last iteration left behind, and a `continue` on the
+	// last plugin would make the whole Setup line look like a failure. `true` states the outcome:
+	// a plugin that could not be linked is ESLint's to report, with the name in it.
+	b.WriteString("done; true; }")
+	return b.String()
 }
 
 // configExists is the shell test behind Tool.SkipUnless: the resolved configuration is a path
@@ -496,8 +534,22 @@ func NewInstallPlan(oroVersion string) InstallPlan {
 	//
 	// The ^5.1.0 pin on the ESLint formatter stays: 6 and later dropped the ESLint 8 formatter
 	// signature, and OroCommerce's supported lines still install ESLint 8.
+	//
+	// Alongside it go the gap fillers: the packages OroCommerce's own .eslintrc.yml names but its
+	// generated package.json does not install. That gap is real and it is ESLint's hard stop, not a
+	// warning — with the linters moved to the application's tree, the QA run died on
+	//
+	//	ESLint couldn't find the plugin "eslint-plugin-no-jquery".
+	//
+	// before linting a single file. They are pinned to the constraints OroCommerce's own generated
+	// package.json declares where it declares them at all, and they are only ever reached when the
+	// application's tree does not carry its own copy; see eslintPluginLinks and the NODE_PATH
+	// fallback in Tools.
 	if needsEslint {
-		plan.JSPackages = append(plan.JSPackages, "eslint-formatter-gitlab@^5.1.0")
+		plan.JSPackages = append(plan.JSPackages,
+			"eslint-formatter-gitlab@^5.1.0",
+			"eslint-config-google@~0.14.0", "eslint-plugin-oro@~0.0.3",
+			"eslint-plugin-no-jquery", "eslint-plugin-import")
 	}
 	// Which stylelint formatter is installed still depends on the Oro line, because the two
 	// stylelint majors load a custom formatter differently — 15 `require()`s it, 16 `import()`s it —
