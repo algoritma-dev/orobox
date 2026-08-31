@@ -226,7 +226,13 @@ func Tools(opts ToolsOptions) []Tool {
 	var phpstanExtraArgs []string
 	if opts.Report == ReportGitLab {
 		phpstanExtraArgs = []string{"--error-format=gitlab"}
-		rectorArgs = append(rectorArgs, "--output-format=gitlab")
+		// --quiet is not an optimization: Rector 2.6 prints a Symfony warning block saying the
+		// gitlab output format is deprecated, and it ends up in the report file next to the
+		// document, which made the merge reject the whole run with "invalid character 'W' looking
+		// for beginning of value". Quieting the console does not cost the report, because the
+		// GitLab formatter `echo`s its JSON rather than writing it through the console, so
+		// Symfony's verbosity never reaches it.
+		rectorArgs = append(rectorArgs, "--output-format=gitlab", "--quiet")
 		phpCSFixerArgs = append(phpCSFixerArgs, "--format=gitlab")
 		twigArgs = append(twigArgs, "--report=gitlab")
 		// The formatter is addressed by absolute path: ESLint 8 resolves a bare --format=gitlab
@@ -679,7 +685,7 @@ func OroLinterInstallCommand(manager string, tools []Tool) string {
 		install = base + ") || " + base + " --force)"
 	}
 
-	return fmt.Sprintf(`# Preparing OroCommerce's node_modules: the QA linters are its own installation
+	script := fmt.Sprintf(`# Preparing OroCommerce's node_modules: the QA linters are its own installation
 set -e
 if %[1]s; then
   echo 'Reusing the linters OroCommerce already installed.'
@@ -690,6 +696,92 @@ else
   echo 'OroCommerce has no package.json yet: installing the assets, which generates it.'
   php bin/console oro:assets:install --env=%[4]s --no-interaction
 fi`, strings.Join(checks, " && "), oroRoot, install, EnvTest)
+
+	if add := oroMissingPackagesCommand(manager, tools); add != "" {
+		script += "\n" + add
+	}
+
+	return script
+}
+
+// oroConfigOnlyPackage is a package OroCommerce's own configuration names and the package.json it
+// generates does not declare. Config and Token are what decide whether the line needs it at all:
+// the file at the application root, and the string that file uses to name the package.
+type oroConfigOnlyPackage struct {
+	Name   string
+	Config string
+	Token  string
+}
+
+// oroConfigOnlyPackages lists those packages per tool. They are installed on top of OroCommerce's
+// manifest, because installing that manifest alone cannot satisfy a configuration written against
+// more than it.
+//
+// ESLint's no-jquery plugin is the one entry. Every other package the two linters' configurations
+// name is declared by the manifest on every supported line — eslint-config-google, eslint-plugin-oro
+// and @oroinc/oro-stylelint-config on all of them, eslint-plugin-import on 7.0, which is also the
+// only line whose .eslintrc.yml names `import`. no-jquery is the exception: 6.0, 6.1 and 7.0 all
+// extend "plugin:no-jquery/deprecated" and list no-jquery under `plugins`, and none of them declare
+// eslint-plugin-no-jquery. Without it ESLint stops before linting anything:
+//
+//	ESLint couldn't find the plugin "eslint-plugin-no-jquery".
+//
+// The package is left unpinned: it declares eslint >= 8 as a peer, so the resolved version fits
+// whichever ESLint major the Oro line installed.
+var oroConfigOnlyPackages = map[string][]oroConfigOnlyPackage{
+	"eslint": {{Name: "eslint-plugin-no-jquery", Config: ".eslintrc.yml", Token: "no-jquery"}},
+}
+
+// oroMissingPackagesCommand adds the oroConfigOnlyPackages the enabled tools need to OroCommerce's
+// node_modules, and only when the line actually needs them.
+//
+// It is a step of its own rather than part of the install above, because the install is skipped
+// whenever the binaries are present — a full install, a cached tree — and that is precisely the run
+// where the package is missing. The packages have to land in the application's tree and nowhere
+// else: ESLint resolves plugins through --resolve-plugins-relative-to, which Tools points at that
+// directory, so a copy in the QA namespace is not on the search path at all.
+//
+// The configuration is what is asked, not the Oro version: 5.1's .eslintrc.yml does not name
+// no-jquery and must not pay for it, and a line that starts or stops naming a package needs no
+// change here. Only knowable inside the container, so it is a grep and not a version check.
+func oroMissingPackagesCommand(manager string, tools []Tool) string {
+	oroRoot := config.OroRootDir
+
+	var packages []oroConfigOnlyPackage
+	seen := map[string]bool{}
+	for _, t := range tools {
+		for _, pkg := range oroConfigOnlyPackages[t.Name] {
+			if !seen[pkg.Name] {
+				seen[pkg.Name] = true
+				packages = append(packages, pkg)
+			}
+		}
+	}
+	if len(packages) == 0 {
+		return ""
+	}
+
+	// pnpm treats the application root as a workspace root and refuses to add to it unless told
+	// the addition is deliberate (ERR_PNPM_ADDING_TO_ROOT). Unlike the QA namespace this tree is
+	// the workspace, so the check is waived rather than the workspace ignored.
+	add := "cd " + oroRoot + " && " + manager + " install --save-dev"
+	if manager == "pnpm" {
+		add = "cd " + oroRoot + " && pnpm add -D --ignore-workspace-root-check"
+	}
+
+	var blocks []string
+	for _, pkg := range packages {
+		blocks = append(blocks, fmt.Sprintf(`if ! grep -q '%[1]s' %[2]s/%[3]s 2>/dev/null; then
+  echo 'OroCommerce'"'"'s %[3]s does not name %[4]s on this line: nothing to add.'
+elif [ -d %[2]s/node_modules/%[4]s ]; then
+  echo '%[4]s is already installed.'
+else
+  echo 'Adding %[4]s: OroCommerce'"'"'s %[3]s names it and its package.json does not declare it.'
+  (%[5]s %[4]s)
+fi`, pkg.Token, oroRoot, pkg.Config, pkg.Name, add))
+	}
+
+	return strings.Join(blocks, "\n")
 }
 
 // ManifestDirtyFile is written into the QA namespace by SharedVendorScript when it changed the

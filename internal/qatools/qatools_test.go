@@ -1027,3 +1027,81 @@ func TestJSInstallCommandKeepsThePnpmStoreInsideTheQaToolsDir(t *testing.T) {
 		t.Errorf("the virtual store is not pinned inside the QA tools dir: %s", command)
 	}
 }
+
+// TestOroLinterInstallCommandAddsThePluginsOroDeclaresButDoesNotShip covers the ESLint failure that
+// followed switching the linters to OroCommerce's own installation:
+//
+//	ESLint couldn't find the plugin "eslint-plugin-no-jquery".
+//	(The package "eslint-plugin-no-jquery" was not found when loaded as a Node module from the
+//	directory "/var/www/oro/node_modules".)
+//
+// It is an upstream gap, not a missing install: OroCommerce's .eslintrc.yml extends
+// "plugin:no-jquery/deprecated" and lists no-jquery under `plugins`, while the package.json it
+// generates — the file `<manager> install` here works from — never declares
+// eslint-plugin-no-jquery. Installing that manifest therefore cannot satisfy the configuration
+// written against it, so the packages it omits are added on top of it.
+//
+// The plugin has to land in the application's node_modules and nowhere else: ESLint resolves
+// plugins through --resolve-plugins-relative-to, which Tools points at that one directory, so a
+// copy in the QA namespace would not be found.
+func TestOroLinterInstallCommandAddsThePluginsOroDeclaresButDoesNotShip(t *testing.T) {
+	tools := Tools(ToolsOptions{SourceRoot: bundleRoot, AnalyzePath: bundleRoot})
+
+	for _, manager := range []string{"npm", "pnpm"} {
+		command := OroLinterInstallCommand(manager, tools)
+
+		if out, err := exec.Command("sh", "-n", "-c", command).CombinedOutput(); err != nil {
+			t.Errorf("%s: the generated command is not valid shell: %v\n%s\n%s", manager, err, out, command)
+		}
+		// Guarded on the package, not on the manifest install having run: the binaries can be
+		// there already — a full install, a cached tree — and that path skips the install
+		// entirely, which is exactly the run that failed.
+		if !strings.Contains(command, "[ -d "+config.OroRootDir+"/node_modules/eslint-plugin-no-jquery ]") {
+			t.Errorf("%s: the missing plugin is never checked for:\n%s", manager, command)
+		}
+		// And guarded on the configuration naming it: 5.1's .eslintrc.yml does not, and adding a
+		// plugin no configuration references would change the application's manifest for nothing.
+		if !strings.Contains(command, "grep -q 'no-jquery' "+config.OroRootDir+"/.eslintrc.yml") {
+			t.Errorf("%s: the plugin is installed without asking whether the line needs it:\n%s", manager, command)
+		}
+		if !strings.Contains(command, config.OroRootDir+" && "+manager+" add") &&
+			!strings.Contains(command, config.OroRootDir+" && "+manager+" install --save-dev") {
+			t.Errorf("%s: the missing plugin is never installed:\n%s", manager, command)
+		}
+	}
+
+	// A tool list without ESLint has no configuration naming the plugin, so it must not pay for it.
+	stylelintOnly := []Tool{toolByName(t, tools, "stylelint")}
+	if got := OroLinterInstallCommand("npm", stylelintOnly); strings.Contains(got, "no-jquery") {
+		t.Errorf("a stylelint-only list installs an ESLint plugin:\n%s", got)
+	}
+}
+
+// TestRectorIsQuietedWhenItReportsGitLab covers the failure that made the whole QA run unreadable
+// even though every tool had run:
+//
+//	the rector report is not valid GitLab Code Quality JSON: invalid character 'W' looking for
+//	beginning of value
+//
+// Rector 2.6 warns that the "gitlab" output format is deprecated, and the warning lands next to the
+// document in the report file, which is Rector's stdout. --quiet silences it without costing the
+// report: the GitLab formatter `echo`s its JSON directly rather than writing it through the
+// console, so Symfony's verbosity does not reach it.
+func TestRectorIsQuietedWhenItReportsGitLab(t *testing.T) {
+	gitlab := Tools(ToolsOptions{SourceRoot: bundleRoot, AnalyzePath: bundleRoot, Report: ReportGitLab})
+	rector := strings.Join(toolByName(t, gitlab, "rector").Args, " ")
+
+	if !strings.Contains(rector, "--output-format=gitlab") {
+		t.Fatalf("rector does not report GitLab Code Quality: %s", rector)
+	}
+	if !strings.Contains(rector, "--quiet") {
+		t.Errorf("rector's deprecation warning still reaches the report file: %s", rector)
+	}
+
+	// Without a report there is no file to keep clean, and the console output is what the user
+	// reads, so quieting it there would hide the findings themselves.
+	plain := Tools(ToolsOptions{SourceRoot: bundleRoot, AnalyzePath: bundleRoot})
+	if args := strings.Join(toolByName(t, plain, "rector").Args, " "); strings.Contains(args, "--quiet") {
+		t.Errorf("rector is silenced when it reports to the terminal: %s", args)
+	}
+}
