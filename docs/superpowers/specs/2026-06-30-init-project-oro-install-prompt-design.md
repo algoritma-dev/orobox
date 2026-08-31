@@ -56,14 +56,24 @@ package-level `stdin io.Reader = os.Stdin` seam used elsewhere in this file).
 
 ### Non-interactive behavior
 
-The prompt is only asked on a terminal. `AskYesNo` blocks in `ReadString` until
-a newline arrives, so it yields its default only at EOF; a CI or daemon process
-that inherits an open pipe on stdin never reaches EOF and would hang there
-forever. `utils.IsInteractiveInput(stdin)` reports whether stdin is a terminal
-(`term.IsTerminal` on the underlying `*os.File`); when it is not, the answer is
-the safe default (`false`) and `oro:install` is skipped without reading. The
-non-interactive default is the conservative one, and `--force-install` is the
-escape hatch for scripted reinstall.
+Every `Ask*` function blocks in `ReadString` until a newline arrives, so it
+yields its default only at EOF. A CI or daemon process that inherits an open
+pipe on stdin never reaches EOF and would hang there forever.
+`utils.SkipPrompts(stdin)` identifies exactly that case: an `*os.File` that is
+not a terminal (`term.IsTerminal` on its descriptor). A terminal is read
+normally, and so is an in-memory reader — the test seam — because it is already
+complete and reaches EOF on its own.
+
+Two places consult it, because both run before anything else in `init` and
+either could hang:
+
+- The `oro:install` question takes its safe default (`false`, skip) without
+  reading. `--force-install` is the escape hatch for scripted reinstall.
+- `generateConfig()`'s wizard reads from an exhausted reader instead of stdin,
+  so every question falls straight through to its default. That is the same
+  outcome a closed stdin already produced for CI and the e2e harness, which is
+  how those runs generate a configuration today; `-t`, `-v` and `-n` remain the
+  way to steer them off the defaults.
 
 ### Gating step 5
 
@@ -85,10 +95,14 @@ composer-install steps run as before regardless of `runOroInstall`.
 - `init_test.go` continues to pass.
 - Add a test asserting the `--force-install` flag is registered on `initCmd`
   and binds to `forceInstall`.
-- Add a `utils.IsInteractiveInput` test covering a `strings.Reader`, an
-  `os.Pipe` read end and `os.DevNull` — the three shapes stdin takes in a
-  non-interactive run — all of which must report false so the prompt is skipped
-  rather than blocked on.
+- Add a `utils.SkipPrompts` test covering the three shapes stdin takes: an
+  in-memory reader (read normally), an `os.Pipe` read end and `os.DevNull`
+  (both skipped).
+- Add a `generateConfig` test that points `stdin` at the read end of a pipe
+  nothing writes to or closes, runs the wizard in a goroutine and fails if it
+  has not returned within 10s. On timeout the working directory is left in the
+  temp directory on purpose: the blocked goroutine outlives the test and would
+  otherwise drop `.orobox.yaml` into the repository.
 - `performInstallation` requires Docker and remains integration-level (not unit
   tested here).
 

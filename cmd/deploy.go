@@ -119,7 +119,11 @@ func runDeployCommand(stageName string) {
 
 	// The prompt exists because a release is irreversible. With --skip-release nothing reaches the
 	// stage host, so asking would only train the reader to confirm without looking.
-	if plan.RunsRelease() && !deployAssumeYes && isTTY() {
+	//
+	// SkipPrompts rather than isTTY: it reads the same stdin seam the reader below is built on,
+	// so a test can drive this confirmation, and it treats a non-terminal pipe as unanswerable
+	// instead of blocking on it. An unanswered release prompt means no release.
+	if plan.RunsRelease() && !deployAssumeYes && !utils.SkipPrompts(stdin) {
 		reader := bufio.NewReader(stdin)
 		if !utils.AskYesNo(reader, fmt.Sprintf("Release %s to %s?", plan.Ref, stage.Host), false) {
 			utils.PrintInfo("Aborted.")

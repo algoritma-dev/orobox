@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/algoritma-dev/orobox/internal/docker"
 
@@ -356,5 +358,65 @@ func TestInitTypeFlagOffersDemo(t *testing.T) {
 		if !strings.Contains(flag.Usage, want) {
 			t.Errorf("--type usage should mention %q, got %q", want, flag.Usage)
 		}
+	}
+}
+
+// generateConfig runs before every other step of `init`, so it is the first place a stdin that
+// never reaches EOF can hang the whole command. An inherited pipe nothing writes to and
+// nothing closes is exactly that: AskSelection would sit in ReadString for the life of the
+// process. The wizard must instead answer from the defaults and return.
+func TestGenerateConfigDoesNotBlockOnOpenPipe(t *testing.T) {
+	tmpDir := t.TempDir()
+	origWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Nothing ever writes to w, and it stays open for the whole test.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe(): %v", err)
+	}
+	defer r.Close()
+	defer w.Close()
+
+	oldStdin := stdin
+	stdin = r
+	defer func() { stdin = oldStdin }()
+
+	oldType, oldVersion := installType, oroVersion
+	installType, oroVersion = "project", "7.0"
+	defer func() { installType, oroVersion = oldType, oldVersion }()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		generateConfig()
+	}()
+
+	select {
+	case <-done:
+		if err := os.Chdir(origWd); err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		// The working directory is deliberately left in tmpDir. A blocked generateConfig
+		// outlives this test — the goroutine is still parked in ReadString — and writes
+		// .orobox.yaml whenever it is finally released. Restoring the working directory
+		// first would drop that file into the repository and break later tests with state
+		// that has nothing to do with them.
+		t.Fatal("generateConfig blocked on a stdin pipe that never reaches EOF")
+	}
+
+	// Read through tmpDir: the working directory has been restored by now.
+	data, err := os.ReadFile(filepath.Join(tmpDir, ".orobox.yaml"))
+	if err != nil {
+		t.Fatalf(".orobox.yaml was not created: %v", err)
+	}
+	if content := string(data); !strings.Contains(content, "type: project") {
+		t.Errorf("expected type project in config, got:\n%s", content)
 	}
 }

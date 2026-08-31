@@ -91,18 +91,22 @@ func AskYesNo(reader *bufio.Reader, question string, defaultValue bool) bool {
 	return input == "y" || input == "yes"
 }
 
-// IsInteractiveInput reports whether r is a terminal a question can actually be answered on.
+// SkipPrompts reports whether questions reading from r must be answered with their defaults
+// instead of read.
 //
-// AskYesNo blocks in ReadString until a newline arrives, so it returns its default only when
-// the reader is at EOF. A CI or daemon process that inherits an open pipe on stdin never
-// reaches EOF and would hang forever on a prompt. Call this before asking anything whose
-// default is the safe answer, and take the default when it reports false.
-func IsInteractiveInput(r io.Reader) bool {
+// Every Ask* function blocks in ReadString until a newline arrives, so it falls back to its
+// default only once the reader is at EOF. That is fine for a terminal, where a human supplies
+// the newline, and fine for an in-memory reader, which is already complete and reaches EOF on
+// its own. It is not fine for a non-terminal *os.File: a CI or daemon process may inherit a
+// pipe nothing ever writes to and never closes, and the prompt would hang there forever.
+// Those are the only readers this reports true for; the caller then takes the default without
+// reading, which is what a closed stdin already produced.
+func SkipPrompts(r io.Reader) bool {
 	f, ok := r.(*os.File)
 	if !ok {
 		return false
 	}
-	return term.IsTerminal(int(f.Fd()))
+	return !term.IsTerminal(int(f.Fd()))
 }
 
 // AskSelection asks a multiple choice question to the user and returns the selected value.

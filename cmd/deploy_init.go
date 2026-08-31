@@ -128,7 +128,16 @@ func installDeployer() bool {
 // askDeployConfig prompts for the deploy block, keeping any existing values as defaults so a
 // second run is an edit rather than a restart.
 func askDeployConfig(conf *config.OroConfig) *config.DeployConfig {
-	reader := bufio.NewReader(stdin)
+	// Input that cannot answer is read from an exhausted reader instead: every question then
+	// takes its default without a blocking read. That is the same outcome a closed stdin
+	// already produced, and askRequired's contract below depends on it — an empty required
+	// answer is what makes the caller refuse to write the file.
+	promptSource := stdin
+	if utils.SkipPrompts(stdin) {
+		utils.PrintInfo("Non-interactive input: answering the deploy prompts with their defaults.")
+		promptSource = strings.NewReader("")
+	}
+	reader := bufio.NewReader(promptSource)
 
 	existing := conf.Deploy
 	if existing == nil {
@@ -199,9 +208,10 @@ func askStage(reader *bufio.Reader, defaults config.StageConfig) config.StageCon
 // and config validation rejects the whole file when one of them is blank — which is how a
 // half-answered deploy-init used to leave a project where no orobox command would run.
 //
-// A non-interactive run (no stdin, as in CI or the e2e harness) reads EOF and gets the default
-// back, empty included: there is nobody to re-ask. The caller's validation is what refuses to
-// write in that case.
+// A non-interactive run reads EOF and gets the default back, empty included: there is nobody
+// to re-ask. The caller's validation is what refuses to write in that case. askDeployConfig
+// guarantees the EOF rather than relying on stdin being closed, so this loop cannot spin on a
+// reader that never returns.
 func askRequired(reader *bufio.Reader, question, defaultValue string) string {
 	for {
 		answer, eof := utils.AskQuestionOrEOF(reader, question, defaultValue)

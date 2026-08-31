@@ -164,12 +164,14 @@ func TestAskSelection(t *testing.T) {
 	}
 }
 
-// A non-terminal reader is not something a question can be answered on: AskYesNo would block
-// on it until EOF, which an inherited pipe never reaches. Callers whose default is the safe
-// answer check this first.
-func TestIsInteractiveInput(t *testing.T) {
-	if IsInteractiveInput(strings.NewReader("y\n")) {
-		t.Error("a strings.Reader is not a terminal")
+// A non-terminal *os.File is the one reader a prompt can hang on forever: an inherited pipe
+// may never be written to and never reach EOF. In-memory readers are complete already and a
+// terminal has a human on the other end, so neither is skipped.
+func TestSkipPrompts(t *testing.T) {
+	// The test seam every cmd package test installs over stdin. Skipping it would silently
+	// stop those tests from answering anything.
+	if SkipPrompts(strings.NewReader("y\n")) {
+		t.Error("an in-memory reader reaches EOF on its own and must still be read")
 	}
 
 	r, w, err := os.Pipe()
@@ -178,16 +180,19 @@ func TestIsInteractiveInput(t *testing.T) {
 	}
 	defer r.Close()
 	defer w.Close()
-	if IsInteractiveInput(r) {
-		t.Error("a pipe is not a terminal")
+	// Nothing is written to w and nothing closes it: reading a line here would block for as
+	// long as the process lives.
+	if !SkipPrompts(r) {
+		t.Error("an open pipe must be skipped rather than read")
 	}
 
+	// What a CI runner and the e2e harness actually hand the process.
 	devNull, err := os.Open(os.DevNull)
 	if err != nil {
 		t.Fatalf("open %s: %v", os.DevNull, err)
 	}
 	defer devNull.Close()
-	if IsInteractiveInput(devNull) {
-		t.Errorf("%s is not a terminal", os.DevNull)
+	if !SkipPrompts(devNull) {
+		t.Errorf("%s must be skipped rather than read", os.DevNull)
 	}
 }

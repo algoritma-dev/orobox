@@ -211,7 +211,7 @@ var performInstallation = func() bool {
 		// safe one — skip oro:install — and --force-install is the way to opt in.
 		if strategy.BindWholeRepo() && !forceInstall {
 			runOroInstall = false
-			if utils.IsInteractiveInput(stdin) {
+			if !utils.SkipPrompts(stdin) {
 				reader := bufio.NewReader(stdin)
 				runOroInstall = utils.AskYesNo(reader, "OroCommerce already present (composer.json found). Run oro:install? This resets the database", false)
 			}
@@ -386,7 +386,18 @@ func generateConfig() {
 	}
 
 	utils.PrintTitle("Config file .orobox.yaml not found or invalid. Let's create it interactively.")
-	reader := bufio.NewReader(stdin)
+
+	// The wizard runs before anything else in `init`, so it is the first place a
+	// never-closing stdin can hang the command. On input that cannot answer, read nothing at
+	// all: an exhausted reader puts every question straight onto its default, which is what a
+	// closed stdin already produced for CI and the e2e harness. The -t/-v/-n flags remain the
+	// way to steer a non-interactive run away from those defaults.
+	promptSource := stdin
+	if utils.SkipPrompts(stdin) {
+		utils.PrintInfo("Non-interactive input: answering the configuration prompts with their defaults (use -t, -v and -n to override).")
+		promptSource = strings.NewReader("")
+	}
+	reader := bufio.NewReader(promptSource)
 
 	typeOfInstall := installType
 	if typeOfInstall == "" {

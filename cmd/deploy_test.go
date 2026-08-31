@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/pipeline"
@@ -399,5 +400,44 @@ func TestAskRequiredReAsksOnBlankInput(t *testing.T) {
 	reader := bufio.NewReader(strings.NewReader("\n\ndeploy.example.test\n"))
 	if got := askRequired(reader, "Remote host", ""); got != "deploy.example.test" {
 		t.Fatalf("askRequired() = %q, want the first non-empty answer", got)
+	}
+}
+
+// The two tests above stand in for a non-interactive run using an already-exhausted reader,
+// which is what a *closed* stdin behaves like. A CI or daemon process can just as easily
+// inherit a pipe that is open and never written to, and askRequired's re-ask loop would then
+// park in ReadString for the life of the process instead of taking the empty default. Nothing
+// downstream can time that out: deploy-init has not written anything yet.
+func TestAskDeployConfigDoesNotBlockOnOpenPipe(t *testing.T) {
+	// Nothing ever writes to w, and it stays open for the whole test.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe(): %v", err)
+	}
+	defer r.Close()
+	defer w.Close()
+
+	oldStdin := stdin
+	stdin = r
+	defer func() { stdin = oldStdin }()
+
+	conf := &config.OroConfig{Type: config.InstallTypeProject}
+
+	type result struct{ deploy *config.DeployConfig }
+	done := make(chan result, 1)
+	go func() { done <- result{askDeployConfig(conf)} }()
+
+	select {
+	case got := <-done:
+		// Same outcome the closed-stdin tests assert: defaults straight through, and the
+		// empty required host is what makes the caller refuse to write the file.
+		if len(got.deploy.Stages) != 1 {
+			t.Fatalf("expected one stage, got %d", len(got.deploy.Stages))
+		}
+		if got.deploy.Stages[0].Host != "" {
+			t.Fatalf("expected an empty host with no input, got %q", got.deploy.Stages[0].Host)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("askDeployConfig blocked on a stdin pipe that never reaches EOF")
 	}
 }
