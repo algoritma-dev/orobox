@@ -363,10 +363,23 @@ func eslintPluginLinks() string {
 	return b.String()
 }
 
-// configExists is the shell test behind Tool.SkipUnless: the resolved configuration is a path
-// expression, so whether the file is there is a question only the container can answer.
+// configExists is the shell test behind Tool.SkipUnless: whether the tool has a configuration at
+// all is a question only the container can answer, so it is asked as a shell test.
+//
+// It tests the configuration's inputs (configRef.Sources), never its resolved Path. Path is what
+// the tool reads, and on a bundle install with both halves present that is the merged file — a file
+// configRef.Setup writes, and Setup runs inside this guard (see ReportScript). Guarding on Path
+// there asked whether a file existed that only the guarded line would ever create, so ESLint and
+// Stylelint skipped every run on a bundle checkout while the project layout, whose two halves are
+// the same file and never merge, was unaffected.
 func configExists(ref configRef) string {
-	return fmt.Sprintf(`[ -f "%s" ]`, ref.Path)
+	tests := make([]string, 0, len(ref.Sources))
+	for _, file := range ref.Sources {
+		tests = append(tests, fmt.Sprintf("[ -f %s ]", file))
+	}
+	// Either half is enough: with one of them the tool has a configuration, and Path resolves to
+	// whichever is there.
+	return "{ " + strings.Join(tests, " || ") + "; }"
 }
 
 // insertAfter splits args at index and inserts extra, keeping a fresh backing array so the

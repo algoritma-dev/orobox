@@ -459,6 +459,40 @@ func TestReportScriptSkipsAToolWhoseConfigurationIsMissing(t *testing.T) {
 	}
 }
 
+// TestJSToolGuardsTestTheConfigurationInputs covers the bundle install, where the base and the
+// project config are two different files and the tool therefore reads a merged one.
+//
+// The guard used to test that merged file, which configRef.Setup writes and which Setup only gets
+// to write when the guard passes: ESLint and Stylelint skipped with "has no configuration in this
+// OroCommerce version" on every single run of a bundle checkout, however many configs were there.
+// A guard naming the inputs cannot deadlock that way.
+func TestJSToolGuardsTestTheConfigurationInputs(t *testing.T) {
+	bundleRoot := config.OroRootDir + "/bundles/Acme/Bundle/AcmeBundle"
+	tools := Tools(ToolsOptions{
+		SourceRoot: bundleRoot,
+		Mode:       ModeCheck,
+		Report:     ReportGitLab,
+		ReportDir:  "/reports/qa",
+		OroVersion: "6.1",
+	})
+
+	for _, tc := range []struct{ tool, file string }{
+		{"eslint", ".eslintrc.yml"},
+		{"stylelint", ".stylelintrc.yml"},
+		{"stylelint-css", ".stylelintrc-css.yml"},
+	} {
+		guard := toolByName(t, tools, tc.tool).SkipUnless
+		if strings.Contains(guard, mergedDir) {
+			t.Errorf("the %s guard tests the merged config, which its own setup writes: %s", tc.tool, guard)
+		}
+		for _, want := range []string{config.OroRootDir + "/" + tc.file, bundleRoot + "/" + tc.file} {
+			if !strings.Contains(guard, "[ -f "+want+" ]") {
+				t.Errorf("the %s guard does not test %s: %s", tc.tool, want, guard)
+			}
+		}
+	}
+}
+
 func TestInstallPlanAlwaysCarriesTheGitLabFormatters(t *testing.T) {
 	viper.Set("test.qa.eslint", true)
 	viper.Set("test.qa.stylelint", true)

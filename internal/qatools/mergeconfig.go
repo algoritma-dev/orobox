@@ -17,9 +17,16 @@ const mergedDir = config.QaToolsDir + "/merged"
 // tool has to read, Setup the shell line that materialises that file when a merge is needed.
 // Path is an expression rather than a string because whether the project ships its own config is
 // only knowable inside the container, where the tools run.
+//
+// Sources are the input files Path resolves between — the base one, the project's one, or both.
+// They exist because Path is not a usable existence test: when both halves are present Path names
+// the merged file, and the merged file is written by Setup, which runs after the guard that asks
+// whether the configuration exists at all (see configExists and ReportScript). Testing the inputs
+// answers that question whatever the order.
 type configRef struct {
-	Path  string
-	Setup string
+	Path    string
+	Setup   string
+	Sources []string
 }
 
 // mergeRenderer renders the merged config that layers the project's file on top of the base one.
@@ -45,11 +52,14 @@ func mergedConfig(sourceRoot, baseDir, file string, render mergeRenderer) config
 	// A project install roots its sources at OroRoot, so the JS tools' base and project configs
 	// are the very same file and there is nothing to merge.
 	if baseFile == projectFile {
-		return configRef{Path: baseFile}
+		return configRef{Path: baseFile, Sources: []string{baseFile}}
 	}
 
 	if render == nil {
-		return configRef{Path: fmt.Sprintf("$([ -f %[1]s ] && echo %[1]s || echo %[2]s)", projectFile, baseFile)}
+		return configRef{
+			Path:    fmt.Sprintf("$([ -f %[1]s ] && echo %[1]s || echo %[2]s)", projectFile, baseFile),
+			Sources: []string{baseFile, projectFile},
+		}
 	}
 
 	b64 := base64.StdEncoding.EncodeToString([]byte(render(baseFile, projectFile)))
@@ -64,6 +74,7 @@ func mergedConfig(sourceRoot, baseDir, file string, render mergeRenderer) config
 		Setup: fmt.Sprintf(
 			"if [ -f %[1]s ] && [ -f %[2]s ]; then mkdir -p %[3]s && printf '%%s' '%[4]s' | base64 -d > %[5]s; fi",
 			baseFile, projectFile, mergedDir, b64, mergedFile),
+		Sources: []string{baseFile, projectFile},
 	}
 }
 
