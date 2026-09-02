@@ -92,7 +92,7 @@ scoops:
 nfpms:
   - id: packages
     package_name: orobox
-    ids: [binaries]
+    ids: [orobox]
     vendor: Algoritma
     homepage: "https://github.com/algoritma-dev/orobox"
     maintainer: "Algoritma <raffaele.carelle@algoritma.it>"
