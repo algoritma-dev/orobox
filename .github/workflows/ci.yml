@@ -26,7 +26,7 @@ jobs:
           cache: false # Disabled for now to avoid cache issues between jobs
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
           version: latest
 
