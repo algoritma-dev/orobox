@@ -49,12 +49,72 @@ archives:
 checksum:
   name_template: 'checksums.txt'
 
+release:
+  # rc/alpha/beta tags are marked pre-release so releases/latest (used by the README
+  # install commands and cmd/self-update.go) keeps pointing at the newest stable tag.
+  prerelease: auto
+
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
+# Additional distribution channels, each optional: skip_upload turns itself off when the
+# corresponding tap token secret is absent, so a fork or a run without the tap repos configured
+# does not fail the release job. Verify this block with `goreleaser check` and a
+# `goreleaser release --snapshot --clean` dry run before relying on it — the syntax below
+# targets the GoReleaser version pinned by `version: latest` in the release job at the time
+# this was written; `brews` was replaced by `homebrew_casks` for prebuilt-binary distributions
+# in recent GoReleaser releases, so this uses the newer key.
+homebrew_casks:
+  - name: orobox
+    ids: [archives]
+    skip_upload: '{{ if .Env.HOMEBREW_TAP_TOKEN }}false{{ else }}true{{ end }}'
+    repository:
+      owner: algoritma-dev
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Casks
+    homepage: "https://github.com/algoritma-dev/orobox"
+    description: "Docker-based local development environment for OroCommerce"
+    license: "GPL-3.0"
+
+scoops:
+  - name: orobox
+    ids: [archives]
+    skip_upload: '{{ if .Env.SCOOP_BUCKET_TOKEN }}false{{ else }}true{{ end }}'
+    repository:
+      owner: algoritma-dev
+      name: scoop-bucket
+      token: "{{ .Env.SCOOP_BUCKET_TOKEN }}"
+    homepage: "https://github.com/algoritma-dev/orobox"
+    description: "Docker-based local development environment for OroCommerce"
+    license: GPL-3.0
+
+nfpms:
+  - id: packages
+    package_name: orobox
+    ids: [binaries]
+    vendor: Algoritma
+    homepage: "https://github.com/algoritma-dev/orobox"
+    maintainer: "Algoritma <raffaele.carelle@algoritma.it>"
+    description: "Docker-based local development environment for OroCommerce"
+    license: GPL-3.0
+    formats: [deb, rpm, apk]
+    bindir: /usr/bin
+
 changelog:
   sort: asc
+  use: github
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Others
+      order: 999
   filters:
     exclude:
       - '^docs:'
       - '^test:'
+      - '^chore:'

@@ -5,6 +5,7 @@ package e2e
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -125,7 +126,19 @@ func runGreenPath(t *testing.T, c Case) {
 	box.Run("xdebug", "on")
 	box.Run("xdebug", "off")
 
-	// 7. generators — assert they wrote something into the checkout.
+	// 7. create bundle — project only, and deliberately here: the bundle has to exist before
+	// qa and test so the shipped skeleton is analysed by the project's own tools rather than
+	// only by the unit tests.
+	//
+	// A bundle checkout is skipped because its composer.json maps its PSR-4 prefix to the
+	// package root, which cannot host a namespace subtree; `create bundle` there falls back to
+	// a standalone package, and that path is covered host-side in create_test.go without
+	// polluting the checkout under test.
+	if c.Type == TypeProject {
+		assertCreatedBundleIsLoaded(t, box)
+	}
+
+	// 8. generators — assert they wrote something into the checkout.
 	//
 	// deploy-init and ci-init are project-only by design: a bundle checkout is not a
 	// deployable application, and its CI would have to stand up a full development stack per
@@ -151,7 +164,7 @@ func runGreenPath(t *testing.T, c Case) {
 	// starts disabling one would have to pass that config in as well.
 	assertGeneratedFiles(t, box, "qa-init", scaffoldRelPaths(scaffold.QaStubs(string(c.Type))))
 
-	// 8. qa — deliberately after qa-init, and graded per tool rather than on the exit code.
+	// 9. qa — deliberately after qa-init, and graded per tool rather than on the exit code.
 	//
 	// The order is what makes the step mean anything for a bundle: `orobox qa` on the compose
 	// engine refuses to run tools that are not installed, so run before qa-init it only ever
@@ -161,18 +174,18 @@ func runGreenPath(t *testing.T, c Case) {
 	// while the job stayed green.
 	assertQa(t, box, c)
 
-	// 9. test-init is not a generator: it provisions the test database and cache (its only
+	// 10. test-init is not a generator: it provisions the test database and cache (its only
 	// write to the checkout is .orobox.yaml, and only behind --tmpfs), so counting files
 	// would always report "created no new files". Assert that it completes instead. It runs
 	// a full oro:install --env=test, so this is one of the slower steps.
 	box.Run("test-init")
 
-	// 10. test — narrowed, and deliberately after test-init: while the test database is
+	// 11. test — narrowed, and deliberately after test-init: while the test database is
 	// missing, `orobox test` prints "run 'orobox test-init'" and returns without ever
 	// invoking PHPUnit, so run any earlier the step asserts nothing.
 	assertNarrowedTests(t, box, c)
 
-	// 11. clear + down (teardown also runs in cleanup). The command is "clear", not
+	// 12. clear + down (teardown also runs in cleanup). The command is "clear", not
 	// "clean": it removes every container and volume so the next run starts fresh.
 	box.Run("clear")
 	box.Run("down")
@@ -364,4 +377,74 @@ func countFiles(t *testing.T, dir string) int {
 		t.Fatal(err)
 	}
 	return n
+}
+
+// e2eCreatedBundle is the bundle `orobox create bundle` generates inside the project checkout
+// during the green path. The namespace is the only input; everything else below is what the
+// scaffolding derives from it, and asserting the derived names here is what keeps the
+// derivation honest end to end.
+const (
+	e2eCreatedBundleNamespace = `Orobox\Bundle\CreatedBundle`
+	e2eCreatedBundleClass     = "OroboxCreatedBundle"
+	e2eCreatedBundleAlias     = "orobox_created"
+)
+
+// e2eCreatedBundleRelDir is where the OroCommerce application's `"": "src/"` PSR-4 rule puts
+// that namespace.
+var e2eCreatedBundleRelDir = filepath.Join("src", "Orobox", "Bundle", "CreatedBundle")
+
+// assertCreatedBundleIsLoaded scaffolds a bundle into a real OroCommerce checkout and proves
+// the result is a bundle the application actually loads.
+//
+// Writing the files is the easy half and the unit tests already cover it. What only a real
+// checkout can answer is whether the skeleton is *valid*: whether the PSR-4 path is one
+// composer autoloads, whether Oro's kernel discovers the generated
+// Resources/config/oro/bundles.yml, and whether the generated Extension and Configuration
+// agree on an alias. A cache rebuild plus the bundle showing up in `debug:config` answers all
+// three, and every one of them fails silently if the placement rule is wrong — the files
+// would still be written, just somewhere inert.
+func assertCreatedBundleIsLoaded(t *testing.T, box *Box) {
+	t.Helper()
+
+	box.Run("create", "bundle", e2eCreatedBundleNamespace)
+
+	dest := filepath.Join(box.Dir(), e2eCreatedBundleRelDir)
+	for _, rel := range []string{
+		e2eCreatedBundleClass + ".php",
+		filepath.Join("DependencyInjection", "OroboxCreatedExtension.php"),
+		filepath.Join("DependencyInjection", "Configuration.php"),
+		filepath.Join("Resources", "config", "services.yml"),
+		filepath.Join("Resources", "config", "oro", "bundles.yml"),
+	} {
+		if _, err := os.Stat(filepath.Join(dest, rel)); err != nil {
+			t.Fatalf("create bundle did not write %s under %s: %v", rel, e2eCreatedBundleRelDir, err)
+		}
+	}
+	// The project autoloads the tree already, so a composer.json here would make composer
+	// treat the directory as a nested package.
+	if _, err := os.Stat(filepath.Join(dest, "composer.json")); err == nil {
+		t.Error("a bundle inside the project's PSR-4 tree must not carry its own composer.json")
+	}
+
+	// A skeleton that does not compile, or a bundles.yml naming a class that is not
+	// autoloadable, fails here rather than at the assertion below.
+	box.Run("console", "cache:clear")
+
+	// debug:config is asked for the bundle by name rather than for the bundle list, and that is
+	// the whole assertion: the command resolves the name through the kernel's bundles, looks up
+	// the extension it registered, asks that extension for its Configuration and dumps the
+	// processed tree rooted at the alias. A bundle the kernel never loaded, an extension whose
+	// alias disagrees with its Configuration, or a Configuration that is not autoloadable each
+	// make the command fail, and box.Run turns that into a failed case on its own.
+	//
+	// The bundle list the bare command prints is deliberately not used: Symfony writes it to the
+	// error output, not stdout, so the assertion below silently matched an empty string and every
+	// project case failed with the alias plainly registered in the log.
+	res := box.Run("console", "debug:config", e2eCreatedBundleClass)
+	// Matched over both streams so a Symfony version that moves the dump to the error output
+	// fails the run for a real reason and not for where it wrote.
+	if out := res.Stdout + res.Stderr; !strings.Contains(out, e2eCreatedBundleAlias) {
+		t.Errorf("Oro did not register the generated bundle (no %q extension alias in debug:config %s):\n%s",
+			e2eCreatedBundleAlias, e2eCreatedBundleClass, out)
+	}
 }

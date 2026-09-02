@@ -150,3 +150,8 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional: absent (empty string) when the tap repos aren't set up yet. The
+          # homebrew_casks/scoops blocks in .goreleaser.yaml turn their own upload off in
+          # that case, so a missing secret does not fail the release.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}

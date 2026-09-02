@@ -11,3 +11,4 @@ orobox
 /cmd/.orobox/nginx.conf
 /build/
 /vendor/
+/site/

@@ -91,6 +91,24 @@ func AskYesNo(reader *bufio.Reader, question string, defaultValue bool) bool {
 	return input == "y" || input == "yes"
 }
 
+// SkipPrompts reports whether questions reading from r must be answered with their defaults
+// instead of read.
+//
+// Every Ask* function blocks in ReadString until a newline arrives, so it falls back to its
+// default only once the reader is at EOF. That is fine for a terminal, where a human supplies
+// the newline, and fine for an in-memory reader, which is already complete and reaches EOF on
+// its own. It is not fine for a non-terminal *os.File: a CI or daemon process may inherit a
+// pipe nothing ever writes to and never closes, and the prompt would hang there forever.
+// Those are the only readers this reports true for; the caller then takes the default without
+// reading, which is what a closed stdin already produced.
+func SkipPrompts(r io.Reader) bool {
+	f, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	return !term.IsTerminal(int(f.Fd()))
+}
+
 // AskSelection asks a multiple choice question to the user and returns the selected value.
 func AskSelection(reader *bufio.Reader, question string, options []string, defaultValue string) string {
 	fmt.Printf("%s%s%s\n", colorCyan, question, colorReset)

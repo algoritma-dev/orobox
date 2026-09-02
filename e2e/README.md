@@ -12,12 +12,25 @@ Design spec: [`docs/superpowers/specs/2026-08-24-e2e-test-suite-design.md`](../d
 - **Versions:** all of `config.SupportedOroVersions` (`7.0`, `6.1`, `6.0`, `5.1`).
 - **Install types:** `project` and `bundle`.
 - **Commands (green path):** `init`, `up`, `run`, `console`, `db backup`,
-  `db restore`, `qa`, `test`, `logs`, `xdebug on|off|status`, the generators
-  (`deploy-init`, `ci-init`, `qa-init`), `test-init`, `clear`, `down`.
+  `db restore`, `create bundle`, `qa`, `test`, `logs`, `xdebug on|off|status`,
+  the generators (`deploy-init`, `ci-init`, `qa-init`), `test-init`, `clear`,
+  `down`.
 - `run` invokes a custom command the fixtures define under `commands:`; it is
   not a console passthrough (that is `console`).
 - `deploy-init` and `ci-init` are project-only by design, so for `bundle` the
   suite asserts that orobox refuses them instead of expecting files.
+- `create bundle` runs inside the project checkout, before `qa` and `test`, so
+  the shipped skeleton is analysed by the project's own tools and not only by
+  the unit tests. What the step proves is that the generated bundle is one the
+  application actually loads: the namespace resolves through the application's
+  `"": "src/"` PSR-4 rule, Oro's kernel discovers the generated
+  `Resources/config/oro/bundles.yml`, and the generated `Extension` and
+  `Configuration` agree on an alias — asserted by a `console cache:clear`
+  followed by the bundle's alias appearing in `console debug:config`. All three
+  fail silently otherwise: the files are still written, just somewhere inert.
+  It is skipped for `bundle`, whose fixture maps its PSR-4 prefix to the
+  package root; `create` there falls back to a standalone package, which
+  `create_test.go` covers host-side without polluting the checkout under test.
 - `test-init` provisions the test database rather than writing files, so it is
   asserted to complete rather than to generate anything.
 - `qa` runs **after** `qa-init` and in report mode (`--report gitlab`). Report
@@ -54,6 +67,22 @@ Design spec: [`docs/superpowers/specs/2026-08-24-e2e-test-suite-design.md`](../d
   tool that could not run does. The two are told apart per tool: a non-zero exit
   next to a report holding findings is lint, while a non-zero exit with an empty
   or unreadable report is an installation or configuration failure.
+
+### Create, host-side
+
+`create_test.go` covers the two `create` subcommands without Docker, since
+neither touches it:
+
+- `create bundle` standalone (no project composer.json) — the full skeleton,
+  a `composer.json` that parses and declares the right PSR-4 prefix, the
+  non-empty-target refusal, and `--path`.
+- `create bundle` inside a PSR-4 project — the namespace decides the directory
+  and the bundle carries no composer.json of its own.
+- `create project` — the one create case that reaches the network. It clones
+  the public OroCommerce application skeleton, asserts the `.git` strip and the
+  non-empty-target refusal, and pins the premise the placement rule rests on:
+  that the application's own composer.json maps `""` to `src/`. Set
+  `E2E_SKIP_CLONE` to skip it on a machine without network.
 
 ### Intentionally excluded
 
@@ -96,6 +125,8 @@ OROBOX_BIN=$PWD/orobox E2E_VERSIONS=6.1 E2E_TYPES=bundle \
   builds one once via `go build`.
 - `E2E_VERSIONS` — comma list of versions (default: all supported).
 - `E2E_TYPES` — comma list of install types (default: `project,bundle`).
+- `E2E_SKIP_CLONE` — skip `TestCreateProjectClonesTheOroApplication`, the only
+  create case that needs the network.
 - `GITHUB_TOKEN` / `COMPOSER_AUTH` — forwarded to the containers that run
   composer.
 
@@ -121,6 +152,9 @@ routinely not in the log at all.
 - `harness.go` (`//go:build e2e`) — the `Box` harness: isolated workdir, binary
   execution, HTTP checks, guaranteed Docker teardown.
 - `e2e_test.go` (`//go:build e2e`) — the matrix driver and green-path sequence.
+- `create_test.go` (`//go:build e2e`) — the `create` cases that need no Docker:
+  bundle scaffolding (standalone and inside a PSR-4 project) and the project
+  clone.
 - `fixtures/` — `text/template` `.orobox.yaml` configs for each install type,
   plus `fixtures/bundle/`, the checkout a bundle case starts from: a
   `composer.json`, a bundle class and a `phpunit.xml.dist` with a `unit` and a

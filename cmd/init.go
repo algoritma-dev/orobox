@@ -22,7 +22,6 @@ import (
 )
 
 var (
-	bundlePath      string
 	oroVersion      string
 	bundleNamespace string
 	installType     string
@@ -33,25 +32,13 @@ var (
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize the development environment",
+	Long: `Initialize provisions the environment in the current directory: it generates
+the configuration, the Docker Compose files, and runs the OroCommerce install. Use
+'orobox create project|bundle' first to scaffold the source tree.`,
 	// A clone, a composer install or an oro:install that fails is a runtime problem, not a
 	// usage problem: printing the flag list after it buries the actual error under help text.
 	SilenceUsage: true,
 	RunE: func(_ *cobra.Command, _ []string) error {
-		absPath, err := filepath.Abs(bundlePath)
-		if err != nil {
-			panic(err)
-		}
-		bundlePath = absPath
-
-		err = os.MkdirAll(bundlePath, 0755)
-		if err != nil {
-			panic(err)
-		}
-
-		if err := os.Chdir(bundlePath); err != nil {
-			panic(err)
-		}
-
 		generateConfig()
 
 		// Reload config after generation
@@ -218,11 +205,16 @@ var performInstallation = func() bool {
 		// Sources present. For project installs the source root is the user's
 		// bind-mounted checkout; running oro:install would reset an existing
 		// database. Ask before doing so (default no), unless --force-install.
-		// In non-interactive runs the reader hits EOF, AskYesNo returns its
-		// default (false), so oro:install is skipped.
+		// The question is only asked on a terminal: a non-interactive run may
+		// inherit a pipe that never reaches EOF, and waiting on it would hang
+		// the command instead of yielding the default. There the answer is the
+		// safe one — skip oro:install — and --force-install is the way to opt in.
 		if strategy.BindWholeRepo() && !forceInstall {
-			reader := bufio.NewReader(stdin)
-			runOroInstall = utils.AskYesNo(reader, "OroCommerce already present (composer.json found). Run oro:install? This resets the database", false)
+			runOroInstall = false
+			if !utils.SkipPrompts(stdin) {
+				reader := bufio.NewReader(stdin)
+				runOroInstall = utils.AskYesNo(reader, "OroCommerce already present (composer.json found). Run oro:install? This resets the database", false)
+			}
 		}
 
 		// Sources present: check for vendors (especially if vendor-oro was just added)
@@ -358,7 +350,6 @@ func seedProjectEnvFiles(strategy config.InstallType) {
 func init() {
 	rootCmd.AddCommand(initCmd)
 
-	initCmd.Flags().StringVarP(&bundlePath, "bundle-path", "b", ".", "Bundle path")
 	initCmd.Flags().StringVarP(&oroVersion, "oro-version", "v", "6.1", "OroCommerce version")
 	initCmd.Flags().StringVarP(&bundleNamespace, "bundle-namespace", "n", "", "Bundle namespace")
 	initCmd.Flags().StringVarP(&installType, "type", "t", "", "Installation type (bundle|project|demo)")
@@ -395,7 +386,18 @@ func generateConfig() {
 	}
 
 	utils.PrintTitle("Config file .orobox.yaml not found or invalid. Let's create it interactively.")
-	reader := bufio.NewReader(stdin)
+
+	// The wizard runs before anything else in `init`, so it is the first place a
+	// never-closing stdin can hang the command. On input that cannot answer, read nothing at
+	// all: an exhausted reader puts every question straight onto its default, which is what a
+	// closed stdin already produced for CI and the e2e harness. The -t/-v/-n flags remain the
+	// way to steer a non-interactive run away from those defaults.
+	promptSource := stdin
+	if utils.SkipPrompts(stdin) {
+		utils.PrintInfo("Non-interactive input: answering the configuration prompts with their defaults (use -t, -v and -n to override).")
+		promptSource = strings.NewReader("")
+	}
+	reader := bufio.NewReader(promptSource)
 
 	typeOfInstall := installType
 	if typeOfInstall == "" {

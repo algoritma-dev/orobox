@@ -2,6 +2,7 @@ package utils
 
 import (
 	"bufio"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -160,5 +161,38 @@ func TestAskSelection(t *testing.T) {
 				t.Errorf("AskSelection() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// A non-terminal *os.File is the one reader a prompt can hang on forever: an inherited pipe
+// may never be written to and never reach EOF. In-memory readers are complete already and a
+// terminal has a human on the other end, so neither is skipped.
+func TestSkipPrompts(t *testing.T) {
+	// The test seam every cmd package test installs over stdin. Skipping it would silently
+	// stop those tests from answering anything.
+	if SkipPrompts(strings.NewReader("y\n")) {
+		t.Error("an in-memory reader reaches EOF on its own and must still be read")
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe(): %v", err)
+	}
+	defer r.Close()
+	defer w.Close()
+	// Nothing is written to w and nothing closes it: reading a line here would block for as
+	// long as the process lives.
+	if !SkipPrompts(r) {
+		t.Error("an open pipe must be skipped rather than read")
+	}
+
+	// What a CI runner and the e2e harness actually hand the process.
+	devNull, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatalf("open %s: %v", os.DevNull, err)
+	}
+	defer devNull.Close()
+	if !SkipPrompts(devNull) {
+		t.Errorf("%s must be skipped rather than read", os.DevNull)
 	}
 }
