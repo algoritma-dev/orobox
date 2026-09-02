@@ -44,7 +44,7 @@ PR-body links the guidelines ask for:
 ```
 Forge link: https://github.com/algoritma-dev/orobox
 pkg.go.dev: https://pkg.go.dev/github.com/algoritma-dev/orobox
-goreportcard.com: https://goreportcard.com/report/github.com/algoritma-dev/orobox
+goreportcard.com: (service sunset 2026-07-01, dead — omit or replace with golangci-lint report link)
 Coverage: (none published yet)
 ```
 
@@ -56,7 +56,7 @@ Coverage: (none published yet)
 | Open source license | **Yes** | GPL-3.0, on OSI's approved list. |
 | `go.mod` present at repo root | **Yes** | `module github.com/algoritma-dev/orobox`. |
 | **At least one tag matching `vX.Y.Z`** (blocking CI check) | **No** | Existing tags are `1.0.0-rc30` etc. — no `v` prefix, and they carry a pre-release suffix. Go's module resolver only recognizes `v`-prefixed tags, so none of these are usable as a real module version; `go install ...@latest` currently resolves to a pseudo-version, not a tagged release. **This is the actual blocker.** |
-| Go Report Card grade A-/A/A+ (blocking CI check) | **Not verified — the check itself may be dead** | `goreportcard.com` announced it sunset the live service on 2026-07-01 (servers shut down, repo archived), yet `CONTRIBUTING.md` fetched today (2026-09-02) still lists it as a blocking automated check and still asks for a `goreportcard.com` link in the PR body. The badge in Orobox's own README (`https://goreportcard.com/badge/...`) also points at the same dead service. This is a live contradiction in avelino/awesome-go's own process worth re-checking at submission time — it may have been patched to an alternative (e.g. `golangci-lint`) by then. |
+| Go Report Card grade A-/A/A+ (blocking CI check) | **Not verified — the check itself may be dead** | `goreportcard.com` announced it sunset the live service on 2026-07-01 (servers shut down, repo archived), yet avelino/awesome-go's `CONTRIBUTING.md` fetched today (2026-09-02) still lists it as a blocking automated check and still asks for a `goreportcard.com` link in the PR body. Confirmed dead 2026-09-02 (site abandoned) — removed the dead badge from Orobox's own README. This is a live contradiction in avelino/awesome-go's own process worth re-checking at submission time — it may have been patched to an alternative (e.g. `golangci-lint`) by then. |
 | pkg.go.dev reachable | **No, not yet** | `https://pkg.go.dev/github.com/algoritma-dev/orobox` returns 404 today. This is fixable without a stable release — pkg.go.dev indexes any module version once the Go proxy is asked for it — but it hasn't been triggered yet. |
 | Test coverage ≥80% (non-data packages), coverage link | **Not verified** | 58 `_test.go` files exist and CI runs `go test -v ./...`, but no coverage flag, Codecov, or Coveralls integration exists, so there's no number or link to cite. |
 | README + pkg.go.dev doc comments in English | **Yes** | README is thorough and in English; doc-comment coverage on exported symbols wasn't audited here. |
