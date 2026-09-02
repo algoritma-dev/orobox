@@ -1,0 +1,943 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Docker-based local development environment for OroCommerce.">
+      
+      
+      
+        <link rel="canonical" href="https://algoritma-dev.github.io/orobox/configuration/">
+      
+      
+        <link rel="prev" href="..">
+      
+      
+        <link rel="next" href="../commands/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Configuration - Orobox</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#configuration" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Orobox" class="md-header__button md-logo" aria-label="Orobox" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Orobox
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Configuration
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/algoritma-dev/orobox" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    algoritma-dev/orobox
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Orobox" class="md-nav__button md-logo" aria-label="Orobox" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Orobox
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/algoritma-dev/orobox" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    algoritma-dev/orobox
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-oroboxyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration (.orobox.yaml)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Configuration (.orobox.yaml)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#installation-types-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Installation types (type)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Installation types (type)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#environment-files-per-install-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment files per install type
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration Fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#global-flags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Global Flags
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../qa/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    QA tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../debugging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Debugging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../domains-and-ssl/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Domains and SSL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Internal structure & development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../comparison/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Comparison with alternatives
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-oroboxyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration (.orobox.yaml)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Configuration (.orobox.yaml)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#installation-types-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Installation types (type)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Installation types (type)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#environment-files-per-install-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment files per install type
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration Fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#global-flags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Global Flags
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<p><a href="../README.md">← Back to README</a> · <a href="../">Documentation index</a></p>
+<h1 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h1>
+<h2 id="configuration-oroboxyaml">Configuration (<code>.orobox.yaml</code>)<a class="headerlink" href="#configuration-oroboxyaml" title="Permanent link">&para;</a></h2>
+<p>Orobox uses a configuration file called <code>.orobox.yaml</code> in the root of your bundle. If the file does not exist, the <code>init</code> command will guide you through its interactive creation.</p>
+<p>Example <code>.orobox.yaml</code> file:
+<div class="highlight"><pre><span></span><code><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bundle</span>
+<span class="nt">class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">MyBundle</span>
+<span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">MyVendor\Bundle\MyBundle</span>
+<span class="nt">oro_version</span><span class="p">:</span><span class="w"> </span><span class="s">"6.1"</span>
+<span class="nt">domains</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">oro.demo</span>
+<span class="w">    </span><span class="nt">root</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">public</span>
+<span class="w">    </span><span class="nt">ssl</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<span class="nt">services</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">redis</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">  </span><span class="nt">redisinsight</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">  </span><span class="nt">mailpit</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">  </span><span class="nt">rabbitmq</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">  </span><span class="nt">elasticsearch</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<span class="w">  </span><span class="nt">kibana</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<span class="w">  </span><span class="nt">adminer</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="nt">test</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">use_tmpfs</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">  </span><span class="nt">tmpfs_size</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1g</span>
+<span class="w">  </span><span class="nt">qa</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">eslint</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">stylelint</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<span class="nt">commands</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"otr"</span>
+<span class="w">    </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="s">"php</span><span class="nv"> </span><span class="s">bin/console</span><span class="nv"> </span><span class="s">oro:test:run"</span>
+<span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">"Runs</span><span class="nv"> </span><span class="s">the</span><span class="nv"> </span><span class="s">Shippy</span><span class="nv"> </span><span class="s">Pro</span><span class="nv"> </span><span class="s">tests</span><span class="nv"> </span><span class="s">suite"</span>
+<span class="w">    </span><span class="nt">service</span><span class="p">:</span><span class="w"> </span><span class="s">"application"</span>
+<span class="nt">composer</span><span class="p">:</span>
+<span class="w">  </span><span class="c1"># Tokens for private repositories. Mirrors Composer's COMPOSER_AUTH schema and is</span>
+<span class="w">  </span><span class="c1"># injected only into the containers that run composer (never committed or baked</span>
+<span class="w">  </span><span class="c1"># into long-running services).</span>
+<span class="w">  </span><span class="nt">auth</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">github-oauth</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">github.com</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ghp_yourtokenhere</span>
+<span class="w">    </span><span class="nt">http-basic</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">repo.packagist.com</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">username</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">token</span>
+<span class="w">        </span><span class="nt">password</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">yourtokenhere</span>
+<span class="w">  </span><span class="c1"># Forward the host SSH agent into the containers. Omit to auto-detect (any SSH-transport</span>
+<span class="w">  </span><span class="c1"># URL in the repositories below, or in the project's own composer.json); true forwards</span>
+<span class="w">  </span><span class="c1"># unconditionally, false never forwards.</span>
+<span class="w">  </span><span class="nt">ssh_agent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">  </span><span class="nt">repositories</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vcs</span>
+<span class="w">      </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://github.com/my-org/private-repo.git</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">composer</span>
+<span class="w">      </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://repo.packagist.com/my-org/</span>
+<span class="w">    </span><span class="c1"># SSH-format URLs are supported too; orobox forwards your host SSH agent into</span>
+<span class="w">    </span><span class="c1"># the containers automatically (start ssh-agent and `ssh-add` your key first).</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vcs</span>
+<span class="w">      </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">git@github.com:my-org/ssh-repo.git</span>
+</code></pre></div></p>
+<h3 id="installation-types-type">Installation types (<code>type</code>)<a class="headerlink" href="#installation-types-type" title="Permanent link">&para;</a></h3>
+<p>Orobox supports three installation types, selected via the <code>type</code> field (or the <code>init</code> prompt / <code>--type</code> flag):</p>
+<ul>
+<li><strong><code>bundle</code></strong> (default): your repository is a single bundle that gets grafted onto a prebuilt OroCommerce application. Orobox downloads the Oro app into a named volume, mounts your bundle under <code>bundles/&lt;namespace&gt;</code>, wires it via <code>composer config repositories.bundle</code> + <code>composer require</code>, and syncs the resolved vendor back to the host. Requires <code>class</code> / <code>namespace</code>.</li>
+<li><strong><code>project</code></strong>: your repository <strong>is</strong> the whole OroCommerce application. Orobox bind-mounts the checkout directly onto <code>/var/www/oro</code>, runs <code>composer install</code> (resolving dependencies from your repo's own <code>composer.lock</code>), then runs the Oro installer. No bundle <code>namespace</code>/<code>class</code> is needed, and no vendor is synced back to the host.</li>
+</ul>
+<blockquote>
+<p>The project repository must contain a <code>composer.json</code> (and ideally a <code>composer.lock</code>). If the lock file is absent, Composer resolves from <code>composer.json</code>.</p>
+<p>Private dependencies: declare the repositories in the application's own <code>composer.json</code> as usual. Orobox reads that file to decide whether to forward your SSH agent, and <code>composer.ssh_agent: true</code> in <code>.orobox.yaml</code> forces forwarding when the SSH access is not visible there. Tokens still go in <code>composer.auth</code>.</p>
+</blockquote>
+<ul>
+<li><strong><code>demo</code></strong>: identical to <code>project</code> in how sources and vendors are wired, but the stack runs production-tuned — <code>ORO_ENV=prod</code>, OPcache enabled with <code>opcache.validate_timestamps=0</code>, and no Xdebug compiled into the image. Intended for demo and staging instances, not for development: PHP will not pick up source edits until the container restarts.</li>
+</ul>
+<p>Example <code>project</code> config:
+<div class="highlight"><pre><span></span><code><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">project</span>
+<span class="nt">oro_version</span><span class="p">:</span><span class="w"> </span><span class="s">"6.1"</span>
+<span class="nt">domains</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">oro.demo</span>
+<span class="w">    </span><span class="nt">root</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">public</span>
+<span class="w">    </span><span class="nt">ssl</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</code></pre></div></p>
+<p>Example <code>demo</code> config:
+<div class="highlight"><pre><span></span><code><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">demo</span>
+<span class="nt">oro_version</span><span class="p">:</span><span class="w"> </span><span class="s">"6.1"</span>
+<span class="nt">domains</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">demo.local</span>
+<span class="w">    </span><span class="nt">root</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">public</span>
+<span class="w">    </span><span class="nt">ssl</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</code></pre></div></p>
+<h4 id="environment-files-per-install-type">Environment files per install type<a class="headerlink" href="#environment-files-per-install-type" title="Permanent link">&para;</a></h4>
+<ul>
+<li><strong><code>bundle</code></strong>: Orobox bind-mounts its generated <code>.env</code> and <code>.env.test</code> over the application's <code>.env-app.local</code> and <code>.env-app.test</code>. Orobox owns those files; edit them through <code>.orobox.yaml</code> or by placing a <code>.env</code> / <code>.env.test</code> next to <code>.orobox.yaml</code>.</li>
+<li><strong><code>project</code> and <code>demo</code></strong>: the checkout owns <code>.env-app</code>, <code>.env-app.local</code> and <code>.env-app.test</code>. On the first <code>orobox init</code>, Orobox copies its generated <code>.env</code> to <code>.env-app.local</code> and <code>.env.test</code> to <code>.env-app.test</code> <strong>only if those files do not already exist</strong>, then never touches them again — subsequent <code>orobox up</code> / <code>run</code> / <code>test</code> invocations leave your edits alone.</li>
+</ul>
+<blockquote>
+<p><strong>Upgrading an existing <code>project</code> setup:</strong> earlier Orobox versions bind-mounted the internal env files over <code>.env-app.local</code> and <code>.env-app.test</code>, so your checkout may not contain them. Either re-run <code>orobox init</code> to have them seeded, or copy them yourself from the Orobox internal directory. If they are missing, the application starts with no database DSN.</p>
+<p>The <code>db</code> and <code>db-test</code> containers still read <code>POSTGRES_*</code> from Orobox's internal <code>.env</code> and <code>.env.test</code>. If you change <code>ORO_DB_*</code> in your own <code>.env-app.local</code>, mirror it there, or the application and the database will disagree on credentials.</p>
+</blockquote>
+<h3 id="configuration-fields">Configuration Fields<a class="headerlink" href="#configuration-fields" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>type</code>: Installation type — <code>bundle</code> (default), <code>project</code> or <code>demo</code>. See <a href="#installation-types-type">Installation types</a>.</li>
+<li><code>class</code>: Name of the bundle class (bundle type only).</li>
+<li><code>namespace</code>: PHP namespace of the bundle (bundle type only).</li>
+<li><code>oro_version</code>: OroCommerce version (e.g., "7.0", "6.1", "6.0", "5.1").</li>
+<li><code>domains</code>: List of domains for the environment.</li>
+<li><code>services</code>: Configuration for optional services and tools:<ul>
+<li><code>redis</code>: (bool) Enable/disable Redis.</li>
+<li><code>redisinsight</code>: (bool) Enable/disable RedisInsight.</li>
+<li><code>mailpit</code>: (bool) Enable/disable Mailpit.</li>
+<li><code>rabbitmq</code>: (bool) Enable/disable RabbitMQ.</li>
+<li><code>elasticsearch</code>: (bool) Enable/disable Elasticsearch/OpenSearch.</li>
+<li><code>kibana</code>: (bool) Enable/disable Kibana (only if Elasticsearch is enabled).</li>
+<li><code>adminer</code>: (bool) Enable/disable Adminer (PostgreSQL manager).</li>
+</ul>
+</li>
+<li><code>test</code>:<ul>
+<li><code>use_tmpfs</code>: (bool) If enabled, uses RAM (tmpfs) for database files in the test container, significantly improving performance but data is lost on container restart.</li>
+<li><code>tmpfs_size</code>: (string) Size of the tmpfs mount (e.g., "1g", "512m").</li>
+<li><code>qa</code>: (map) Enable or disable individual QA tools. Any tool not listed defaults to enabled. Useful when a bundle has no JavaScript (disable <code>eslint</code>, <code>stylelint</code>) or no Twig templates (disable <code>twig_cs_fixer</code>).<ul>
+<li><code>phpstan</code>: (bool) Enable/disable PHPStan.</li>
+<li><code>rector</code>: (bool) Enable/disable Rector.</li>
+<li><code>php_cs_fixer</code>: (bool) Enable/disable PHP-CS-Fixer.</li>
+<li><code>twig_cs_fixer</code>: (bool) Enable/disable Twig-CS-Fixer.</li>
+<li><code>eslint</code>: (bool) Enable/disable ESLint.</li>
+<li><code>stylelint</code>: (bool) Enable/disable Stylelint (SCSS/LESS/SASS/CSS).</li>
+</ul>
+</li>
+</ul>
+</li>
+<li><code>commands</code>: (list) List of custom commands that can be run in the container:<ul>
+<li><code>name</code>: (string) Name of the command (e.g., <code>otr</code>).</li>
+<li><code>command</code>: (string) The actual command to execute (e.g., <code>php bin/console oro:test:run</code>).</li>
+<li><code>description</code>: (string) Description of the command (displayed in help).</li>
+<li><code>service</code>: (string, optional) Default service to run the command in (e.g., <code>application</code>).</li>
+</ul>
+</li>
+<li><code>composer</code>: (map) Composer-specific settings.<ul>
+<li><code>repositories</code>: (list, <code>bundle</code> type only) Additional Composer repositories to register in the OroCommerce project during installation. Accepts the same format as Composer's <a href="https://getcomposer.org/doc/05-repositories.md"><code>repositories</code></a> field (VCS, Composer, path, package, etc.). These are merged with any existing repositories in the project's <code>composer.json</code>. Required when the bundle depends on packages hosted in private repositories. <code>project</code> and <code>demo</code> installs declare their repositories in the application's own <code>composer.json</code> and ignore this key.</li>
+<li><code>auth</code>: (map) Credentials for private repositories, using Composer's <a href="https://getcomposer.org/doc/03-cli.md#composer-auth"><code>COMPOSER_AUTH</code></a> schema (<code>github-oauth</code>, <code>gitlab-token</code>, <code>http-basic</code>, <code>bearer</code>, ...). Serialized to JSON and injected as the <code>COMPOSER_AUTH</code> environment variable only into the containers that run composer, so tokens are never committed or baked into long-running services.</li>
+<li><code>ssh_agent</code>: (bool, optional) Forces SSH agent forwarding on or off. When omitted, Orobox auto-detects it: forwarding is on when an SSH-transport URL appears in <code>repositories</code> above <strong>or</strong> in the checkout's own <code>composer.json</code>. Set it to <code>true</code> for a <code>project</code> whose private dependencies reach SSH through something Composer never sees (a git submodule, a <code>path</code> repository that is itself a checkout), and to <code>false</code> to opt out entirely.</li>
+<li><strong>SSH repositories</strong>: when forwarding is on — see <code>ssh_agent</code> above — Orobox bind-mounts your host SSH agent socket into the containers and sets <code>SSH_AUTH_SOCK</code> (on Docker Desktop the built-in agent socket is used, on Linux your live <code>$SSH_AUTH_SOCK</code>). This covers both the one-shot composer/git commands <code>orobox init</code> runs and the running <code>application</code> container, so <code>orobox shell</code> followed by <code>composer update</code> or <code>git fetch</code> authenticates too. <code>orobox init</code> will start an agent and load your default key if none is running; every other command uses only an agent that is already running, so start one first with <code>eval "$(ssh-agent)" &amp;&amp; ssh-add</code>.</li>
+</ul>
+</li>
+<li><code>deploy</code>: (map, <code>project</code> type only) Deployment configuration, generated by <a href="../deployment/#13-deployment-initialization-deploy-init"><code>deploy-init</code></a>. This is the single source of truth: <code>deploy.php</code> reads host, user, port, path, repository and ref from the <code>OROBOX_DEPLOY_*</code> variables Orobox injects, so the two files cannot drift.<ul>
+<li><code>pre_built_assets_enabled</code>: (bool) <code>true</code> when the repository already ships built assets — the pipeline then has no assets stage. <code>false</code> makes the pipeline run <code>oro:assets:install --env=prod</code> and upload the result as <code>assets.tar.gz</code>. Either way the remote never rebuilds them.</li>
+<li><code>repository</code>: (string, optional) URL Deployer clones on the remote host. Defaults to <code>git remote get-url origin</code>.</li>
+<li><code>source_dir</code>: (string, optional) Repository-relative directory holding the OroCommerce application. Leave empty when the repository root <strong>is</strong> the application. Set it for a monorepo that keeps the application beside other projects (e.g. <code>b2b</code> in a repository with <code>b2b/</code> and <code>api_client/</code>): the pipeline builds from that directory and Deployer's <code>sub_directory</code> extracts only it into the release, so the release looks like a plain Oro checkout and the sibling projects never reach the remote host. Must be relative and inside the repository.</li>
+<li><code>stages</code>: (list) One entry per deploy target.<ul>
+<li><code>name</code>: (string) Stage selector, e.g. <code>orobox deploy production</code>.</li>
+<li><code>ref</code>: (string) Git ref built by the pipeline <strong>and</strong> checked out on the remote, so the artifacts always match the deployed code.</li>
+<li><code>host</code>, <code>user</code>, <code>port</code>: (string/string/int) SSH target. <code>port</code> defaults to <code>22</code>.</li>
+<li><code>deploy_path</code>: (string) Deployer's <code>deploy_path</code> on the remote host.</li>
+<li><code>keep_releases</code>: (int, optional) Releases kept on the remote. Defaults to <code>5</code>.</li>
+<li><code>test_suites</code>: (list, optional) PHPUnit suites the pipeline runs: <code>unit</code>, <code>functional</code> or both. Defaults to <code>[unit]</code>; <code>functional</code> adds a full <code>oro:install --env=test</code> and is much slower.</li>
+<li><code>restart_command</code>: (string, optional) Command run on the remote after the update, for consumers and cron.</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p><em>Note: Versions of PHP, PostgreSQL, Node.js, and other components are automatically determined by the <code>oro_version</code> setting and cannot be changed manually.</em></p>
+<h3 id="global-flags">Global Flags<a class="headerlink" href="#global-flags" title="Permanent link">&para;</a></h3>
+<p>These options can be used with any command:
+- <code>--config</code>: Specifies an alternative configuration file (default: <code>.orobox.yaml</code>).</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
