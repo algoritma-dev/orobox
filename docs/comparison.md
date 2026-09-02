@@ -140,7 +140,7 @@ measured here.
   Drupal, Magento or plain Symfony project — a generic tool like DDEV, Lando or Warden (or a
   framework-specific one) fits that work better.
 - **Production environments.** Orobox says so directly: *"This tool is designed EXCLUSIVELY for
-  local development. It MUST NOT be used in production environments."* ([README.md](../README.md#%EF%B8%8F-important-disclaimer))
+  local development. It MUST NOT be used in production environments."* ([README.md](../README.md))
   The `demo` install type is production-*tuned* for realistic performance testing, but it is still
   generated and run by the same dev-only tool — it is not a production deployment mechanism.
   `orobox deploy` ships application releases to a remote host via Deployer, but the local Orobox
