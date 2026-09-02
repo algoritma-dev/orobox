@@ -1,0 +1,37 @@
+name: Feature request
+description: Propose a new feature or improvement for Orobox
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do that Orobox doesn't support today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you're using today, or other approaches you thought about
+
+  - type: dropdown
+    id: install-type
+    attributes:
+      label: Installation type this affects
+      multiple: true
+      options:
+        - bundle
+        - project
+        - demo
+        - all / not install-type specific
+    validations:
+      required: true

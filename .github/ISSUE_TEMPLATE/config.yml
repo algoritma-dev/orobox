@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or discussion
+    url: https://github.com/algoritma-dev/orobox/discussions
+    about: Ask usage questions here.
+  - name: OroCommerce community forum
+    url: https://forum.oroinc.com/
+    about: Questions about OroCommerce itself, not about Orobox.

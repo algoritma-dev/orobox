@@ -1,0 +1,80 @@
+name: Bug report
+description: Something in Orobox isn't working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: make sure `.orobox.yaml` in your report has any tokens under
+        `composer.auth` removed or replaced with placeholders.
+
+  - type: input
+    id: version
+    attributes:
+      label: Orobox version
+      description: Output of `orobox --version`
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and architecture
+      placeholder: e.g. macOS 15 arm64, Ubuntu 24.04 x86_64, Windows 11
+    validations:
+      required: true
+
+  - type: input
+    id: docker-version
+    attributes:
+      label: Docker / Docker Compose version
+      description: Output of `docker version` and `docker compose version`
+    validations:
+      required: true
+
+  - type: input
+    id: oro-version
+    attributes:
+      label: oro_version and type
+      description: The `oro_version` and `type` (`bundle` / `project` / `demo`) from your `.orobox.yaml`
+    validations:
+      required: true
+
+  - type: textarea
+    id: orobox-yaml
+    attributes:
+      label: .orobox.yaml
+      description: Your configuration file, with any `composer.auth` tokens removed
+      render: yaml
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command run
+      description: The exact `orobox` command that triggered the issue
+      render: bash
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected output
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual output
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Output of `orobox logs ...`, or CLI output with `--debug` where applicable
+      render: shell
