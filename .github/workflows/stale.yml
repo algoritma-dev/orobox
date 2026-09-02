@@ -1,0 +1,28 @@
+name: Stale
+
+on:
+  schedule:
+    - cron: '0 4 * * *'   # daily 04:00 UTC
+  workflow_dispatch:
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/stale@v9
+        with:
+          days-before-stale: 60
+          days-before-close: 14
+          exempt-issue-labels: "help wanted,good first issue,bug"
+          exempt-pr-labels: "help wanted"
+          stale-issue-message: >-
+            This issue has had no activity for 60 days and will be closed in 14 days if nothing
+            changes. Remove the stale label or comment to keep it open.
+          stale-pr-message: >-
+            This pull request has had no activity for 60 days and will be closed in 14 days if
+            nothing changes.
+          stale-issue-label: stale
+          stale-pr-label: stale

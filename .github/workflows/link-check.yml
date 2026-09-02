@@ -1,0 +1,49 @@
+name: Link check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/*.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - '**/*.md'
+  schedule:
+    - cron: '0 3 * * 1'   # weekly, Monday 03:00 UTC
+  workflow_dispatch:
+
+jobs:
+  internal-links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Relative links and same-file/#anchor fragments only. This must stay green: a broken
+      # internal link (e.g. a moved docs/*.md file, a renamed heading) is a real regression.
+      - name: Check internal links and anchors
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: >-
+            --no-progress
+            --include-fragments
+            --exclude '^https?://'
+            './README.md' './docs/**/*.md' './*.md'
+          fail: true
+
+  external-links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # External URLs are prone to false positives (rate limiting, transient outages), so this
+      # is informational only — check the job summary rather than failing the build on it.
+      - name: Check external links
+        uses: lycheeverse/lychee-action@v2
+        continue-on-error: true
+        with:
+          args: >-
+            --no-progress
+            --scheme https --scheme http
+            './README.md' './docs/**/*.md' './*.md'
+          fail: false

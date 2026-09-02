@@ -1,0 +1,66 @@
+site_name: Orobox
+site_description: Docker-based local development environment for OroCommerce.
+site_url: https://algoritma-dev.github.io/orobox/
+repo_url: https://github.com/algoritma-dev/orobox
+repo_name: algoritma-dev/orobox
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - content.code.copy
+
+# docs/agents/, docs/promotion/, docs/assets/ and docs/superpowers/ are internal (agent workflow
+# notes, promotion prep material, demo recording assets, planning docs) and must not appear on
+# the public site.
+plugins:
+  - search
+  - exclude:
+      glob:
+        - agents/**
+        - promotion/**
+        - assets/**
+        - superpowers/**
+
+# The doc pages carry "back to README"/"CONTRIBUTING" links that point outside docs_dir on
+# purpose, because the same files are also read directly on GitHub, where those relative links
+# resolve correctly against the repository root. MkDocs cannot resolve (or serve) anything
+# outside docs_dir, so these are expected and downgraded to informational instead of failing
+# `mkdocs build --strict`.
+validation:
+  links:
+    not_found: info
+
+markdown_extensions:
+  - admonition
+  - tables
+  - pymdownx.superfences
+  - toc:
+      permalink: true
+
+nav:
+  - Home: README.md
+  - Configuration: configuration.md
+  - Commands: commands.md
+  - QA tools: qa.md
+  - Deployment: deployment.md
+  - Debugging: debugging.md
+  - Domains and SSL: domains-and-ssl.md
+  - Internal structure & development: development.md
+  - Comparison with alternatives: comparison.md
