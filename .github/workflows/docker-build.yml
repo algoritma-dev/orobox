@@ -87,7 +87,7 @@ jobs:
       # Built into the local daemon rather than pushed: the seed bake below has to run *this*
       # image, and the push happens afterwards from the thin layer that adds the dump.
       - name: Build runtime image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: build-context
           file: build-context/Dockerfile
