@@ -48,7 +48,7 @@ func TestNewCIDataWithoutDeployHasNoStages(t *testing.T) {
 func TestRenderGitLabPipeline(t *testing.T) {
 	useRealTemplates(t)
 
-	out, err := Render("templates/ci/gitlab-ci-orobox.yml.tmpl", NewCIData("1.0.0-rc29", deployConfig()))
+	out, err := Render("templates/ci/gitlab-ci-orobox.yml.tmpl", NewCIData("1.0.0-rc30", deployConfig()))
 	if err != nil {
 		t.Fatalf("Render() error = %v", err)
 	}
@@ -69,7 +69,7 @@ func TestRenderGitLabPipeline(t *testing.T) {
 		// The README snippet this replaces never installed the binary, so every job failed on its
 		// first script line.
 		"apk add --no-cache git",
-		"releases/download/1.0.0-rc29/orobox_Linux_x86_64",
+		"releases/download/1.0.0-rc30/orobox_Linux_x86_64",
 		"codequality: " + config.ReportsRelDir + "/code-quality.json",
 		"junit: " + config.ReportsRelDir + "/junit.xml",
 		config.DeployArtifactsDir + "/staging/",
@@ -104,7 +104,7 @@ func TestRenderGitLabPipeline(t *testing.T) {
 func TestRenderGitLabPipelineWithoutDeployStages(t *testing.T) {
 	useRealTemplates(t)
 
-	out, err := Render("templates/ci/gitlab-ci-orobox.yml.tmpl", NewCIData("1.0.0-rc29", nil))
+	out, err := Render("templates/ci/gitlab-ci-orobox.yml.tmpl", NewCIData("1.0.0-rc30", nil))
 	if err != nil {
 		t.Fatalf("Render() error = %v", err)
 	}
@@ -126,7 +126,7 @@ func TestRenderGitLabPipelineWithoutDeployStages(t *testing.T) {
 func TestRenderGitLabRootIncludesTheOroboxPipeline(t *testing.T) {
 	useRealTemplates(t)
 
-	out, err := Render("templates/ci/gitlab-ci.yml.tmpl", NewCIData("1.0.0-rc29", nil))
+	out, err := Render("templates/ci/gitlab-ci.yml.tmpl", NewCIData("1.0.0-rc30", nil))
 	if err != nil {
 		t.Fatalf("Render() error = %v", err)
 	}

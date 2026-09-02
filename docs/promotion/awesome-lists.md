@@ -7,7 +7,7 @@ Orobox is in shape for it.
 
 Researched 2026-09-02, against Orobox at commit `d4010de` (branch `create-scaffold`), repo
 `algoritma-dev/orobox`: 4 stars, created 2026-03-19, `go.mod` module `github.com/algoritma-dev/orobox`,
-license GPL-3.0, latest tag `1.0.0-rc29` (no stable `1.0.0` release yet, and no tag uses the `v`
+license GPL-3.0, latest tag `1.0.0-rc30` (no stable `1.0.0` release yet, and no tag uses the `v`
 prefix Go modules require for SemVer resolution).
 
 ## Summary
@@ -55,7 +55,7 @@ Coverage: (none published yet)
 | ≥5 months of history since first commit | **Yes** | First commit 2026-03-19; ~5.5 months old as of 2026-09-02. |
 | Open source license | **Yes** | GPL-3.0, on OSI's approved list. |
 | `go.mod` present at repo root | **Yes** | `module github.com/algoritma-dev/orobox`. |
-| **At least one tag matching `vX.Y.Z`** (blocking CI check) | **No** | Existing tags are `1.0.0-rc29` etc. — no `v` prefix, and they carry a pre-release suffix. Go's module resolver only recognizes `v`-prefixed tags, so none of these are usable as a real module version; `go install ...@latest` currently resolves to a pseudo-version, not a tagged release. **This is the actual blocker.** |
+| **At least one tag matching `vX.Y.Z`** (blocking CI check) | **No** | Existing tags are `1.0.0-rc30` etc. — no `v` prefix, and they carry a pre-release suffix. Go's module resolver only recognizes `v`-prefixed tags, so none of these are usable as a real module version; `go install ...@latest` currently resolves to a pseudo-version, not a tagged release. **This is the actual blocker.** |
 | Go Report Card grade A-/A/A+ (blocking CI check) | **Not verified — the check itself may be dead** | `goreportcard.com` announced it sunset the live service on 2026-07-01 (servers shut down, repo archived), yet `CONTRIBUTING.md` fetched today (2026-09-02) still lists it as a blocking automated check and still asks for a `goreportcard.com` link in the PR body. The badge in Orobox's own README (`https://goreportcard.com/badge/...`) also points at the same dead service. This is a live contradiction in avelino/awesome-go's own process worth re-checking at submission time — it may have been patched to an alternative (e.g. `golangci-lint`) by then. |
 | pkg.go.dev reachable | **No, not yet** | `https://pkg.go.dev/github.com/algoritma-dev/orobox` returns 404 today. This is fixable without a stable release — pkg.go.dev indexes any module version once the Go proxy is asked for it — but it hasn't been triggered yet. |
 | Test coverage ≥80% (non-data packages), coverage link | **Not verified** | 58 `_test.go` files exist and CI runs `go test -v ./...`, but no coverage flag, Codecov, or Coveralls integration exists, so there's no number or link to cite. |

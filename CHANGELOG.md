@@ -10,6 +10,8 @@ group commits by theme rather than listing every commit. There is no stable `1.0
 
 ## [Unreleased]
 
+## [1.0.0-rc30] - 2026-09-02
+
 - Added a comprehensive end-to-end test suite (`e2e/`) covering bundle/project/demo installs
   across OroCommerce 5.1–7.0, running nightly and on manual dispatch.
 - Added the `create` command to scaffold a new project or bundle source tree.
