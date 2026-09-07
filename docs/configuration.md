@@ -35,6 +35,9 @@ commands:
     command: "php bin/console oro:test:run"
     description: "Runs the Shippy Pro tests suite"
     service: "application"
+system_packages:
+  - imagemagick
+  - poppler-utils
 composer:
   # Tokens for private repositories. Mirrors Composer's COMPOSER_AUTH schema and is
   # injected only into the containers that run composer (never committed or baked
@@ -103,6 +106,28 @@ domains:
 
   > The `db` and `db-test` containers still read `POSTGRES_*` from Orobox's internal `.env` and `.env.test`. If you change `ORO_DB_*` in your own `.env-app.local`, mirror it there, or the application and the database will disagree on credentials.
 
+### Extra system packages (`system_packages`)
+
+Orobox runs a published image, so the system libraries it ships are the same for everyone. A project that needs more of them — an ImageMagick binding, `pdftotext`, a client library a private extension links against — lists them here:
+
+```yaml
+system_packages:
+  - imagemagick
+  - poppler-utils
+  - libsodium
+```
+
+The entries are [Alpine](https://pkgs.alpinelinux.org/packages) package names, since the image is Alpine-based. A version constraint (`gnu-libiconv=1.15-r3`, `icu>72`) and a repository tag (`php84-pecl-redis@testing`) are accepted; anything else is refused when the config file is read, because these end up in an `apk add` line.
+
+How it works, and what it costs:
+
+- Orobox builds a **thin layer on top of the published image**, in a single `apk add`, and points every service at it. Nothing about the published image changes, and no project ever rebuilds PHP or its extensions.
+- The layer is rebuilt automatically. There is **no separate command and no need to re-run `init`**: the next `orobox up` / `run` / `test` notices that either the package list or the base image changed and rebuilds before starting anything. `orobox self-update` therefore only pulls, and the layer follows on the next command.
+- Removing the key puts the project straight back on the published image, with no local build at all.
+- The layer is tagged `orobox-custom/<project>:<oro_version>-<type>` and exists only on your machine. It is per checkout, so two projects on the same host never share one.
+
+> This adds system packages, not PHP extensions: the layer installs prebuilt packages and compiles nothing. Ask for a PHP extension by opening an issue — it belongs in the published image, where every project gets it without a local build.
+
 ### Configuration Fields
 - `type`: Installation type — `bundle` (default), `project` or `demo`. See [Installation types](#installation-types-type).
 - `class`: Name of the bundle class (bundle type only).
@@ -132,6 +157,7 @@ domains:
     - `command`: (string) The actual command to execute (e.g., `php bin/console oro:test:run`).
     - `description`: (string) Description of the command (displayed in help).
     - `service`: (string, optional) Default service to run the command in (e.g., `application`).
+- `system_packages`: (list) Extra Alpine packages installed into the application image by a locally built layer. See [Extra system packages](#extra-system-packages-system_packages).
 - `composer`: (map) Composer-specific settings.
     - `repositories`: (list, `bundle` type only) Additional Composer repositories to register in the OroCommerce project during installation. Accepts the same format as Composer's [`repositories`](https://getcomposer.org/doc/05-repositories.md) field (VCS, Composer, path, package, etc.). These are merged with any existing repositories in the project's `composer.json`. Required when the bundle depends on packages hosted in private repositories. `project` and `demo` installs declare their repositories in the application's own `composer.json` and ignore this key.
     - `auth`: (map) Credentials for private repositories, using Composer's [`COMPOSER_AUTH`](https://getcomposer.org/doc/03-cli.md#composer-auth) schema (`github-oauth`, `gitlab-token`, `http-basic`, `bearer`, ...). Serialized to JSON and injected as the `COMPOSER_AUTH` environment variable only into the containers that run composer, so tokens are never committed or baked into long-running services.

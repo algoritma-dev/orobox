@@ -1,0 +1,8 @@
+# Thin layer on top of the published Orobox image, generated from `system_packages` in
+# .orobox.yaml. It exists so a project can add the system libraries it depends on without
+# owning an image: the base tag stays the one Orobox publishes, and only this layer is built
+# locally. The build runs as root — the compose files pick the runtime user per service.
+FROM {{.BaseImage}}
+
+RUN apk add --no-cache{{range .SystemPackages}} \
+    {{.}}{{end}}

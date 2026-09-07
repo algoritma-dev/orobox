@@ -1,6 +1,11 @@
 x-templates:
   oro-app: &oro-app
-    image: "algoritmadev/orobox:{{.OroVersion}}-{{.ImageSuffix}}-latest"
+    image: "{{.AppImage}}"
+    {{- if .SystemPackages}}
+    # Built locally by orobox from `system_packages`, so it exists in no registry: a
+    # pull would go looking for it on Docker Hub and fail with an unrelated error.
+    pull_policy: never
+    {{- end}}
     env_file: .env
     extra_hosts:
       - "host.docker.internal:host-gateway"

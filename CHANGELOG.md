@@ -10,6 +10,12 @@ group commits by theme rather than listing every commit. There is no stable `1.0
 
 ## [Unreleased]
 
+- Added `system_packages` to `.orobox.yaml`: extra Alpine packages a project needs inside the
+  application image. Orobox builds a thin layer on top of the published image and rebuilds it
+  automatically when the list or the base image changes, so there is no new command and no need
+  to re-run `init`. Projects that do not use the key keep running the published image with no
+  local build.
+
 ## [1.0.0-rc30] - 2026-09-02
 
 - Added a comprehensive end-to-end test suite (`e2e/`) covering bundle/project/demo installs

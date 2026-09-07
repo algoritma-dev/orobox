@@ -147,6 +147,8 @@ func bundleComposeData() map[string]any {
 	return map[string]any{
 		"OroVersion":              "6.1",
 		"ImageSuffix":             "bundle",
+		"BaseImage":               BaseImageRef("6.1", "bundle"),
+		"AppImage":                BaseImageRef("6.1", "bundle"),
 		"BindWholeRepo":           false,
 		"BundlePath":              "/host/repo",
 		"OroRootDir":              "/var/www/oro",
@@ -186,6 +188,8 @@ func bundleComposeData() map[string]any {
 func projectComposeData() map[string]any {
 	d := bundleComposeData()
 	d["ImageSuffix"] = "project"
+	d["BaseImage"] = BaseImageRef("6.1", "project")
+	d["AppImage"] = BaseImageRef("6.1", "project")
 	d["BindWholeRepo"] = true
 	d["SyncsVendorToHost"] = false
 	d["RunsComposerRequire"] = false
@@ -201,6 +205,8 @@ func projectComposeData() map[string]any {
 func demoComposeData() map[string]any {
 	d := projectComposeData()
 	d["ImageSuffix"] = "demo"
+	d["BaseImage"] = BaseImageRef("6.1", "demo")
+	d["AppImage"] = BaseImageRef("6.1", "demo")
 	d["Type"] = "demo"
 	return d
 }

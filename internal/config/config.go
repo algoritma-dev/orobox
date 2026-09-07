@@ -6,6 +6,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -187,6 +190,11 @@ type OroConfig struct {
 	Test       TestConfig      `yaml:"test" mapstructure:"test"`
 	Commands   []CommandConfig `yaml:"commands" mapstructure:"commands"`
 	Composer   ComposerConfig  `yaml:"composer" mapstructure:"composer"`
+	// SystemPackages lists extra Alpine packages the project needs inside the application
+	// image. Orobox runs a published image rather than building one per project, so these are
+	// not compiled into it: they are installed by a thin layer built locally on top of the
+	// published tag. Listing none keeps the stack on the published image with no local build.
+	SystemPackages []string `yaml:"system_packages,omitempty" mapstructure:"system_packages"`
 	// Deploy is a pointer so a project without deployment keeps a clean config file: a struct
 	// value would always be serialized, empty stages and all.
 	Deploy *DeployConfig `yaml:"deploy,omitempty" mapstructure:"deploy"`
@@ -238,7 +246,44 @@ func (c *OroConfig) Validate() error {
 			return errors.New("config error: 'host' is required for domain at index " + string(rune(i)))
 		}
 	}
+	for _, pkg := range c.SystemPackages {
+		if !alpinePackagePattern.MatchString(strings.TrimSpace(pkg)) {
+			return errors.New("config error: 'system_packages' entry " + strconv.Quote(pkg) +
+				" is not a valid Alpine package name (letters, digits, '.', '_', '+', '-', " +
+				"an optional '@repository' tag and an optional '=<>~' version constraint)")
+		}
+	}
 	return c.ValidateDeploy()
+}
+
+// alpinePackagePattern matches what `apk add` accepts as a package atom: a name, an optional
+// `@repository` tag and an optional version constraint. The entries reach `apk add` inside a
+// generated Dockerfile, so anything a shell would treat as syntax — whitespace, `;`, `$`,
+// quotes — has to be rejected here rather than produce an unreadable build failure.
+var alpinePackagePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*(@[A-Za-z0-9._-]+)?([=<>~][A-Za-z0-9._+:-]+)?$`)
+
+// GetSystemPackages returns the extra Alpine packages configured for this project, trimmed,
+// de-duplicated and sorted. The order is normalized because it is hashed into the tag of the
+// locally built image layer: reordering the list in the config file is not a change that
+// warrants a rebuild.
+func GetSystemPackages() []string {
+	var raw []string
+	if err := viper.UnmarshalKey("system_packages", &raw); err != nil {
+		return nil
+	}
+
+	seen := make(map[string]bool, len(raw))
+	packages := make([]string, 0, len(raw))
+	for _, pkg := range raw {
+		pkg = strings.TrimSpace(pkg)
+		if pkg == "" || seen[pkg] {
+			continue
+		}
+		seen[pkg] = true
+		packages = append(packages, pkg)
+	}
+	sort.Strings(packages)
+	return packages
 }
 
 // ParseConfig parses a configuration from bytes.

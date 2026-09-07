@@ -274,6 +274,9 @@ func EnsureDockerCompose() bool {
 		WebsocketFrontendPort   string
 		SSHAgentSocket          string
 		SeedDumpPath            string
+		BaseImage               string
+		AppImage                string
+		SystemPackages          []string
 	}{
 		Type:                    viper.GetString("type"),
 		InternalDir:             internalDir,
@@ -370,6 +373,12 @@ func EnsureDockerCompose() bool {
 	// dumped by another server simply has no file at this path and the install runs as before.
 	data.SeedDumpPath = config.SeedDumpPath(config.PostgresMajor(versions.Postgres))
 
+	// Which image the services run. A project that asks for extra system packages runs a layer
+	// built locally on top of the published tag instead of the tag itself; everything else
+	// keeps running the published image with no local build at all.
+	data.SystemPackages = config.GetSystemPackages()
+	data.BaseImage, data.AppImage = ProjectImageRefs()
+
 	data.RabbitMQ = viper.GetBool("services.rabbitmq")
 	if data.RabbitMQ {
 		data.RabbitMQVersion = versions.RabbitMQ
@@ -430,6 +439,7 @@ func EnsureDockerCompose() bool {
 		changed = writeEntrypoint(internalDir, data) || changed
 	}
 
+	changed = writeCustomDockerfile(len(data.SystemPackages) > 0, data) || changed
 	changed = writeEnvFile("templates/docker/.env", internalDir, data) || changed
 	changed = writeEnvFile("templates/docker/.env.test", internalDir, data) || changed
 	changed = writeNginxConf(internalDir, data) || changed
@@ -503,6 +513,12 @@ func GetBaseComposeArgs() []string {
 // and captures its output, showing it only if an error occurs.
 // It shows a loader while running.
 var RunComposeCommandSilently = func(message string, args ...string) error {
+	if composeNeedsAppImage(args) {
+		if err := EnsureCustomImage(); err != nil {
+			return err
+		}
+	}
+
 	debug := viper.GetBool("debug")
 	if !debug {
 		utils.StartLoader(message)
@@ -562,6 +578,12 @@ var RunComposeCommandSilently = func(message string, args ...string) error {
 // RunSetupComposeCommandSilently is like RunComposeCommandSilently but enables
 // the "setup" profile so that services marked with profiles: [setup] are accessible.
 var RunSetupComposeCommandSilently = func(message string, args ...string) error {
+	if composeNeedsAppImage(args) {
+		if err := EnsureCustomImage(); err != nil {
+			return err
+		}
+	}
+
 	debug := viper.GetBool("debug")
 	if !debug {
 		utils.StartLoader(message)
@@ -614,6 +636,12 @@ var RunSetupComposeCommandSilently = func(message string, args ...string) error 
 // RunComposeCommand runs docker compose with the provided arguments
 // and connects to system stdout/stderr.
 var RunComposeCommand = func(message string, args ...string) error {
+	if composeNeedsAppImage(args) {
+		if err := EnsureCustomImage(); err != nil {
+			return err
+		}
+	}
+
 	if message != "" {
 		utils.PrintInfo(message)
 	}
@@ -777,9 +805,17 @@ func PullProjectImages() (bool, error) {
 		return false, err
 	}
 
+	baseImage, _ := ProjectImageRefs()
+
 	projectImages := make(map[string]bool)
 	for _, img := range strings.Split(strings.TrimSpace(string(output)), "\n") {
 		img = strings.TrimSpace(img)
+		// The per-project layer exists in no registry, so pulling it would fail every time.
+		// What can be updated is the image it was built on, and updating that is what makes the
+		// next command rebuild the layer — so the base takes its place here.
+		if IsCustomImageRef(img) {
+			img = baseImage
+		}
 		if img != "" {
 			// Some images might not have a tag in the config (defaults to latest)
 			// But docker images will show them with :latest
@@ -1334,6 +1370,57 @@ func writeDockerfile(internalDir string, data any) bool {
 
 	err = os.WriteFile(dest, buf.Bytes(), 0644)
 	if err != nil {
+		panic(err)
+	}
+
+	return true
+}
+
+// writeCustomDockerfile renders the per-project image layer into its own build context, or
+// removes that context when the project no longer asks for extra packages — a stale Dockerfile
+// left behind would be built again the next time the list is repopulated.
+func writeCustomDockerfile(wanted bool, data any) bool {
+	contextDir := customImageContextDir()
+	dest := filepath.Join(contextDir, "Dockerfile")
+
+	if !wanted {
+		if _, err := os.Stat(dest); err != nil {
+			return false
+		}
+		if err := os.RemoveAll(contextDir); err != nil {
+			utils.PrintWarning(fmt.Sprintf("Could not remove the unused image layer context %s: %v", contextDir, err))
+			return false
+		}
+		return true
+	}
+
+	src := "templates/docker/Dockerfile.custom"
+	content, err := fs.ReadFile(Templates, src)
+	if err != nil {
+		fmt.Printf("Warning: could not read template %s: %v\n", src, err)
+		return false
+	}
+
+	tmpl, err := template.New("dockerfile-custom").Parse(string(content))
+	if err != nil {
+		panic(err)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		panic(err)
+	}
+
+	if err := os.MkdirAll(contextDir, 0755); err != nil {
+		panic(err)
+	}
+
+	oldContent, err := os.ReadFile(dest)
+	if err == nil && bytes.Equal(oldContent, buf.Bytes()) {
+		return false
+	}
+
+	if err := os.WriteFile(dest, buf.Bytes(), 0644); err != nil {
 		panic(err)
 	}
 
