@@ -94,6 +94,8 @@ var performInstallation = func() bool {
 		return false
 	}
 
+	writeProjectMarker(&conf)
+
 	// EnsureDockerCompose has already written the internal env files, so project and demo
 	// checkouts can be seeded before anything starts or clones.
 	seedProjectEnvFiles(strategy)

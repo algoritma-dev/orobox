@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Orobox
+Comment=Manage OroCommerce development environments
+Exec=/usr/bin/orobox-tray
+Icon=orobox-symbolic
+Terminal=false
+Categories=Development;
+X-GNOME-Autostart-enabled=true

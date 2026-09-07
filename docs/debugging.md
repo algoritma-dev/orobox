@@ -6,24 +6,31 @@ Orobox includes Xdebug preinstalled, but disabled by default to maintain perform
 
 ### 1. Enabling/Disabling Xdebug
 
-You can enable or disable Xdebug in currently running containers using the `xdebug` command:
+You can turn Xdebug on or off in currently running containers using the `xdebug` command:
 
 ```bash
-orobox xdebug enable
+orobox xdebug on
 ```
 
 This command will:
 - Apply the change immediately to running containers ("hot-patching").
 
-To disable Xdebug:
+To turn Xdebug off:
 ```bash
-orobox xdebug disable
+orobox xdebug off
 ```
 
-You can specify which environment to target:
+By default this targets the application and PHP-FPM containers. You can target the background
+services instead:
 ```bash
-orobox xdebug enable --dev   # Development environment (default)
-orobox xdebug enable --test  # Test environment
+orobox xdebug on --consumer  # Message queue consumer
+orobox xdebug on --cron      # Cron
+```
+
+Check the current state of every container without changing anything:
+```bash
+orobox xdebug status         # human-readable
+orobox xdebug status --json  # machine-readable, e.g. {"application":true,"php-fpm-app":true,"consumer":false,"cron":false}
 ```
 
 *Note: Since the configuration is not persistent, Xdebug will be disabled again after a container restart or `orobox up`.*

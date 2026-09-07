@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/algoritma-dev/orobox/internal/config"
+	"github.com/algoritma-dev/orobox/internal/project"
 	"github.com/algoritma-dev/orobox/internal/utils"
 )
 
@@ -476,27 +477,13 @@ func writeComposeFile(internalDir string, filename string, data any) bool {
 
 // GetBaseComposeArgs returns the base arguments to pass to docker compose,
 // including project name and compose file path.
+//
+// Delegates to internal/project.Project.ComposeArgs, the pure, CWD-independent
+// implementation the tray also uses, so the two never compute different arguments for the
+// same project.
 func GetBaseComposeArgs() []string {
-	projectName := config.GetProjectName()
-	internalDir := config.GetInternalDir()
-	composeFile := filepath.Join(internalDir, "docker-compose.yml")
-	args := []string{"-p", projectName, "--project-directory", internalDir}
-
-	args = append(args, "-f", composeFile)
-
-	// Add setup and test files if they exist
-	setupFile := filepath.Join(internalDir, "docker-compose.setup.yml")
-	if _, err := os.Stat(setupFile); err == nil {
-		args = append(args, "-f", setupFile)
-	}
-	if includeTestFiles {
-		testFile := filepath.Join(internalDir, "docker-compose.test.yml")
-		if _, err := os.Stat(testFile); err == nil {
-			args = append(args, "-f", testFile)
-		}
-	}
-
-	return args
+	p := project.Project{Name: config.GetProjectName(), InternalDir: config.GetInternalDir()}
+	return p.ComposeArgs(includeTestFiles)
 }
 
 // RunComposeCommandSilently runs docker compose with the provided arguments

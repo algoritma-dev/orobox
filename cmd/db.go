@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/algoritma-dev/orobox/internal/docker"
+	"github.com/algoritma-dev/orobox/internal/project"
 	"github.com/algoritma-dev/orobox/internal/utils"
 	"github.com/spf13/cobra"
 )
@@ -95,8 +96,8 @@ if [ -d "$dir" ]; then
   rm -rf "$old"
 fi`
 
-// oroKernelServices are the long-running services that boot an Oro kernel of their own against
-// the same var/cache volume the application container writes to.
+// quiesceOroKernels stops the services in project.KernelServices that are currently running and
+// returns the function that starts exactly those back up.
 //
 // They are stopped for the duration of a restore, and that is not only about the cache. A restore
 // drops and recreates the database under them: a consumer mid-message, a cron job mid-run or a
@@ -110,17 +111,13 @@ fi`
 // the EEXIST a second creator hands it: "Could not create cache directory
 // .../var/cache/dev/oro_entities/Extend/Entity", and the restore fails on a race rather than on
 // anything about the dump.
-var oroKernelServices = []string{"web", "php-fpm-app", "ws", "consumer", "cron"}
-
-// quiesceOroKernels stops the services in oroKernelServices that are currently running and returns
-// the function that starts exactly those back up.
 //
 // Only the running ones are touched, so a restore never leaves a stack with more services up than
 // it found — a developer who deliberately keeps the consumer down gets it back down afterwards.
 // Both halves are best-effort: failing a restore because a background service could not be paused
 // would trade a rare race for a certain outage.
 func quiesceOroKernels() func() {
-	running := docker.RunningServices(oroKernelServices)
+	running := docker.RunningServices(project.KernelServices)
 	if len(running) == 0 {
 		return func() {}
 	}
@@ -200,7 +197,7 @@ func restoreDatabase(file string) error {
 	}
 
 	// Nothing else may hold a kernel open while the database and the cache underneath it are
-	// replaced; see oroKernelServices. Deferred, so a restore that fails halfway still hands the
+	// replaced; see project.KernelServices. Deferred, so a restore that fails halfway still hands the
 	// stack back in the shape it found it.
 	resume := quiesceOroKernels()
 	defer resume()

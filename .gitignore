@@ -1,5 +1,7 @@
 /.idea/
 orobox
+/orobox-tray
+/dist/
 /cmd/.orobox/.env
 /cmd/.orobox/.env.test
 /cmd/.orobox/docker-compose.setup.yml

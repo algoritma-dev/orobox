@@ -112,11 +112,14 @@ major that did not write the dump, and any restore that does not complete. Set `
 skip the dump and always install from scratch.
 
 ### 3. Start Environment (`up`)
-Starts Docker containers and configures OroCommerce.
+Starts the Docker containers.
 ```bash
 orobox up
 ```
-The command dynamically generates the `docker-compose.yml` file, starts the services, and proceeds with the environment installation or update.
+The command dynamically generates the `docker-compose.yml` file and runs `docker compose up -d`.
+It does **not** install OroCommerce — that's `init`'s job. If the stack has never been
+initialized, the containers come up but the application returns an error until you run
+`orobox init`.
 
 ### 4. Stop Environment (`down`)
 Shuts down the Docker services associated with the bundle.
@@ -125,9 +128,10 @@ orobox down
 ```
 
 ### 5. Shell Access (`shell`)
-Accesses a container in interactive mode (default: php).
+Accesses a container in interactive mode (default: `application`).
 ```bash
 orobox shell
+orobox shell db   # any compose service name, e.g. db, redis, application
 ```
 
 ### 6. View Logs (`logs`)
@@ -162,10 +166,11 @@ Options:
 - `--report-path`: Where to write it (default `var/orobox/reports/junit.xml`).
 - `--cache-scope`, `--base-cache-scope`: Dagger engine only; same meaning as on `orobox deploy`.
 
-### 11. Total Cleanup (`clean`)
-Removes all associated containers and volumes to start from scratch.
+### 11. Total Cleanup (`clear`)
+Removes all associated containers **and volumes** to start from scratch — this deletes the
+database and the whole installation. There is no confirmation prompt.
 ```bash
-orobox clean
+orobox clear
 ```
 
 ### 12. Run Custom Commands (`run`)
@@ -182,3 +187,14 @@ Options:
 - `--test`, `-t`: Quick flag to run the command in the `application` service with test environment override.
 
 If you run `orobox run --help`, you will see a dynamic list of all commands configured in your `.orobox.yaml`.
+
+### 13. Database Backup & Restore (`db backup` / `db restore`)
+Dumps or restores the database as a plain SQL file via `pg_dump`/`psql`. The file argument is
+required — there is no default path.
+```bash
+orobox db backup ./dump.sql
+orobox db restore ./dump.sql
+```
+`db restore` starts `db` and `application` if they are not already running, and stops the
+application's kernel services (web, PHP-FPM, websocket, consumer, cron) for the duration of the
+restore so nothing races the schema being replaced.

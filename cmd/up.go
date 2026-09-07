@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/algoritma-dev/orobox/internal/certificates"
+	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
 	"github.com/algoritma-dev/orobox/internal/utils"
 	"github.com/spf13/viper"
@@ -23,6 +24,13 @@ var upCmd = &cobra.Command{
 	RunE: func(_ *cobra.Command, _ []string) error {
 		certificates.InstallSslCertificates()
 		configChanged := docker.EnsureDockerCompose()
+
+		var conf config.OroConfig
+		if err := viper.Unmarshal(&conf); err != nil {
+			utils.PrintWarning(fmt.Sprintf("Could not read configuration for project.json: %v", err))
+		} else {
+			writeProjectMarker(&conf)
+		}
 
 		if cleanBeforeUp {
 			if err := docker.RunComposeCommandSilently("Cleaning up environment...", "down", "-v", "--remove-orphans"); err != nil {

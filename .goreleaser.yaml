@@ -6,7 +6,8 @@ before:
     - go mod tidy
 
 builds:
-  - env:
+  - id: orobox
+    env:
       - CGO_ENABLED=0
     goos:
       - linux
@@ -18,8 +19,28 @@ builds:
     main: ./main.go
     binary: orobox
 
+  # orobox-tray: a Linux-only system tray applet (see cmd/orobox-tray). fyne.io/systray's
+  # current release implements the Linux backend as pure Go over D-Bus (godbus), not cgo +
+  # libayatana-appindicator3 as older releases (and the design spec written against them)
+  # assumed — verified by building it under this same CGO_ENABLED=0 with no appindicator
+  # headers installed. That removes the arm64 cross-compile blocker the spec expected too, so
+  # both architectures ship from day one instead of amd64-only.
+  - id: orobox-tray
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    main: ./cmd/orobox-tray
+    binary: orobox-tray
+    ldflags:
+      - -X main.Version={{.Version}}
+
 archives:
   - id: archives
+    ids: [orobox]
     formats: ["tar.gz"]
     # use zip for windows archives
     format_overrides:
@@ -37,12 +58,23 @@ archives:
       - README.md
 
   - id: binaries
+    ids: [orobox]
     formats: ["binary"]
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
       {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+
+  - id: tray-archives
+    ids: [orobox-tray]
+    formats: ["tar.gz"]
+    name_template: >-
+      orobox-tray_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
       {{- else }}{{ .Arch }}{{ end }}
       {{- if .Arm }}v{{ .Arm }}{{ end }}
 
@@ -100,6 +132,35 @@ nfpms:
     license: GPL-3.0
     formats: [deb, rpm, apk]
     bindir: /usr/bin
+
+  # No libayatana-appindicator3-1 runtime dependency: fyne.io/systray's current Linux backend
+  # is pure Go over D-Bus, not the appindicator library the design spec assumed (see the
+  # `orobox-tray` build above). The icon still needs a tray host to actually show — GNOME Shell
+  # needs the "AppIndicator and KStatusNotifierItem Support" extension; orobox-tray detects and
+  # reports that at startup (§12), it is not something a package dependency can express.
+  - id: tray-packages
+    package_name: orobox-tray
+    ids: [orobox-tray]
+    vendor: Algoritma
+    homepage: "https://github.com/algoritma-dev/orobox"
+    maintainer: "Algoritma <raffaele.carelle@algoritma.it>"
+    description: "System tray applet for managing orobox development environments"
+    license: GPL-3.0
+    formats: [deb, rpm]
+    bindir: /usr/bin
+    contents:
+      - src: assets/tray/orobox-tray.desktop
+        dst: /usr/share/applications/orobox-tray.desktop
+      - src: assets/tray/orobox-symbolic.svg
+        dst: /usr/share/icons/hicolor/scalable/apps/orobox-symbolic.svg
+      - src: assets/tray/orobox-up-symbolic.svg
+        dst: /usr/share/icons/hicolor/scalable/apps/orobox-up-symbolic.svg
+      - src: assets/tray/orobox-down-symbolic.svg
+        dst: /usr/share/icons/hicolor/scalable/apps/orobox-down-symbolic.svg
+      - src: assets/tray/orobox-partial-symbolic.svg
+        dst: /usr/share/icons/hicolor/scalable/apps/orobox-partial-symbolic.svg
+      - src: assets/tray/orobox-error-symbolic.svg
+        dst: /usr/share/icons/hicolor/scalable/apps/orobox-error-symbolic.svg
 
 changelog:
   sort: asc

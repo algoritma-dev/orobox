@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 var (
 	xdebugConsumer bool
 	xdebugCron     bool
+	xdebugJSON     bool
 )
 
 var xdebugCmd = &cobra.Command{
@@ -28,6 +30,9 @@ var xdebugCmd = &cobra.Command{
 		docker.EnsureDockerCompose()
 		action := args[0]
 		if action == "status" {
+			if xdebugJSON {
+				return showXdebugStatusJSON()
+			}
 			showXdebugStatus()
 			return nil
 		}
@@ -63,6 +68,7 @@ func init() {
 	rootCmd.AddCommand(xdebugCmd)
 	xdebugCmd.Flags().BoolVar(&xdebugConsumer, "consumer", false, "Apply to consumer service")
 	xdebugCmd.Flags().BoolVar(&xdebugCron, "cron", false, "Apply to cron service")
+	xdebugCmd.Flags().BoolVar(&xdebugJSON, "json", false, "With 'status', print machine-readable JSON instead of text")
 }
 
 func applyXdebugHotfix(enable bool, service string, reloadPhpFpm bool, restartService bool) error {
@@ -107,34 +113,66 @@ func applyXdebugHotfix(enable bool, service string, reloadPhpFpm bool, restartSe
 	return nil
 }
 
+// xdebugStatusServices are the containers whose Xdebug state is reported by `xdebug status`,
+// in both its text and --json forms.
+var xdebugStatusServices = []struct{ service, label string }{
+	{"application", "Application"},
+	{"php-fpm-app", "PHP-FPM"},
+	{"cron", "Cron"},
+	{"consumer", "Consumer"},
+}
+
 func showXdebugStatus() {
 	utils.StartLoader("Checking Xdebug status...")
 	defer utils.StopLoader()
 
-	checkXdebugStatus("application", "Application")
-	checkXdebugStatus("php-fpm-app", "PHP-FPM")
-	checkXdebugStatus("cron", "Cron")
-	checkXdebugStatus("consumer", "Consumer")
+	for _, s := range xdebugStatusServices {
+		enabled, err := xdebugEnabled(s.service)
+		if err != nil {
+			utils.PrintWarning(fmt.Sprintf("%s: could not check status", s.label))
+			continue
+		}
+		if enabled {
+			utils.PrintSuccess(fmt.Sprintf("%s: Xdebug is ENABLED", s.label))
+		} else {
+			utils.PrintWarning(fmt.Sprintf("%s: Xdebug is DISABLED", s.label))
+		}
+	}
 }
 
-func checkXdebugStatus(service, label string) {
+// showXdebugStatusJSON prints {"application":bool,"php-fpm-app":bool,"consumer":bool,"cron":bool}
+// so a caller like orobox-tray can drive a checkbox off a real state instead of guessing.
+// Unlike the text form, a service that cannot be checked fails the whole call: a caller
+// consuming this as data has no "could not check status" middle ground to render.
+func showXdebugStatusJSON() error {
+	result := make(map[string]bool, len(xdebugStatusServices))
+	for _, s := range xdebugStatusServices {
+		enabled, err := xdebugEnabled(s.service)
+		if err != nil {
+			return fmt.Errorf("checking %s: %w", s.service, err)
+		}
+		result[s.service] = enabled
+	}
+
+	data, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(data))
+	return nil
+}
+
+// xdebugEnabled reports whether Xdebug's ini file is present (not disabled) in service.
+func xdebugEnabled(service string) (bool, error) {
 	execArgs := []string{"exec", "-u", "root"}
 	if !isTTY() {
 		execArgs = append(execArgs, "-T")
 	}
-	// Check if the file is present (not disabled)
 	execArgs = append(execArgs, service, "bash", "-c", "if [ -f /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini ]; then echo 'on'; else echo 'off'; fi")
 
 	output, err := docker.RunComposeCommandWithOutput(execArgs...)
 	if err != nil {
-		utils.PrintWarning(fmt.Sprintf("%s: could not check status", label))
-		return
+		return false, err
 	}
-
-	status := strings.TrimSpace(string(output))
-	if status == "on" {
-		utils.PrintSuccess(fmt.Sprintf("%s: Xdebug is ENABLED", label))
-	} else {
-		utils.PrintWarning(fmt.Sprintf("%s: Xdebug is DISABLED", label))
-	}
+	return strings.TrimSpace(string(output)) == "on", nil
 }

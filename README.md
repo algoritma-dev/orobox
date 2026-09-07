@@ -129,10 +129,48 @@ orobox self-update
 | `console` | Run a Symfony console command | [commands.md](docs/commands.md#7-symfony-console-console) |
 | `test` | Run the PHPUnit suites | [commands.md](docs/commands.md#8-run-tests-test) |
 | `qa-init` / `qa` | Install and run the QA toolchain | [qa.md](docs/qa.md) |
-| `clean` | Remove all containers and volumes | [commands.md](docs/commands.md#11-total-cleanup-clean) |
+| `clear` | Remove all containers and volumes | [commands.md](docs/commands.md#11-total-cleanup-clear) |
 | `run` | Run a custom command from `.orobox.yaml` | [commands.md](docs/commands.md#12-run-custom-commands-run) |
 | `deploy-init` / `ci-init` / `deploy` | Configure and run the build/check/release pipeline | [deployment.md](docs/deployment.md) |
 | `xdebug` | Hot-patch Xdebug in running containers | [debugging.md](docs/debugging.md) |
+| `db backup` / `db restore` | Dump or restore the database as a plain SQL file | [commands.md](docs/commands.md#13-database-backup--restore-db-backup--db-restore) |
+
+## Tray applet (Linux)
+
+`orobox-tray` is an optional system tray applet: it shows which environment is up, and lets you
+start/stop/switch environments, open the app and its optional services, run custom commands, and
+toggle Xdebug — all without a terminal. It shells out to the `orobox` binary you already have on
+PATH; it does not replace it (`init`, `create`, `deploy`, `db`, `qa-init` remain terminal-only).
+
+**Linux only.** macOS needs a signed `.app` bundle and a main-thread event loop; on Windows,
+Docker Desktop changes what "the active environment" even means. Both are out of scope for v1.
+
+### Install
+
+From a `.deb`/`.rpm` release asset:
+```bash
+sudo dpkg -i orobox-tray_*_linux_amd64.deb   # Debian/Ubuntu
+sudo rpm -i orobox-tray_*_linux_amd64.rpm    # Fedora/RHEL
+```
+Or build it yourself, same as the CLI:
+```bash
+go install github.com/algoritma-dev/orobox/cmd/orobox-tray@latest
+```
+
+### GNOME Shell
+
+GNOME Shell has no tray by default. Install the **"AppIndicator and KStatusNotifierItem
+Support"** extension first, or the icon simply never appears — `orobox-tray` detects the missing
+`org.kde.StatusNotifierWatcher` and prints a message naming the extension rather than failing
+silently. KDE Plasma works with no extra setup. Wayland is not a problem either way: the icon is
+served over D-Bus (StatusNotifierItem), not XEmbed.
+
+### Usage
+
+Run `orobox-tray` (or enable "Start at login" from its own menu once it's running) and click the
+icon. Environments are discovered automatically from `~/.config/orobox/*` — nothing to configure.
+`orobox-tray --dry-run` prints the menu tree to stdout instead, useful for scripting or a
+headless sanity check.
 
 ## Documentation
 

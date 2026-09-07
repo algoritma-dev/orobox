@@ -4,6 +4,9 @@ go 1.26.1
 
 require (
 	dagger.io/dagger v0.21.9
+	fyne.io/systray v1.12.2
+	github.com/esiqveland/notify v0.14.0
+	github.com/godbus/dbus/v5 v5.2.2
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	golang.org/x/sync v0.22.0
