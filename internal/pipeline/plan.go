@@ -646,24 +646,32 @@ func qaWarmupCommand(postgresVersion string) string {
 set -e
 stamp=%[1]s/.orobox-qa-fingerprint
 %[7]s
+export PGPASSWORD=%[12]s
+psql_run() { psql -h %[10]s -U %[11]s -d %[13]s -v ON_ERROR_STOP=1 "$@"; }
+# psql empties the schema and loads the seed dump, and the first of those two is needed even when
+# there is no dump to load, so the client is installed before anything decides which path to take.
+# A failure here is not fatal: reset_schema then falls back to bin/console and the seed is skipped.
+if ! command -v psql >/dev/null 2>&1; then
+  apk add --no-cache postgresql%[9]s-client >/dev/null 2>&1 || apk add --no-cache postgresql-client >/dev/null 2>&1 || true
+fi
+%[6]s
 seed_install() {
   if [ -n "$OROBOX_NO_CACHE" ]; then return 1; fi
   if [ ! -f %[8]s ]; then return 1; fi
-  if ! command -v psql >/dev/null 2>&1; then
-    apk add --no-cache postgresql%[9]s-client >/dev/null 2>&1 || apk add --no-cache postgresql-client >/dev/null 2>&1 || return 1
-  fi
+  if ! command -v psql >/dev/null 2>&1; then return 1; fi
   echo 'Seeding the QA database from the dump the runtime image carries.'
-  %[6]s
-  export PGPASSWORD=%[12]s
-  gunzip -c %[8]s | psql -h %[10]s -U %[11]s -d %[13]s -v ON_ERROR_STOP=1 >/dev/null || return 1
-  # The reset above runs through bin/console, so it left a warmed var/cache/test describing the
-  # empty database it ran against — the dumped container, the generated extend classes, the
-  # compiled Doctrine metadata. The dump then replaced that database wholesale, and
-  # oro:platform:update boots on top of whatever the cache holds rather than rebuilding it: on
-  # Oro 7.0 that surfaced as "Circular reference detected for service
-  # doctrine.orm.default_entity_manager", a container error with nothing to do with the database
-  # it was handed. The test step drops the same directory for the same reason; see rebuild() in
-  # testDatabaseCommand.
+  # Every failure below returns explicitly. This function runs as an "if !" condition, which
+  # disables set -e for its whole body, so an unchecked reset would be reported by nothing and the
+  # dump would be loaded on top of the install it was supposed to replace.
+  reset_schema || return 1
+  gunzip -c %[8]s | psql_run >/dev/null || return 1
+  # The dump replaced the database wholesale, and var/cache/test — if a previous run left one —
+  # describes the database that was there before: the dumped container, the generated extend
+  # classes, the compiled Doctrine metadata. oro:platform:update boots on top of whatever the cache
+  # holds rather than rebuilding it: on Oro 7.0 that surfaced as "Circular reference detected for
+  # service doctrine.orm.default_entity_manager", a container error with nothing to do with the
+  # database it was handed. The test step drops the same directory for the same reason; see
+  # rebuild() in testDatabaseCommand.
   rm -rf %[4]s
   php bin/console oro:platform:update --force --env=test --timeout=0 --skip-download-translations --skip-translations || return 1
 }
@@ -671,7 +679,7 @@ full_install() {
   rm -rf %[4]s "$stamp"
   %[5]s
   if ! seed_install; then
-    %[6]s
+    reset_schema
     php bin/console oro:install --env=test --no-interaction --drop-database --skip-translations
   fi
   php bin/console cache:warmup --env=test
@@ -696,7 +704,7 @@ fi
 echo 'Rebuilding the QA cache: installing Oro and warming the test cache. Later runs reuse this.'
 full_install`,
 		qatools.CacheVolumeDir(), qatools.ContainerXMLPath(qatools.EnvTest), qatools.SymfonyConfigDir(qatools.EnvTest),
-		qatools.CacheDir(qatools.EnvTest), oroWritableDirsCommand(), qaDatabaseResetCommand(),
+		qatools.CacheDir(qatools.EnvTest), oroWritableDirsCommand(), qaResetSchemaCommand(),
 		sourceFingerprintCommand("the QA cache will be rebuilt and not cached"),
 		config.SeedDumpPath(major), major,
 		qaDBService, testDBUser, testDBPassword, qaDBName)
@@ -727,32 +735,56 @@ if [ -z "$fingerprint" ]; then
 fi`, consequence)
 }
 
-// qaDatabaseResetCommand empties the persistent QA database before oro:install runs against it.
+// qaResetSchemaCommand defines reset_schema, which empties the persistent QA database before the
+// seed dump is loaded into it or oro:install runs against it.
 //
 // oro:install --drop-database drops what Doctrine knows about, which is the entity tables. The
 // tables nothing maps — oro_session and oro_migrations — survive it, and on the reused data
 // volume that is enough to take the next install down: the session table is created again and
 // PostgreSQL answers with `relation "oro_session" already exists`. A surviving oro_migrations is
-// worse, because the migrations already recorded there are then never replayed.
+// worse, because the migrations already recorded there are then never replayed. Loading the seed
+// dump into a database that still holds an install fails for the same class of reason, with
+// `function "oro_scope_fill_row_hash" already exists with same argument types`.
 //
 // Dropping the schema removes every table whatever created it. It also removes the two
 // extensions Oro requires, which the volume received from the service's initdb script and which
 // only runs when the cluster is initialised, so they are recreated here rather than assumed.
-// The statements are separate console calls: DBAL sends a multi-statement string as one
-// prepared statement, which PostgreSQL rejects.
-func qaDatabaseResetCommand() string {
+//
+// The statements go through psql rather than `bin/console doctrine:query:sql`, and that is the
+// whole point of this function. A console call needs a kernel, a kernel with no var/cache/test
+// builds the extend classes from the oro_entity_config rows the database happens to hold, and the
+// database this is about to empty is exactly the one those rows cannot be trusted from: a run that
+// died mid-install leaves config the dumper rejects, and on Oro 7.0 every one of the four resets
+// then failed with `get_parent_class(): Argument #1 ($object_or_class) must be an object or a valid
+// class name, string given` from ExtendConfigDumper. The reset that repairs that state must not
+// depend on it. The test step's reset_schema has always used psql; this is the same reset.
+//
+// psql is only best-effort available — the runtime image may not carry it and the client package
+// may not install — so the console form stays as the fallback for the case where there is nothing
+// else to try. Each statement is a separate call either way: DBAL sends a multi-statement string
+// as one prepared statement, which PostgreSQL rejects.
+func qaResetSchemaCommand() string {
 	statements := []string{
 		"DROP SCHEMA IF EXISTS public CASCADE",
 		"CREATE SCHEMA public",
-		`CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"`,
+		`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`,
 		"CREATE EXTENSION IF NOT EXISTS pg_trgm",
 	}
-	commands := make([]string, 0, len(statements)+1)
-	commands = append(commands, "echo 'Emptying the QA database: the reused volume can hold tables the installer does not drop.'")
+	psql := make([]string, 0, len(statements))
+	console := make([]string, 0, len(statements))
 	for _, statement := range statements {
-		commands = append(commands, fmt.Sprintf(`php bin/console doctrine:query:sql --env=test "%s"`, statement))
+		psql = append(psql, fmt.Sprintf(`    psql_run -c '%s'`, statement))
+		console = append(console, fmt.Sprintf(`    php bin/console doctrine:query:sql --env=test "%s"`, strings.ReplaceAll(statement, `"`, `\"`)))
 	}
-	return strings.Join(commands, "\n")
+	return fmt.Sprintf(`reset_schema() {
+  echo 'Emptying the QA database: the reused volume can hold tables the installer does not drop.'
+  if command -v psql >/dev/null 2>&1; then
+%s
+  else
+    echo 'psql is not available: emptying the schema through bin/console instead.'
+%s
+  fi
+}`, strings.Join(psql, " &&\n"), strings.Join(console, " &&\n"))
 }
 
 // oroWritableDirsCommand creates the directories Oro's requirements check demands before

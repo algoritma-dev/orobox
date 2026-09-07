@@ -961,6 +961,44 @@ func TestQaWarmupSeedsFromTheImageDump(t *testing.T) {
 	}
 }
 
+// The reset that empties the QA database goes through psql, not through bin/console. A console
+// call needs a kernel, and a kernel with no var/cache/test rebuilds the extend classes from the
+// oro_entity_config rows the database holds — which is what a database left by a half-finished run
+// cannot be trusted for. On Oro 7.0 all four console resets failed with `get_parent_class():
+// Argument #1 ($object_or_class) must be an object or a valid class name, string given` from
+// ExtendConfigDumper, the schema was never emptied, and the seed dump was then loaded into the
+// install it was replacing: `function "oro_scope_fill_row_hash" already exists with same argument
+// types`.
+func TestQaWarmupResetsTheSchemaWithoutBootingTheKernel(t *testing.T) {
+	qa := joined(New(testConf("7.0", true), testStage(), "repo").QA.Commands)
+
+	for _, want := range []string{
+		`psql_run -c 'DROP SCHEMA IF EXISTS public CASCADE'`,
+		`psql_run -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"'`,
+	} {
+		if !strings.Contains(qa, want) {
+			t.Errorf("the QA reset does not run %q through psql: %s", want, qa)
+		}
+	}
+
+	// The client has to be installed before anything calls the reset, and the seed path has to be
+	// able to tell that the reset failed: the function runs as an "if !" condition, where set -e is
+	// disabled for its whole body, so an unchecked reset is reported by nothing.
+	client := strings.Index(qa, "-client >/dev/null")
+	reset := strings.Index(qa, "reset_schema || return 1")
+	if client < 0 || reset < 0 || client > reset {
+		t.Errorf("psql is installed at %d and the seed resets at %d: %s", client, reset, qa)
+	}
+
+	// The console form is the fallback for an image with no psql and no way to install one, so it
+	// must stay behind that branch rather than be what the reset normally runs.
+	fallback := strings.Index(qa, "psql is not available")
+	console := strings.Index(qa, `php bin/console doctrine:query:sql --env=test "DROP SCHEMA`)
+	if fallback < 0 || console < 0 || fallback > console {
+		t.Errorf("the bin/console reset is not behind the no-psql fallback (fallback=%d console=%d): %s", fallback, console, qa)
+	}
+}
+
 // TestQaStepInstallsOroCommercesNodeModules covers the two install paths that leave the QA step
 // without the linters: a cached install is reused untouched, and a seeded one is restored from a
 // database dump — neither runs the asset install that creates node_modules, and the linters are
