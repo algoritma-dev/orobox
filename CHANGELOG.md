@@ -10,6 +10,8 @@ group commits by theme rather than listing every commit. There is no stable `1.0
 
 ## [Unreleased]
 
+## [1.0.0-rc31] - 2026-09-07
+
 - Added `dockerfile` to `.orobox.yaml`: a project-owned Dockerfile that extends the published
   image, so a project can install the system libraries, PHP extensions and tools it depends on.
   Orobox passes the published image for the configured `oro_version` in the `OROBOX_BASE_IMAGE`

@@ -60,3 +60,8 @@ pre-release validation; GoReleaser marks it as a GitHub pre-release
 `orobox self-update` keep pointing at the newest **stable** tag until a plain `X.Y.Z` is
 tagged. A stable release is cut once the checklist in the tracking issue for that version is
 complete (see the "Release 1.0.0" issue for the current one).
+
+Because no stable tag exists yet, `releases/latest` has nothing to resolve to, so the README
+install commands pin the current release candidate explicitly. Bump that pin in `README.md`
+along with `cmd/root.go` when cutting a new `rcN`; once `1.0.0` is tagged, the commands can go
+back to `releases/latest`.
