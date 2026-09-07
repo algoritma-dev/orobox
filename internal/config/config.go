@@ -5,9 +5,8 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"path"
 	"path/filepath"
-	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -190,11 +189,14 @@ type OroConfig struct {
 	Test       TestConfig      `yaml:"test" mapstructure:"test"`
 	Commands   []CommandConfig `yaml:"commands" mapstructure:"commands"`
 	Composer   ComposerConfig  `yaml:"composer" mapstructure:"composer"`
-	// SystemPackages lists extra Alpine packages the project needs inside the application
-	// image. Orobox runs a published image rather than building one per project, so these are
-	// not compiled into it: they are installed by a thin layer built locally on top of the
-	// published tag. Listing none keeps the stack on the published image with no local build.
-	SystemPackages []string `yaml:"system_packages,omitempty" mapstructure:"system_packages"`
+	// Dockerfile is a project-owned Dockerfile, relative to the directory holding
+	// .orobox.yaml, that extends the published image. Orobox runs a published image rather
+	// than building one per project; naming a Dockerfile here inserts one locally built layer
+	// between that image and the stack, so a project can install whatever it depends on. Its
+	// final stage must be `FROM ${OROBOX_BASE_IMAGE}` — see DockerfileBaseImageArg — so
+	// `oro_version` stays the only thing that decides which Oro image is underneath. Unset
+	// keeps the stack on the published image with no local build.
+	Dockerfile string `yaml:"dockerfile,omitempty" mapstructure:"dockerfile"`
 	// Deploy is a pointer so a project without deployment keeps a clean config file: a struct
 	// value would always be serialized, empty stages and all.
 	Deploy *DeployConfig `yaml:"deploy,omitempty" mapstructure:"deploy"`
@@ -246,44 +248,48 @@ func (c *OroConfig) Validate() error {
 			return errors.New("config error: 'host' is required for domain at index " + string(rune(i)))
 		}
 	}
-	for _, pkg := range c.SystemPackages {
-		if !alpinePackagePattern.MatchString(strings.TrimSpace(pkg)) {
-			return errors.New("config error: 'system_packages' entry " + strconv.Quote(pkg) +
-				" is not a valid Alpine package name (letters, digits, '.', '_', '+', '-', " +
-				"an optional '@repository' tag and an optional '=<>~' version constraint)")
+	if raw := strings.TrimSpace(c.Dockerfile); raw != "" {
+		if filepath.IsAbs(raw) {
+			return errors.New("config error: 'dockerfile' must be relative to the directory holding .orobox.yaml, got " + strconv.Quote(raw))
+		}
+		if rel := normalizeDockerfilePath(raw); rel == "" || strings.HasPrefix(rel, "..") {
+			return errors.New("config error: 'dockerfile' must point inside the project, got " + strconv.Quote(raw))
 		}
 	}
 	return c.ValidateDeploy()
 }
 
-// alpinePackagePattern matches what `apk add` accepts as a package atom: a name, an optional
-// `@repository` tag and an optional version constraint. The entries reach `apk add` inside a
-// generated Dockerfile, so anything a shell would treat as syntax — whitespace, `;`, `$`,
-// quotes — has to be rejected here rather than produce an unreadable build failure.
-var alpinePackagePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*(@[A-Za-z0-9._-]+)?([=<>~][A-Za-z0-9._+:-]+)?$`)
+// DockerfileBaseImageArg is the build argument Orobox sets to the published image a custom
+// Dockerfile has to extend. It is a build argument rather than a hardcoded tag so `oro_version`
+// remains the single place that decides which Oro image the project runs on: bumping it in
+// .orobox.yaml moves the custom layer with it, and a project Dockerfile never has to be edited
+// for an Oro upgrade.
+const DockerfileBaseImageArg = "OROBOX_BASE_IMAGE"
 
-// GetSystemPackages returns the extra Alpine packages configured for this project, trimmed,
-// de-duplicated and sorted. The order is normalized because it is hashed into the tag of the
-// locally built image layer: reordering the list in the config file is not a change that
-// warrants a rebuild.
-func GetSystemPackages() []string {
-	var raw []string
-	if err := viper.UnmarshalKey("system_packages", &raw); err != nil {
-		return nil
+// normalizeDockerfilePath cleans a configured path into a project-relative one. Separate from
+// GetDockerfile so Validate can reject an escaping path without touching viper.
+func normalizeDockerfilePath(raw string) string {
+	cleaned := path.Clean(strings.TrimSpace(filepath.ToSlash(raw)))
+	if cleaned == "." || cleaned == "/" {
+		return ""
 	}
+	return strings.TrimPrefix(cleaned, "./")
+}
 
-	seen := make(map[string]bool, len(raw))
-	packages := make([]string, 0, len(raw))
-	for _, pkg := range raw {
-		pkg = strings.TrimSpace(pkg)
-		if pkg == "" || seen[pkg] {
-			continue
-		}
-		seen[pkg] = true
-		packages = append(packages, pkg)
+// GetDockerfile returns the project-relative path of the custom Dockerfile, or "" when the
+// project runs the published image unchanged.
+func GetDockerfile() string {
+	return normalizeDockerfilePath(viper.GetString("dockerfile"))
+}
+
+// GetDockerfilePath returns the absolute path of the custom Dockerfile, or "" when none is
+// configured.
+func GetDockerfilePath() string {
+	rel := GetDockerfile()
+	if rel == "" {
+		return ""
 	}
-	sort.Strings(packages)
-	return packages
+	return filepath.Join(GetHostBundlePath(), filepath.FromSlash(rel))
 }
 
 // ParseConfig parses a configuration from bytes.

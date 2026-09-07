@@ -118,6 +118,10 @@ orobox up
 ```
 The command dynamically generates the `docker-compose.yml` file, starts the services, and proceeds with the environment installation or update.
 
+Flags:
+- `-c`, `--clean`: tear the environment down, volumes included, before starting.
+- `--rebuild`: rebuild the image from the project's [`dockerfile`](configuration.md#custom-dockerfile-dockerfile) ignoring the Docker cache. Only useful with that key set: rebuilds happen automatically when the Dockerfile, its build context or the base image change, so this is for the case Docker cannot see — an unpinned `RUN apk add` that should pick up a newer package.
+
 ### 4. Stop Environment (`down`)
 Shuts down the Docker services associated with the bundle.
 ```bash

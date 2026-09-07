@@ -1,8 +1,13 @@
 package docker
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/spf13/viper"
 )
 
@@ -44,22 +49,29 @@ func TestCustomImageRefIsNotThePublishedRepository(t *testing.T) {
 	}
 }
 
-// The layer is stale both when the package list changes and when the base image it was built
-// on is replaced — an `orobox self-update` does the latter without touching the Dockerfile.
-func TestCustomLayerHashCoversTheDockerfileAndTheBaseImage(t *testing.T) {
-	const baseID = "sha256:aaaa"
-	dockerfile := []byte("FROM base\nRUN apk add --no-cache poppler-utils\n")
+// The compose files and the builder must never disagree about which image the stack runs, so
+// both read it from here.
+func TestProjectImageRefs(t *testing.T) {
+	viper.Reset()
+	defer viper.Reset()
+	viper.Set("type", "project")
+	viper.Set("oro_version", "6.1")
 
-	reference := customLayerHash(dockerfile, baseID)
+	base, app := ProjectImageRefs()
+	if base != BaseImageRef("6.1", "project") {
+		t.Errorf("base = %q", base)
+	}
+	if app != base {
+		t.Errorf("without a custom dockerfile the stack must run the published image, got %q", app)
+	}
 
-	if again := customLayerHash(dockerfile, baseID); again != reference {
-		t.Errorf("the hash is not stable: %q then %q", reference, again)
+	viper.Set("dockerfile", "docker/Dockerfile")
+	base, app = ProjectImageRefs()
+	if base != BaseImageRef("6.1", "project") {
+		t.Errorf("base changed with a custom dockerfile: %q", base)
 	}
-	if changed := customLayerHash([]byte("FROM base\nRUN apk add --no-cache imagemagick\n"), baseID); changed == reference {
-		t.Error("a changed package list must change the hash")
-	}
-	if changed := customLayerHash(dockerfile, "sha256:bbbb"); changed == reference {
-		t.Error("a changed base image must change the hash")
+	if !IsCustomImageRef(app) {
+		t.Errorf("with a custom dockerfile the stack must run the local layer, got %q", app)
 	}
 }
 
@@ -92,28 +104,112 @@ func TestComposeNeedsAppImage(t *testing.T) {
 	}
 }
 
-// The compose files and the builder must never disagree about which image the stack runs, so
-// both read it from here.
-func TestProjectImageRefs(t *testing.T) {
-	viper.Reset()
-	defer viper.Reset()
-	viper.Set("type", "project")
-	viper.Set("oro_version", "6.1")
+// A Dockerfile whose runtime stage is not the Orobox image makes oro_version decide nothing,
+// and the stack then fails somewhere far from the config key that caused it. Earlier stages are
+// unconstrained, which is what makes compiling a tool and copying it over possible.
+func TestCheckExtendsBaseImage(t *testing.T) {
+	arg := config.DockerfileBaseImageArg
 
-	base, app := ProjectImageRefs()
-	if base != BaseImageRef("6.1", "project") {
-		t.Errorf("base = %q", base)
+	accepted := map[string]string{
+		"braced": "ARG " + arg + "\nFROM ${" + arg + "}\nRUN apk add --no-cache imagemagick\n",
+		"bare":   "ARG " + arg + "\nFROM $" + arg + "\n",
+		"named stage": "ARG " + arg + "\n" +
+			"FROM golang:1.24-alpine AS builder\nRUN go build ./...\n" +
+			"FROM ${" + arg + "}\nCOPY --from=builder /app/tool /usr/local/bin/tool\n",
+		"lowercase from": "ARG " + arg + "\nfrom ${" + arg + "}\n",
 	}
-	if app != base {
-		t.Errorf("without system_packages the stack must run the published image, got %q", app)
+	for name, content := range accepted {
+		t.Run(name, func(t *testing.T) {
+			if err := checkExtendsBaseImage("docker/Dockerfile", []byte(content)); err != nil {
+				t.Errorf("expected the Dockerfile to be accepted, got %v", err)
+			}
+		})
 	}
 
-	viper.Set("system_packages", []string{"imagemagick"})
-	base, app = ProjectImageRefs()
-	if base != BaseImageRef("6.1", "project") {
-		t.Errorf("base changed with system_packages: %q", base)
+	rejected := map[string]string{
+		"hardcoded oro tag": "FROM algoritmadev/orobox:6.1-project-latest\n",
+		"unrelated image":   "FROM php:8.4-fpm-alpine\n",
+		"final stage is not the base": "ARG " + arg + "\nFROM ${" + arg + "} AS oro\n" +
+			"FROM alpine\nCOPY --from=oro /var/www/oro /oro\n",
+		"no from at all": "RUN apk add --no-cache imagemagick\n",
 	}
-	if !IsCustomImageRef(app) {
-		t.Errorf("with system_packages the stack must run the local layer, got %q", app)
+	for name, content := range rejected {
+		t.Run(name, func(t *testing.T) {
+			err := checkExtendsBaseImage("docker/Dockerfile", []byte(content))
+			if err == nil {
+				t.Fatal("expected the Dockerfile to be rejected")
+			}
+			// The message has to say what to write, not just that something is wrong.
+			if !strings.Contains(err.Error(), "docker/Dockerfile") {
+				t.Errorf("the error should name the configured path, got %v", err)
+			}
+		})
+	}
+}
+
+// The layer is stale when anything in the build context changes and when the base image it was
+// built on is replaced — an `orobox self-update` does the latter without touching a file.
+func TestCustomLayerHashCoversTheContextAndTheBaseImage(t *testing.T) {
+	const baseID = "sha256:aaaa"
+	dir := t.TempDir()
+	dockerfile := filepath.Join(dir, "Dockerfile")
+	write := func(path, content string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		// Modification times are part of the hash, and a test that writes twice in the same
+		// clock tick would otherwise compare two identical stamps.
+		stamp := time.Now().Add(time.Duration(len(content)) * time.Second)
+		if err := os.Chtimes(path, stamp, stamp); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hash := func() string {
+		t.Helper()
+		h, err := customLayerHash(dir, baseID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+
+	write(dockerfile, "FROM ${OROBOX_BASE_IMAGE}\n")
+	reference := hash()
+
+	if again := hash(); again != reference {
+		t.Errorf("the hash is not stable: %q then %q", reference, again)
+	}
+
+	write(dockerfile, "FROM ${OROBOX_BASE_IMAGE}\nRUN apk add --no-cache imagemagick\n")
+	if changed := hash(); changed == reference {
+		t.Error("an edited Dockerfile must change the hash")
+	}
+	reference = hash()
+
+	// A file the Dockerfile copies is part of the layer just as much as the Dockerfile is.
+	copied := filepath.Join(dir, "php.ini")
+	write(copied, "memory_limit=4096M\n")
+	if changed := hash(); changed == reference {
+		t.Error("a new file in the build context must change the hash")
+	}
+	reference = hash()
+
+	write(copied, "memory_limit=8192M\n")
+	if changed := hash(); changed == reference {
+		t.Error("an edited file in the build context must change the hash")
+	}
+	reference = hash()
+
+	if changed, err := customLayerHash(dir, "sha256:bbbb"); err != nil {
+		t.Fatal(err)
+	} else if changed == reference {
+		t.Error("a changed base image must change the hash")
+	}
+}
+
+func TestCustomLayerHashReportsAMissingContext(t *testing.T) {
+	if _, err := customLayerHash(filepath.Join(t.TempDir(), "absent"), "sha256:aaaa"); err == nil {
+		t.Error("expected an error for a build context that does not exist")
 	}
 }

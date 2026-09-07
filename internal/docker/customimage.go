@@ -5,9 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -24,8 +28,9 @@ const customImageRepository = "orobox-custom"
 // customImageHashLabel records what the layer was built from. The tag rendered into the
 // compose files has to be stable — they are written before Docker is ever consulted — so the
 // tag alone cannot say whether the layer is current. The label can: it holds a digest of the
-// generated Dockerfile *and* of the base image it was built on, so both a changed
-// `system_packages` list and a base image updated by `orobox self-update` invalidate it.
+// whole build context and of the base image the layer sits on, so a changed Dockerfile, a
+// changed file the Dockerfile copies, and a base image updated by `orobox self-update` all
+// invalidate it.
 const customImageHashLabel = "dev.orobox.custom-layer"
 
 // customImageOnce memoizes the check for the lifetime of the process. Every command that
@@ -36,8 +41,18 @@ var (
 	customImageErr  error
 )
 
+// forceCustomImageRebuild makes the next build ignore the Docker layer cache. `orobox up
+// --rebuild` sets it: a `RUN apk add` with no pinned version is a cache hit forever, so
+// picking up a new upstream package needs an explicit request.
+var forceCustomImageRebuild bool
+
+// SetForceCustomImageRebuild requests a cache-less rebuild of the project's image layer.
+func SetForceCustomImageRebuild(force bool) {
+	forceCustomImageRebuild = force
+}
+
 // BaseImageRef returns the published image tag for an Oro version and install type. This is
-// what the stack runs unless the project asks for extra system packages.
+// what the stack runs unless the project extends it with its own Dockerfile.
 func BaseImageRef(oroVersion, imageSuffix string) string {
 	return fmt.Sprintf("algoritmadev/orobox:%s-%s-latest", oroVersion, imageSuffix)
 }
@@ -77,13 +92,6 @@ func sanitizeImageName(name string) string {
 	return sanitized
 }
 
-// customImageContextDir is the build context for the layer. It is a directory of its own and
-// not the internal directory, whose `.env` files and certificates have no business being
-// uploaded to the Docker daemon on every build.
-func customImageContextDir() string {
-	return filepath.Join(config.GetInternalDir(), "custom")
-}
-
 // composeNeedsAppImage reports whether a `docker compose` invocation is one that needs the
 // application image to exist. The list is an allow-list rather than a skip-list: a subcommand
 // nobody thought of here costs an image that is built one step later, while a skip-list that
@@ -101,7 +109,7 @@ func composeNeedsAppImage(args []string) bool {
 }
 
 // ProjectImageRefs returns the published image this project's stack is based on and the image
-// its services actually run. They are the same reference unless `system_packages` puts a
+// its services actually run. They are the same reference unless a custom `dockerfile` puts a
 // locally built layer in between.
 func ProjectImageRefs() (base, app string) {
 	oroVersion := viper.GetString("oro_version")
@@ -112,29 +120,32 @@ func ProjectImageRefs() (base, app string) {
 	}
 
 	base = BaseImageRef(oroVersion, installType.ImageSuffix())
-	if len(config.GetSystemPackages()) == 0 {
+	if config.GetDockerfile() == "" {
 		return base, base
 	}
 	return base, CustomImageRef(oroVersion, installType.ImageSuffix())
 }
 
-// EnsureCustomImage builds the project's layer if `system_packages` asks for one and the
-// existing layer is not current. It is a no-op — and costs nothing beyond a single image
-// inspect — when the list is empty or the layer is already up to date.
+// EnsureCustomImage builds the project's image layer if `dockerfile` asks for one and the
+// existing layer is not current. It is a no-op — and costs nothing beyond stat'ing the build
+// context and one image inspect — when no Dockerfile is configured or the layer is up to date.
 func EnsureCustomImage() error {
 	customImageOnce.Do(func() { customImageErr = ensureCustomImage() })
 	return customImageErr
 }
 
 func ensureCustomImage() error {
-	if len(config.GetSystemPackages()) == 0 {
+	dockerfile := config.GetDockerfilePath()
+	if dockerfile == "" {
 		return nil
 	}
 
-	dockerfile := filepath.Join(customImageContextDir(), "Dockerfile")
 	content, err := os.ReadFile(dockerfile)
 	if err != nil {
-		return fmt.Errorf("could not read the generated %s: %w", dockerfile, err)
+		return fmt.Errorf("could not read the 'dockerfile' configured in .orobox.yaml (%s): %w", dockerfile, err)
+	}
+	if err := checkExtendsBaseImage(config.GetDockerfile(), content); err != nil {
+		return err
 	}
 
 	base, ref := ProjectImageRefs()
@@ -153,36 +164,108 @@ func ensureCustomImage() error {
 		}
 	}
 
-	want := customLayerHash(content, baseID)
-	if got, err := imageField(ref, fmt.Sprintf("{{index .Config.Labels %q}}", customImageHashLabel)); err == nil && got == want {
+	contextDir := filepath.Dir(dockerfile)
+	want, err := customLayerHash(contextDir, baseID)
+	if err != nil {
+		return err
+	}
+
+	if !forceCustomImageRebuild {
+		got, err := imageField(ref, fmt.Sprintf("{{index .Config.Labels %q}}", customImageHashLabel))
+		if err == nil && got == want {
+			return nil
+		}
+	}
+
+	return buildCustomImage(ref, base, contextDir, dockerfile, want)
+}
+
+// fromInstruction matches a Dockerfile `FROM` line and captures the image it names.
+var fromInstruction = regexp.MustCompile(`(?im)^\s*FROM\s+(\S+)`)
+
+// checkExtendsBaseImage refuses a Dockerfile whose final stage does not build on the published
+// Orobox image. Earlier stages are free to use anything — compiling a tool against a plain
+// Alpine and copying the result over is exactly what multi-stage builds are for — but the stage
+// that produces the runtime image has to be the Orobox one, or `oro_version` would decide
+// nothing and the stack would fail in ways that point nowhere near this config key.
+func checkExtendsBaseImage(configured string, content []byte) error {
+	matches := fromInstruction.FindAllStringSubmatch(string(content), -1)
+	if len(matches) == 0 {
+		return fmt.Errorf("%s contains no FROM instruction", configured)
+	}
+
+	final := matches[len(matches)-1][1]
+	if final == "$"+config.DockerfileBaseImageArg || final == "${"+config.DockerfileBaseImageArg+"}" {
 		return nil
 	}
 
-	return buildCustomImage(ref, want)
+	return fmt.Errorf(
+		"the final stage of %s must be `FROM ${%s}` (found %q). Orobox passes the published image "+
+			"for the configured oro_version in that build argument, so declare it above the "+
+			"instruction:\n\n    ARG %s\n    FROM ${%s}\n",
+		configured, config.DockerfileBaseImageArg, final, config.DockerfileBaseImageArg, config.DockerfileBaseImageArg)
 }
 
-// customLayerHash digests everything the layer's content depends on: the Dockerfile the
-// package list was rendered into, and the base image it sits on.
-func customLayerHash(dockerfile []byte, baseID string) string {
-	sum := sha256.New()
-	sum.Write(dockerfile)
-	sum.Write([]byte("\n"))
-	sum.Write([]byte(baseID))
-	return hex.EncodeToString(sum.Sum(nil))[:16]
-}
-
-func buildCustomImage(ref, hash string) error {
-	context := customImageContextDir()
-	args := []string{
-		"build",
-		"--label", customImageHashLabel + "=" + hash,
-		"-t", ref,
-		"-f", filepath.Join(context, "Dockerfile"),
-		context,
+// customLayerHash digests everything the layer's content depends on: the base image it sits on
+// and every file in the build context, by path, size and modification time. Contents are not
+// read — a touched file that Docker's own cache then finds unchanged costs one cached build,
+// while reading a large context on every command would cost far more.
+func customLayerHash(contextDir, baseID string) (string, error) {
+	type entry struct {
+		path string
+		size int64
+		mod  int64
 	}
 
+	var entries []entry
+	err := filepath.WalkDir(contextDir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(contextDir, p)
+		if err != nil {
+			return err
+		}
+		entries = append(entries, entry{filepath.ToSlash(rel), info.Size(), info.ModTime().UnixNano()})
+		return nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("could not read the image layer build context %s: %w", contextDir, err)
+	}
+
+	// WalkDir is already lexical, but the hash must not depend on that guarantee.
+	sort.Slice(entries, func(i, j int) bool { return entries[i].path < entries[j].path })
+
+	sum := sha256.New()
+	sum.Write([]byte(baseID))
+	for _, e := range entries {
+		sum.Write([]byte("\n" + e.path + "\x00" + strconv.FormatInt(e.size, 10) + "\x00" + strconv.FormatInt(e.mod, 10)))
+	}
+	return hex.EncodeToString(sum.Sum(nil))[:16], nil
+}
+
+func buildCustomImage(ref, base, contextDir, dockerfile, hash string) error {
+	args := []string{
+		"build",
+		"--build-arg", config.DockerfileBaseImageArg + "=" + base,
+		"--label", customImageHashLabel + "=" + hash,
+		"-t", ref,
+		"-f", dockerfile,
+	}
+	if forceCustomImageRebuild {
+		args = append(args, "--no-cache", "--pull")
+	}
+	args = append(args, contextDir)
+
 	debug := viper.GetBool("debug")
-	message := "Building the project image layer (system_packages)..."
+	message := fmt.Sprintf("Building the project image from %s...", config.GetDockerfile())
 	if !debug {
 		utils.StartLoader(message)
 		defer utils.StopLoader()
@@ -196,7 +279,7 @@ func buildCustomImage(ref, hash string) error {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("could not build %s: %w", ref, err)
+			return fmt.Errorf("could not build %s from %s: %w", ref, config.GetDockerfile(), err)
 		}
 		return nil
 	}
@@ -207,7 +290,7 @@ func buildCustomImage(ref, hash string) error {
 	if err := cmd.Run(); err != nil {
 		utils.StopLoader()
 		fmt.Print(output.String())
-		return fmt.Errorf("could not build %s: %w", ref, err)
+		return fmt.Errorf("could not build %s from %s: %w", ref, config.GetDockerfile(), err)
 	}
 	return nil
 }

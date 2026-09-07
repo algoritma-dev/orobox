@@ -12,7 +12,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var cleanBeforeUp bool
+var (
+	cleanBeforeUp bool
+	rebuildImage  bool
+)
 
 var upCmd = &cobra.Command{
 	Use:   "up",
@@ -22,6 +25,7 @@ var upCmd = &cobra.Command{
 	SilenceUsage: true,
 	RunE: func(_ *cobra.Command, _ []string) error {
 		certificates.InstallSslCertificates()
+		docker.SetForceCustomImageRebuild(rebuildImage)
 		configChanged := docker.EnsureDockerCompose()
 
 		if cleanBeforeUp {
@@ -110,4 +114,5 @@ var upCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(upCmd)
 	upCmd.Flags().BoolVarP(&cleanBeforeUp, "clean", "c", false, "Clean up environment before starting")
+	upCmd.Flags().BoolVar(&rebuildImage, "rebuild", false, "Rebuild the image from the project's dockerfile ignoring the Docker cache")
 }

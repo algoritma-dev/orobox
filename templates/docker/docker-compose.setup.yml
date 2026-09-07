@@ -1,9 +1,9 @@
 x-templates:
   oro-app: &oro-app
     image: "{{.AppImage}}"
-    {{- if .SystemPackages}}
-    # Built locally by orobox from `system_packages`, so it exists in no registry: a
-    # pull would go looking for it on Docker Hub and fail with an unrelated error.
+    {{- if .CustomDockerfile}}
+    # Built locally by orobox from the project's own {{.CustomDockerfile}}, so it exists in no
+    # registry: a pull would go looking for it on Docker Hub and fail with an unrelated error.
     pull_policy: never
     {{- end}}
     env_file: .env

@@ -35,9 +35,7 @@ commands:
     command: "php bin/console oro:test:run"
     description: "Runs the Shippy Pro tests suite"
     service: "application"
-system_packages:
-  - imagemagick
-  - poppler-utils
+dockerfile: docker/Dockerfile
 composer:
   # Tokens for private repositories. Mirrors Composer's COMPOSER_AUTH schema and is
   # injected only into the containers that run composer (never committed or baked
@@ -106,27 +104,50 @@ domains:
 
   > The `db` and `db-test` containers still read `POSTGRES_*` from Orobox's internal `.env` and `.env.test`. If you change `ORO_DB_*` in your own `.env-app.local`, mirror it there, or the application and the database will disagree on credentials.
 
-### Extra system packages (`system_packages`)
+### Custom Dockerfile (`dockerfile`)
 
-Orobox runs a published image, so the system libraries it ships are the same for everyone. A project that needs more of them — an ImageMagick binding, `pdftotext`, a client library a private extension links against — lists them here:
+Orobox runs a published image, so what it ships is the same for everyone. A project that depends on something more — a system library, `pdftotext`, a PECL extension, a CLI tool it shells out to — points `dockerfile` at a Dockerfile of its own:
 
 ```yaml
-system_packages:
-  - imagemagick
-  - poppler-utils
-  - libsodium
+dockerfile: docker/Dockerfile
 ```
 
-The entries are [Alpine](https://pkgs.alpinelinux.org/packages) package names, since the image is Alpine-based. A version constraint (`gnu-libiconv=1.15-r3`, `icu>72`) and a repository tag (`php84-pecl-redis@testing`) are accepted; anything else is refused when the config file is read, because these end up in an `apk add` line.
+The path is relative to the directory holding `.orobox.yaml`. The file belongs to your repository: commit it, review it, change it like any other source file.
+
+Its **final stage must build on the image Orobox publishes**, which arrives in the `OROBOX_BASE_IMAGE` build argument:
+
+```dockerfile
+ARG OROBOX_BASE_IMAGE
+FROM ${OROBOX_BASE_IMAGE}
+
+RUN apk add --no-cache imagemagick poppler-utils
+RUN install-php-extensions redis
+```
+
+`ARG` before `FROM` is required by Docker itself — that is the only way a `FROM` can read a build argument. Orobox refuses a Dockerfile whose last `FROM` names anything else, because a hardcoded tag would make `oro_version` decide nothing and break the stack somewhere far from this config key. Bumping `oro_version` in `.orobox.yaml` therefore moves your layer with it, and the Dockerfile never needs editing for an Oro upgrade.
+
+Earlier stages are unconstrained, so compiling something and copying the result over works as usual:
+
+```dockerfile
+ARG OROBOX_BASE_IMAGE
+
+FROM golang:1.24-alpine AS tool
+RUN go install example.com/some/tool@latest
+
+FROM ${OROBOX_BASE_IMAGE}
+COPY --from=tool /go/bin/tool /usr/local/bin/tool
+```
 
 How it works, and what it costs:
 
-- Orobox builds a **thin layer on top of the published image**, in a single `apk add`, and points every service at it. Nothing about the published image changes, and no project ever rebuilds PHP or its extensions.
-- The layer is rebuilt automatically. There is **no separate command and no need to re-run `init`**: the next `orobox up` / `run` / `test` notices that either the package list or the base image changed and rebuilds before starting anything. `orobox self-update` therefore only pulls, and the layer follows on the next command.
+- The **build context is the directory containing the Dockerfile**, not the repository root. Put the files you `COPY` next to it (`docker/php.ini`, `docker/entrypoint-extra.sh`) — a context scoped this way keeps builds fast and rebuild detection exact.
+- Rebuilds are automatic. There is **no separate command and no need to re-run `init`**: the next `orobox up` / `run` / `test` notices that the Dockerfile, a file in its build context, or the base image changed, and rebuilds before starting anything. `orobox self-update` therefore only pulls, and the layer follows on the next command.
+- When nothing changed, the check costs a directory stat and one image inspect — no build runs.
+- `orobox up --rebuild` forces a build with `--no-cache --pull`, for what Docker's cache cannot see: an unpinned `RUN apk add` that should pick up a newer package.
+- The image is tagged `orobox-custom/<project>:<oro_version>-<type>` and exists only on your machine. It is per checkout, so two projects on the same host never share one.
 - Removing the key puts the project straight back on the published image, with no local build at all.
-- The layer is tagged `orobox-custom/<project>:<oro_version>-<type>` and exists only on your machine. It is per checkout, so two projects on the same host never share one.
 
-> This adds system packages, not PHP extensions: the layer installs prebuilt packages and compiles nothing. Ask for a PHP extension by opening an issue — it belongs in the published image, where every project gets it without a local build.
+> Build the image, not the code. Your sources are bind-mounted into the container at run time, so `COPY`ing them into the image gains nothing and makes every edit a rebuild. Use this for tools and libraries.
 
 ### Configuration Fields
 - `type`: Installation type — `bundle` (default), `project` or `demo`. See [Installation types](#installation-types-type).
@@ -157,7 +178,7 @@ How it works, and what it costs:
     - `command`: (string) The actual command to execute (e.g., `php bin/console oro:test:run`).
     - `description`: (string) Description of the command (displayed in help).
     - `service`: (string, optional) Default service to run the command in (e.g., `application`).
-- `system_packages`: (list) Extra Alpine packages installed into the application image by a locally built layer. See [Extra system packages](#extra-system-packages-system_packages).
+- `dockerfile`: (string) Path, relative to `.orobox.yaml`, of a project-owned Dockerfile that extends the published image. See [Custom Dockerfile](#custom-dockerfile-dockerfile).
 - `composer`: (map) Composer-specific settings.
     - `repositories`: (list, `bundle` type only) Additional Composer repositories to register in the OroCommerce project during installation. Accepts the same format as Composer's [`repositories`](https://getcomposer.org/doc/05-repositories.md) field (VCS, Composer, path, package, etc.). These are merged with any existing repositories in the project's `composer.json`. Required when the bundle depends on packages hosted in private repositories. `project` and `demo` installs declare their repositories in the application's own `composer.json` and ignore this key.
     - `auth`: (map) Credentials for private repositories, using Composer's [`COMPOSER_AUTH`](https://getcomposer.org/doc/03-cli.md#composer-auth) schema (`github-oauth`, `gitlab-token`, `http-basic`, `bearer`, ...). Serialized to JSON and injected as the `COMPOSER_AUTH` environment variable only into the containers that run composer, so tokens are never committed or baked into long-running services.

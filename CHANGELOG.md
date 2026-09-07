@@ -10,11 +10,14 @@ group commits by theme rather than listing every commit. There is no stable `1.0
 
 ## [Unreleased]
 
-- Added `system_packages` to `.orobox.yaml`: extra Alpine packages a project needs inside the
-  application image. Orobox builds a thin layer on top of the published image and rebuilds it
-  automatically when the list or the base image changes, so there is no new command and no need
-  to re-run `init`. Projects that do not use the key keep running the published image with no
-  local build.
+- Added `dockerfile` to `.orobox.yaml`: a project-owned Dockerfile that extends the published
+  image, so a project can install the system libraries, PHP extensions and tools it depends on.
+  Orobox passes the published image for the configured `oro_version` in the `OROBOX_BASE_IMAGE`
+  build argument and requires the Dockerfile's final stage to use it, so an Oro upgrade never
+  means editing the Dockerfile. The image is rebuilt automatically when the Dockerfile, a file
+  in its build context or the base image changes — no new command and no need to re-run `init`
+  — and `orobox up --rebuild` forces a cache-less build. Projects that do not use the key keep
+  running the published image with no local build.
 
 ## [1.0.0-rc30] - 2026-09-02
 
