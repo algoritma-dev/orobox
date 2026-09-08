@@ -162,7 +162,7 @@ func Tools(opts ToolsOptions) []Tool {
 	// mergedConfig. The ignore files are the exception, and the one there explains why.
 	phpstanConfig := phpstanConfigRef(sourceRoot, analyzePath)
 	rectorConfig := rectorConfigRef(sourceRoot)
-	phpCSFixerConfig := mergedConfig(sourceRoot, qaDir, ".php-cs-fixer.dist.php", phpCSFixerMerge)
+	phpCSFixerConfig := phpCSFixerConfigRef(sourceRoot)
 	twigCSFixerConfig := mergedConfig(sourceRoot, qaDir, ".twig-cs-fixer.php", twigCSFixerMerge)
 	eslintConfig := mergedConfig(sourceRoot, oroRoot, ".eslintrc.yml", yamlExtendsMerge)
 	eslintIgnore := mergedConfig(sourceRoot, oroRoot, ".eslintignore", nil)
@@ -654,6 +654,16 @@ func ComposerInstallCommand(packages []string) string {
 // An existing manifest is left alone: a project that committed vendor-bin/qa/package.json pinned
 // the tool versions there on purpose, exactly as ComposerInstallCommand treats the Composer one.
 func JSInstallCommand(plan InstallPlan) string {
+	// Nothing to install is a normal state, not an empty edge case: the only JS packages here are
+	// ESLint's formatter and its gap fillers, so a project that enables stylelint but not eslint
+	// reaches this with an empty list. `pnpm add -D` with no arguments is a hard error
+	// (ERR_PNPM_MISSING_PACKAGE_NAME) and `npm install --save-dev` would silently install the
+	// application's own tree instead, so the command is not produced at all and its callers skip
+	// the step.
+	if len(plan.JSPackages) == 0 {
+		return ""
+	}
+
 	qaDir := config.QaToolsDir
 	manifest := qaDir + "/package.json"
 

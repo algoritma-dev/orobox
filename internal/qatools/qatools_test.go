@@ -715,6 +715,28 @@ func TestJSInstallCommandPinsTheInstallToTheQaToolsDir(t *testing.T) {
 	}
 }
 
+// TestJSInstallCommandIsEmptyWithoutPackagesToInstall covers stylelint enabled on its own. The QA
+// namespace installs ESLint's formatter and its gap fillers and nothing else — stylelint's
+// formatter is a file Orobox writes — so that combination leaves the package list empty. The
+// install line must then not be produced at all: `pnpm add -D` with no package name aborts with
+// ERR_PNPM_MISSING_PACKAGE_NAME, which is what failed the whole QA init.
+func TestJSInstallCommandIsEmptyWithoutPackagesToInstall(t *testing.T) {
+	viper.Set("test.qa.eslint", false)
+	viper.Set("test.qa.stylelint", true)
+	defer func() {
+		viper.Set("test.qa.eslint", nil)
+		viper.Set("test.qa.stylelint", nil)
+	}()
+
+	plan := NewInstallPlan("7.0")
+	if len(plan.JSPackages) != 0 {
+		t.Fatalf("stylelint alone plans no JS package of its own, got %v", plan.JSPackages)
+	}
+	if command := JSInstallCommand(plan); command != "" {
+		t.Errorf("an install with no packages is still generated:\n%s", command)
+	}
+}
+
 // TestJSToolsRunOroCommercesOwnLinters pins both halves of the decision: the binary is the
 // application's, and so is the tree the linters resolve bare names against. A QA-local linter has
 // to guess a version for a ruleset OroCommerce owns; the application's copy is the one that

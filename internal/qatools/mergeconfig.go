@@ -285,6 +285,35 @@ return static function (RectorConfig $rectorConfig): void {
 `, baseFile, projectFile, phpList(oroGeneratedSources()))
 }
 
+// phpCSFixerConfigRef resolves PHP-CS-Fixer's configuration. Like PHPStan's and Rector's it is
+// always the generated wrapper, never the base or the project file directly, because Orobox has
+// two things of its own to contribute to it: the rules it turns off for every project (see
+// phpUnitAttributeRules) and the finder narrowing that keeps the tool off the sources OroCommerce
+// generates (see oroGeneratedSources).
+//
+// Resolving through the generic project-or-base fallback dropped both in exactly the case that
+// matters most. A checkout with no .php-cs-fixer.dist.php of its own — which is what the pipeline
+// engine sees, since it installs the tools itself and never runs `orobox qa-init` — handed the
+// tool the base standard as-is, and the standard's @PHPUnit100Migration:risky set then rewrote
+// `@dataProvider giveMeData` into an attribute PHPUnit 9.6 does not read, which is the rewrite the
+// override exists to prevent.
+//
+// Both files stay optional, and the wrapper decides per file rather than the shell: which side is
+// present changes where the overrides are layered, not whether they are applied.
+func phpCSFixerConfigRef(sourceRoot string) configRef {
+	baseFile := config.QaToolsDir + "/.php-cs-fixer.dist.php"
+	projectFile := sourceRoot + "/.php-cs-fixer.dist.php"
+	mergedFile := mergedDir + "/.php-cs-fixer.dist.php"
+
+	b64 := base64.StdEncoding.EncodeToString([]byte(phpCSFixerMerge(baseFile, projectFile)))
+
+	return configRef{
+		Path:    mergedFile,
+		Setup:   fmt.Sprintf("mkdir -p %s && printf '%%s' '%s' | base64 -d > %s", mergedDir, b64, mergedFile),
+		Sources: []string{baseFile, projectFile},
+	}
+}
+
 // phpCSFixerMerge merges the two PHP-CS-Fixer configs rule by rule, the project's winning on the
 // rules it names, with Orobox's own rule overrides in between (see phpUnitAttributeRules).
 //
@@ -308,7 +337,11 @@ declare(strict_types=1);
 use PhpCsFixer\ConfigInterface;
 use Symfony\Component\Finder\Finder;
 
-$load = static function (string $file): ConfigInterface {
+$load = static function (string $file): ?ConfigInterface {
+    if (!is_file($file)) {
+        return null;
+    }
+
     $config = require $file;
 
     if (!$config instanceof ConfigInterface) {
@@ -323,15 +356,35 @@ $load = static function (string $file): ConfigInterface {
     return $config;
 };
 
-$base = $load('%s');
-$project = $load('%s');
+$baseFile = '%s';
+$projectFile = '%s';
+
+$base = $load($baseFile);
+$project = $load($projectFile);
+
+if ($base === null && $project === null) {
+    throw new RuntimeException(sprintf(
+        'Orobox found no PHP-CS-Fixer config to run: neither %%s nor %%s exists.',
+        $baseFile,
+        $projectFile
+    ));
+}
+
+// The project's file owns everything that is not a rule, and falls back to the base one when the
+// project has none: a Config is what carries the finder, and the tool needs one either way.
+$config = $project ?? $base;
 
 // See phpUnitAttributeRules: between the two sides, so the shared standard cannot switch the
-// rules on and the project can still switch them back.
-$project->setRules(array_merge($base->getRules(), [%s], $project->getRules()));
-$project->setRiskyAllowed($base->getRiskyAllowed() || $project->getRiskyAllowed());
+// rules on and the project can still switch them back. A missing side contributes no rules, which
+// keeps the override in force rather than dropping it with the file that was not there.
+$config->setRules(array_merge(
+    $base === null ? [] : $base->getRules(),
+    [%s],
+    $project === null ? [] : $project->getRules()
+));
+$config->setRiskyAllowed(($base !== null && $base->getRiskyAllowed()) || ($project !== null && $project->getRiskyAllowed()));
 
-$finder = $project->getFinder();
+$finder = $config->getFinder();
 if ($finder instanceof Finder) {
     $generated = [%s];
 
@@ -339,10 +392,10 @@ if ($finder instanceof Finder) {
         return !in_array((string) $file->getRealPath(), $generated, true);
     });
 
-    $project->setFinder($finder);
+    $config->setFinder($finder);
 }
 
-return $project;
+return $config;
 `, baseFile, projectFile, phpDisabledRules(phpUnitAttributeRules()), phpList(oroGeneratedSources()))
 }
 

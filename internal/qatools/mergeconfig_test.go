@@ -117,7 +117,7 @@ func TestMergedDocumentsLayerProjectOverBase(t *testing.T) {
 		{
 			tool: "php-cs-fixer",
 			base: config.QaToolsDir + "/.php-cs-fixer.dist.php",
-			want: []string{"ConfigInterface", "array_merge($base->getRules(), [", "], $project->getRules())", "setRiskyAllowed"},
+			want: []string{"ConfigInterface", "$base === null ? [] : $base->getRules()", "$project === null ? [] : $project->getRules()", "setRiskyAllowed"},
 		},
 		{
 			tool: "twig-cs-fixer",
@@ -346,9 +346,53 @@ func TestPhpCSFixerMergeDisablesThePHPUnitAttributeRules(t *testing.T) {
 		}
 	}
 
-	want := "array_merge($base->getRules(), [" + phpDisabledRules(phpUnitAttributeRules()) + "], $project->getRules())"
-	if !strings.Contains(doc, want) {
-		t.Errorf("the overrides are not layered between the base and the project rules, want %q:\n%s", want, doc)
+	// Precedence is positional: PHP-CS-Fixer expands a ruleset where it is named, so an override
+	// after the base's rules cannot be switched on by the standard, and one before the project's
+	// can still be switched back by a project that has moved to PHPUnit 10.
+	baseAt := strings.Index(doc, "$base === null ? [] : $base->getRules()")
+	overrideAt := strings.Index(doc, phpDisabledRules(phpUnitAttributeRules()))
+	projectAt := strings.Index(doc, "$project === null ? [] : $project->getRules()")
+	if baseAt < 0 || overrideAt < 0 || projectAt < 0 || baseAt > overrideAt || overrideAt > projectAt {
+		t.Errorf("the overrides are not layered between the base and the project rules:\n%s", doc)
+	}
+}
+
+// TestPhpCSFixerAlwaysUsesTheGeneratedWrapper covers the other half of issue #11, still reachable
+// after the override was added: the generic project-or-base fallback handed the base standard
+// straight to the tool whenever the checkout had no .php-cs-fixer.dist.php of its own — the
+// pipeline engine always, a developer's checkout until qa-init writes the stub — and the base
+// standard is the side that switches php_unit_attributes on. The override and the generated-source
+// exclusion only exist inside the wrapper, so the wrapper is what the tool always reads.
+func TestPhpCSFixerAlwaysUsesTheGeneratedWrapper(t *testing.T) {
+	ref := phpCSFixerConfigRef(bundleRoot)
+
+	merged := mergedDir + "/.php-cs-fixer.dist.php"
+	if ref.Path != merged {
+		t.Errorf("php-cs-fixer config = %q, want the generated wrapper at %q", ref.Path, merged)
+	}
+	// Unconditional: no `if [ -f ... ]` guard may gate the write, or the fallback is back.
+	if strings.Contains(ref.Setup, "if [ -f ") {
+		t.Errorf("the wrapper must be written unconditionally: %s", ref.Setup)
+	}
+	if !strings.Contains(ref.Setup, "> "+merged) {
+		t.Errorf("setup line does not write the wrapper: %s", ref.Setup)
+	}
+
+	doc := decodeMerged(t, ref.Setup)
+	// Either half may be absent, so neither may be required — and the overrides have to survive
+	// the absence, which is the whole point.
+	if !strings.Contains(doc, "if (!is_file($file)) {") {
+		t.Errorf("the wrapper requires both halves to exist:\n%s", doc)
+	}
+	for _, rule := range phpUnitAttributeRules() {
+		if !strings.Contains(doc, "'"+rule+"' => false") {
+			t.Errorf("the wrapper does not disable %s:\n%s", rule, doc)
+		}
+	}
+	// The inputs, not the resolved path: whether the tool has a configuration at all is still
+	// asked of the two files the wrapper reads.
+	if len(ref.Sources) != 2 {
+		t.Errorf("config sources = %v, want the base and the project file", ref.Sources)
 	}
 }
 

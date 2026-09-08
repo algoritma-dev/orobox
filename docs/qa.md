@@ -187,8 +187,9 @@ overwrites a file that is already there.
 
 The merged file is generated into `vendor-bin/qa/merged/` on every run; nothing is written to your
 checkout. When you ship no config of your own, the base one is used directly — except for
-`rector.php` and `phpstan.neon`, which always go through the generated wrapper because Orobox has
-something of its own to add to each: a skip list for Rector, the excluded trees for PHPStan (see
+`rector.php`, `phpstan.neon` and `.php-cs-fixer.dist.php`, which always go through the generated
+wrapper because Orobox has something of its own to add to each: a skip list for Rector, the
+excluded trees for PHPStan, the PHPUnit override and the same exclusion for PHP-CS-Fixer (see
 below).
 
 **Vendored trees are excluded from the analysis.** `vendor`, `vendor-oro` and `node_modules` hold
@@ -205,7 +206,10 @@ annotations into PHPUnit 10 attributes and deletes the annotation it replaced �
 giveMeData` becomes `#[PHPUnit\Framework\Attributes\DataProvider('giveMeData')]`. Every Oro line
 pins PHPUnit 9.6, which reads neither, so the rewritten test loses its data provider. Orobox turns
 the rule off between the base standard and your config: name it in your own
-`.php-cs-fixer.dist.php` to take it back once your tests run on PHPUnit 10.
+`.php-cs-fixer.dist.php` to take it back once your tests run on PHPUnit 10. The override lives in
+the generated wrapper, and PHP-CS-Fixer always reads that wrapper — including in a checkout with no
+`.php-cs-fixer.dist.php` of its own, which is what the pipeline engine sees, since it installs the
+tools itself and never runs `orobox qa-init`.
 
 **Sources OroCommerce generates are excluded.** `src/AppKernel.php` is written by the OroCommerce
 application skeleton and shipped again with every release, so reformatting it is work the next

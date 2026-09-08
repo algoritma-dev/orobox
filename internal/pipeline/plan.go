@@ -826,8 +826,9 @@ func qaToolCommands(oroVersion string) []string {
 		}
 	}
 
-	if plan.NeedsJSTools {
-		commands = append(commands, qatools.JSInstallCommand(plan))
+	// Empty when the enabled tools need no JS package of their own; see JSInstallCommand.
+	if jsInstall := qatools.JSInstallCommand(plan); jsInstall != "" {
+		commands = append(commands, jsInstall)
 	}
 
 	return commands

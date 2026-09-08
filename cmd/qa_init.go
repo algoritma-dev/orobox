@@ -150,8 +150,10 @@ func runQaInitCommand(conf config.OroConfig) error {
 	// 2. Install JS packages in the QA tools namespace directory. The install runs through the
 	//    shared shell line rather than as a bare exec because where the packages land is decided
 	//    by the manifest that line writes first; see JSInstallCommand.
-	if plan.NeedsJSTools {
-		npmArgs := []string{"exec", "-T", "application", "sh", "-c", qatools.JSInstallCommand(plan)}
+	//    The command is empty when the enabled tools need no package of their own — stylelint
+	//    without eslint — and then there is nothing to run.
+	if jsInstall := qatools.JSInstallCommand(plan); jsInstall != "" {
+		npmArgs := []string{"exec", "-T", "application", "sh", "-c", jsInstall}
 		if err := docker.RunComposeCommandSilently(fmt.Sprintf("Installing %s QA packages...", strings.ToUpper(plan.JSManager)), npmArgs...); err != nil {
 			utils.PrintError(fmt.Sprintf("Failed to install %s packages: %v", plan.JSManager, err))
 			return err
