@@ -15,7 +15,7 @@ import (
 var cfgFile string
 
 // Version is the current version of the tool.
-var Version = "1.0.0-rc32"
+var Version = "1.0.0-rc33"
 
 var rootCmd = &cobra.Command{
 	Use:     "orobox",
