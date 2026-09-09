@@ -17,7 +17,7 @@ jobs:
   internal-links:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Relative links and same-file/#anchor fragments only. This must stay green: a broken
       # internal link (e.g. a moved docs/*.md file, a renamed heading) is a real regression.
@@ -34,7 +34,7 @@ jobs:
   external-links:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # External URLs are prone to false positives (rate limiting, transient outages), so this
       # is informational only — check the job summary rather than failing the build on it.
