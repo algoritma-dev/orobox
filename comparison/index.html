@@ -1,0 +1,1071 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Docker-based local development environment for OroCommerce.">
+      
+      
+      
+        <link rel="canonical" href="https://algoritma-dev.github.io/orobox/comparison/">
+      
+      
+        <link rel="prev" href="../development/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Comparison with alternatives - Orobox</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#comparison-with-alternatives" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Orobox" class="md-header__button md-logo" aria-label="Orobox" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Orobox
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Comparison with alternatives
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/algoritma-dev/orobox" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    algoritma-dev/orobox
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Orobox" class="md-nav__button md-logo" aria-label="Orobox" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Orobox
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/algoritma-dev/orobox" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    algoritma-dev/orobox
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../qa/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    QA tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../debugging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Debugging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../domains-and-ssl/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Domains and SSL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Internal structure & development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Comparison with alternatives
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Comparison with alternatives
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#comparison-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Comparison table
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-official-oro-dev-environment-documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Official Oro dev-environment documentation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-community-docker-compose-stacks-github" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Community Docker Compose stacks (GitHub)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-a-fully-manual-docker-compose-setup-no-tool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. A fully manual Docker Compose setup (no tool)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-generic-local-dev-tools-ddev-lando-warden" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Generic local-dev tools: DDEV, Lando, Warden
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-not-to-use-orobox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When not to use Orobox
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sources-consulted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sources consulted
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#comparison-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Comparison table
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-official-oro-dev-environment-documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Official Oro dev-environment documentation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-community-docker-compose-stacks-github" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Community Docker Compose stacks (GitHub)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-a-fully-manual-docker-compose-setup-no-tool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. A fully manual Docker Compose setup (no tool)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-generic-local-dev-tools-ddev-lando-warden" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Generic local-dev tools: DDEV, Lando, Warden
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-not-to-use-orobox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When not to use Orobox
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sources-consulted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sources consulted
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<p><a href="../README.md">← Back to README</a> · <a href="../">Documentation index</a></p>
+<h1 id="comparison-with-alternatives">Comparison with alternatives<a class="headerlink" href="#comparison-with-alternatives" title="Permanent link">&para;</a></h1>
+<p>This page compares Orobox to the other paths a developer setting up an OroCommerce environment
+is likely to consider: the official Oro documentation, community Docker Compose stacks found on
+GitHub, a hand-rolled Docker Compose file, and generic PHP local-dev tools (DDEV, Lando, Warden).</p>
+<p><strong>How to read this page.</strong> Every factual claim about a third-party project below is either backed
+by a link to a page or repository actually fetched or searched while writing this comparison, or
+is explicitly marked <strong>not verified</strong>. Where "not verified" appears, it means the search/fetch
+performed did not surface a documented answer — not that the feature is absent. Treat those cells
+as open questions to check yourself before deciding, not as "no". Nothing here is meant to
+disparage the alternatives; several of them solve a broader problem than Orobox does (a generic
+PHP/CMS stack for many frameworks, not OroCommerce specifically), and picking a narrower or wider
+tool is a legitimate tradeoff either way.</p>
+<h2 id="comparison-table">Comparison table<a class="headerlink" href="#comparison-table" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Dimension</th>
+<th>Orobox</th>
+<th>Official Oro dev-environment docs</th>
+<th>Community Compose stacks (GitHub)</th>
+<th>Manual Docker Compose (no tool)</th>
+<th>DDEV</th>
+<th>Lando</th>
+<th>Warden</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Time to first boot</td>
+<td><code>orobox create</code> → <code>init</code> → <code>up</code>; restores a pre-seeded DB dump instead of a full <code>oro:install</code> when the image's dump matches the target version <a href="../commands/#pre-installed-database">(docs/commands.md)</a></td>
+<td>Manual, multi-step: clone, install services, run Composer/<code>oro:install</code> yourself; the "Docker and Symfony Server" guide runs only backing services in Docker and PHP/Node on the host <a href="https://doc.oroinc.com/backend/setup/dev-environment/docker-and-symfony/">oroinc docs</a></td>
+<td>Varies per repository; none seen ship a pre-seeded database, so a full <code>oro:install</code> is the default path (not verified for every repo — see <a href="#2-community-docker-compose-stacks-github">Community stacks</a>)</td>
+<td>Slowest: you write the Compose file, wire the network, and run the full Oro installer yourself, from scratch</td>
+<td>Fast for its supported presets; OroCommerce is not one of them, so first boot on Oro means writing a custom config from the generic PHP type (not verified how long that takes)</td>
+<td>Fast for its own recipes; no official or actively maintained OroCommerce recipe found (see below)</td>
+<td>Fast for its supported frameworks; OroCommerce is not one of them</td>
+</tr>
+<tr>
+<td>Multi-version OroCommerce support (5.1–7.0)</td>
+<td>Yes — <code>5.1</code>, <code>6.0</code>, <code>6.1</code>, <code>7.0</code> are the versions Orobox builds images and dumps for (<code>internal/config/config.go: SupportedOroVersions</code>)</td>
+<td>The documentation site itself is versioned per Oro release (5.1, 6.0, 6.1, 7.0, 7.1-dev selectors seen on <a href="https://doc.oroinc.com/backend/setup/dev-environment/">doc.oroinc.com</a>), but that is per-version docs, not one tool that provisions any of them on demand</td>
+<td>Not verified in general; the repositories found each target a fixed, often old, version (e.g. <code>vtsykun/docker-orocommerce</code> lists 1.6/3.1/4.1/4.2 — <a href="https://github.com/vtsykun/docker-orocommerce">repo</a>)</td>
+<td>N/A — whatever you build supports whatever version you wire it for</td>
+<td>Not applicable — no OroCommerce preset exists to version</td>
+<td>Not applicable — no maintained OroCommerce recipe exists to version</td>
+<td>Not applicable — no OroCommerce environment type exists to version</td>
+</tr>
+<tr>
+<td>Bundle / project / demo modes</td>
+<td>Yes — <code>bundle</code> (grafted onto a prebuilt app), <code>project</code> (full app checkout), <code>demo</code> (prod-tuned) are first-class <code>type:</code> values <a href="../configuration/#installation-types-type">(configuration.md)</a></td>
+<td>No equivalent concept; the guides set up "an application" checkout (closest to Orobox's <code>project</code>) and a separate demo-only Docker Compose repo (<a href="https://github.com/oroinc/orocommerce-application-demo-docker">oroinc/orocommerce-application-demo-docker</a>)</td>
+<td>Not verified; the repositories found each ship one docker-compose.yml for "an OroCommerce app", with no bundle-grafting concept observed</td>
+<td>N/A — you decide the shape yourself</td>
+<td>No concept of bundle/project/demo modes</td>
+<td>No concept of bundle/project/demo modes</td>
+<td>No concept of bundle/project/demo modes</td>
+</tr>
+<tr>
+<td>Included QA toolchain</td>
+<td>Yes — PHPStan (with baseline), Rector, PHP-CS-Fixer, Twig-CS-Fixer, ESLint, Stylelint, preconfigured and layered on Oro's own standards, installed by <code>qa-init</code> and run by <code>qa</code> <a href="../qa/">(qa.md)</a></td>
+<td>Documentation <em>recommends</em> configuring PHPStorm with Symfony/Oro plugins, PHP_CodeSniffer, PHP Mess Detector, PHP-CS-Fixer and PHPUnit — IDE setup guidance, not an automated, versioned toolchain shipped with the environment (<a href="https://doc.oroinc.com/backend/setup/dev-environment/">doc.oroinc.com</a>)</td>
+<td>Not verified — no evidence found of a bundled/preconfigured QA toolchain in the repositories checked</td>
+<td>None — you install and wire every tool yourself</td>
+<td>Not Oro-specific; DDEV provides the container platform, not an Oro QA toolchain</td>
+<td>Not Oro-specific</td>
+<td>Not Oro-specific</td>
+</tr>
+<tr>
+<td>CI pipeline generation</td>
+<td>Yes — <code>ci-init</code> writes a ready-to-run GitLab CI pipeline (<code>lint</code>, <code>test</code>, <code>deploy</code> jobs) from <code>.orobox.yaml</code>, <code>project</code> type only <a href="../deployment/#14-ci-initialization-ci-init">(deployment.md)</a></td>
+<td>Jenkins CI is documented as a configuration option (<a href="https://doc.oroinc.com/backend/setup/jenkins/">doc.oroinc.com/backend/setup/jenkins</a>), but this is a setup guide, not a generator invoked from a project's own config</td>
+<td>Not verified</td>
+<td>None</td>
+<td>Not Oro-specific; no generator for an Oro pipeline</td>
+<td>Not Oro-specific</td>
+<td>Not Oro-specific</td>
+</tr>
+<tr>
+<td>Deploy tooling</td>
+<td>Yes — <code>deploy-init</code> wires PHP Deployer with an Oro-specific recipe, <code>deploy</code> runs build/check/release through Dagger, <code>project</code> type only <a href="../deployment/">(deployment.md)</a></td>
+<td>General Symfony deployment guidance is referenced (lock <code>composer.lock</code>, warm prod cache, configure cron/websocket); no dedicated Oro deploy-tool integration was found in the pages checked (not verified beyond that)</td>
+<td>Not verified</td>
+<td>None</td>
+<td>Not Oro-specific</td>
+<td>Not Oro-specific</td>
+<td>Not Oro-specific</td>
+</tr>
+<tr>
+<td>Xdebug preconfiguration</td>
+<td>Yes — preinstalled but disabled by default, hot-patchable per running container with <code>orobox xdebug enable/disable</code>, independently for web, CLI, consumer and cron <a href="../debugging/">(debugging.md)</a></td>
+<td>Documented as a manual PHPStorm/Xdebug setup step (<a href="https://doc.oroinc.com/backend/setup/dev-environment/">doc.oroinc.com</a>); the "Docker and Symfony Server" guide runs PHP on the host, so Xdebug is whatever the host PHP install provides, not container-managed (<a href="https://doc.oroinc.com/backend/setup/dev-environment/docker-and-symfony/">doc.oroinc.com</a>)</td>
+<td>Not verified</td>
+<td>None built in</td>
+<td>Yes, generically — <code>ddev xdebug on/off/toggle/status</code> (<a href="https://docs.ddev.com/en/stable/users/debugging-profiling/step-debugging/">DDEV docs via search</a>); not Oro-aware</td>
+<td>Yes, generically — recipes expose an <code>xdebug: true</code> option (<a href="https://docs.lando.dev/core/v3/recipes.html">Lando docs</a>); no Oro recipe to attach it to</td>
+<td>Yes, generically — Xdebug configuration is documented (<a href="https://docs.warden.dev/">docs.warden.dev</a>); not Oro-aware</td>
+</tr>
+<tr>
+<td>Websocket support</td>
+<td>Yes — the Oro websocket server is proxied by nginx on the same origin as the app (<code>wss://</code> on SSL domains), with the addressing wired automatically for web/ws/consumer/cron <a href="../domains-and-ssl/#websocket">(domains-and-ssl.md)</a></td>
+<td>Not verified — not covered in the pages checked</td>
+<td>Not verified</td>
+<td>None — you configure the proxy yourself if you need it</td>
+<td>Not Oro-specific — no built-in Oro websocket wiring</td>
+<td>Not Oro-specific</td>
+<td>Not Oro-specific; Warden does provide a shared Traefik proxy, but no Oro websocket wiring was found</td>
+</tr>
+<tr>
+<td>tmpfs test DB</td>
+<td>Yes — the test database container can run on <code>tmpfs</code>, with a configurable size, for fast disposable test runs <a href="../configuration/#configuration-fields">(configuration.md)</a></td>
+<td>Not verified — not covered in the pages checked</td>
+<td>Not verified</td>
+<td>None — up to you to configure</td>
+<td>Not verified for Oro use (no Oro preset)</td>
+<td>Not verified for Oro use (no Oro recipe)</td>
+<td>Not verified for Oro use (no Oro environment type)</td>
+</tr>
+<tr>
+<td>Vendor sync for IDE</td>
+<td>Yes — for <code>type: bundle</code>, the <code>vendor/</code> resolved inside the container is synced back to the host so the IDE can index it <a href="../configuration/#installation-types-type">(configuration.md)</a></td>
+<td>N/A — the "Docker and Symfony Server" guide runs Composer on the host directly, so there is nothing to sync back in that setup (<a href="https://doc.oroinc.com/backend/setup/dev-environment/docker-and-symfony/">doc.oroinc.com</a>); the containerized demo repo's behavior here is not verified</td>
+<td>Not verified</td>
+<td>None — if vendor is resolved only inside a container, syncing it back is your own script</td>
+<td>Not Oro-specific; general DDEV projects typically run Composer inside the web container with the project directory mounted, so vendor is visible on the host by default for that generic setup (not verified for a custom Oro type specifically)</td>
+<td>Not Oro-specific / not verified</td>
+<td>Not Oro-specific / not verified</td>
+</tr>
+<tr>
+<td>Private Composer repo handling (tokens + SSH agent forwarding)</td>
+<td>Yes — <code>composer.auth</code> mirrors Composer's <code>COMPOSER_AUTH</code> schema and is injected only into containers that run Composer; SSH-transport repository URLs trigger automatic host SSH-agent forwarding, with an explicit <code>ssh_agent</code> override <a href="../configuration/#configuration-fields">(configuration.md)</a></td>
+<td>Composer's own private-package authentication mechanisms apply (<code>auth.json</code>, <code>COMPOSER_AUTH</code>) as they would to any Composer project; no Oro-specific tooling for this was found in the pages checked (not verified beyond that)</td>
+<td>Not verified</td>
+<td>None — you wire Composer credentials and SSH agent forwarding into the Compose file yourself</td>
+<td>Not Oro-specific; DDEV has general Composer/SSH-key support, but no Oro-specific wiring (not verified in depth)</td>
+<td>Not Oro-specific / not verified</td>
+<td>Not Oro-specific / not verified</td>
+</tr>
+</tbody>
+</table>
+<h2 id="1-official-oro-dev-environment-documentation">1. Official Oro dev-environment documentation<a class="headerlink" href="#1-official-oro-dev-environment-documentation" title="Permanent link">&para;</a></h2>
+<p>The current <a href="https://doc.oroinc.com/backend/setup/dev-environment/"><code>doc.oroinc.com/backend/setup/dev-environment/</code></a>
+section documents a <strong>hybrid</strong> setup as its primary path — "Docker and Symfony Server" — where
+Docker runs only backing services (PostgreSQL, Elasticsearch, RabbitMQ, Redis, MailCatcher) while
+PHP, Composer and Node.js run directly on the host and are invoked through the Symfony CLI
+(<a href="https://doc.oroinc.com/backend/setup/dev-environment/docker-and-symfony/">doc.oroinc.com</a>). It
+ships OS-specific quick guides for macOS, Ubuntu and WSL2, and the docs explicitly note the
+Symfony local web server "is not intended for production use."</p>
+<p>Oro also documents a fully containerized alternative for demo/evaluation purposes:
+<a href="https://doc.oroinc.com/backend/setup/demo-environment/docker/"><code>doc.oroinc.com/backend/setup/demo-environment/docker/</code></a>,
+backed by the <a href="https://github.com/oroinc/orocommerce-application-demo-docker"><code>oroinc/orocommerce-application-demo-docker</code></a>
+repository, which packages web server, PHP-FPM, consumer, websocket and cron roles into images
+published on Docker Hub. That page is explicit: <strong>"This deployment is NOT intended for a
+production environment."</strong> It supports switching between OroCommerce versions (5.1 through the
+current release and a 7.1 dev line, per the version selector on the docs site) but is a demo
+convenience, not a development toolchain — it does not mention Xdebug, a QA toolchain, CI
+generation, or deploy automation in the material checked.</p>
+<p>Both official paths document <em>how a human sets up the pieces</em>; neither is a CLI that scaffolds a
+bundle/project skeleton, generates CI/deploy pipelines, or hot-patches Xdebug per process the way
+Orobox does. That is a reasonable difference in scope, not a shortcoming — the official docs also
+cover ground Orobox does not, such as OS-native (non-Docker) host setup.</p>
+<h2 id="2-community-docker-compose-stacks-github">2. Community Docker Compose stacks (GitHub)<a class="headerlink" href="#2-community-docker-compose-stacks-github" title="Permanent link">&para;</a></h2>
+<p>A GitHub Topics/search pass surfaced several independent, unofficial Docker stacks for Oro-family
+applications (<a href="https://github.com/topics/orocommerce">search results</a>):</p>
+<ul>
+<li><a href="https://github.com/kiboko-labs/kloud"><code>kiboko-labs/kloud</code></a> — referenced by Oro's own docs as
+  "Docker images and stacks for OroPlatform based applications by the Kiboko team." Its README
+  describes building a local Docker stack for OroCommerce/OroCRM/OroPlatform/Marello development,
+  explicitly not for production. The repository shows 155 commits and multiple open issues/PRs;
+  its current maintenance cadence was <strong>not verified</strong> (no commit date was visible in what was
+  fetched).</li>
+<li><a href="https://github.com/vtsykun/docker-orocommerce"><code>vtsykun/docker-orocommerce</code></a> — a compact
+  Alpine-based image bundling web server, cron, websocket and job processing in one container, for
+  OroCommerce <strong>1.6, 3.1, 4.1 and 4.2</strong> — versions well before Orobox's supported 5.1–7.0 range.
+  Current maintenance status <strong>not verified</strong>.</li>
+<li><a href="https://github.com/djocker/orocommerce"><code>djocker/orocommerce</code></a> ("Dockerized OroCommerce
+  Application (Unofficial)") and <a href="https://github.com/mkovel/orodeploytemplate"><code>mkovel/orodeploytemplate</code></a>
+  turned up in the same search; their content, target versions and maintenance status were <strong>not
+  independently verified</strong> beyond their titles and descriptions in search results.</li>
+<li>A Lando-specific community image, <a href="https://github.com/improper/lando-image-orocommerce"><code>improper/lando-image-orocommerce</code></a>,
+  extends Lando's PHP image with OroCommerce's PHP extension dependencies. Its own README says the
+  author "hope[s] to create a Lando Recipe to automate this setup" — it never became one — and the
+  repository <strong>was archived (read-only) on 2020-08-01</strong>, per GitHub's archive notice.</li>
+</ul>
+<p>General pattern observed across this category: these are individually maintained images/compose
+files targeting a specific, often dated, Oro version, built to solve one person's or team's setup
+problem rather than to track Oro's supported version matrix or provide QA/CI/deploy automation. No
+code-search access was used to audit their Dockerfiles or compose files line by line — the claims
+above come from each repository's own README/description as fetched, not from reading their
+implementation.</p>
+<h2 id="3-a-fully-manual-docker-compose-setup-no-tool">3. A fully manual Docker Compose setup (no tool)<a class="headerlink" href="#3-a-fully-manual-docker-compose-setup-no-tool" title="Permanent link">&para;</a></h2>
+<p>Writing your own <code>docker-compose.yml</code> for OroCommerce — one PHP-FPM service, one Postgres, nginx,
+Node for asset building, and whichever of Redis/RabbitMQ/Elasticsearch/Mailpit you need — gives
+the most control and the fewest assumptions to unwind, at the cost of building and maintaining
+every piece yourself: the OroCommerce Docker image and PHP extension set, Composer/SSH-agent
+wiring for private packages, Xdebug toggling, a websocket reverse-proxy configuration, a disposable
+tmpfs test database, a QA toolchain, and any CI/deploy pipeline. None of that is hard individually,
+but all of it has to be built once, then kept in sync by hand as OroCommerce's own requirements
+(PHP version, extensions, Node version) change across releases — work a tool like Orobox, the
+official Oro images, or a generic platform like DDEV/Lando/Warden has already done once for many
+projects to share. The tradeoff is the classic build-vs-adopt one: total control and zero
+tool lock-in, versus paying setup and maintenance cost per project instead of once per tool.</p>
+<h2 id="4-generic-local-dev-tools-ddev-lando-warden">4. Generic local-dev tools: DDEV, Lando, Warden<a class="headerlink" href="#4-generic-local-dev-tools-ddev-lando-warden" title="Permanent link">&para;</a></h2>
+<p>These three are real, actively maintained, general-purpose local Docker environment tools for
+PHP/CMS stacks. None of them ships official, out-of-the-box OroCommerce support as of this
+writing:</p>
+<ul>
+<li><strong>DDEV</strong> — its homepage advertises "presets for Laravel, WordPress, Drupal, TYPO3, Backdrop,
+  Magento, Craft CMS and more" (<a href="https://ddev.com/">ddev.com</a>); OroCommerce is not among the named
+  presets, and none was found by searching DDEV's docs. DDEV does support a <code>generic</code>/<code>php</code>
+  project type meant for stacks without a dedicated preset, plus general Composer and SSH-key
+  support, and ships built-in Xdebug toggling (<code>ddev xdebug on/off/toggle/status</code>)
+  (<a href="https://docs.ddev.com/en/stable/users/debugging-profiling/step-debugging/">DDEV docs</a> — found
+  via search; the docs page fetched directly returned an error). Running OroCommerce on DDEV would
+  mean building a custom project-type configuration yourself, similar in spirit to the manual
+  Compose route above but on top of DDEV's platform primitives.</li>
+<li><strong>Lando</strong> — its recipes documentation points to a separate plugins listing rather than a fixed
+  in-page list (<a href="https://docs.lando.dev/core/v3/recipes.html">docs.lando.dev</a>); no official Symfony
+  or OroCommerce recipe was found there. The one OroCommerce-oriented Lando artifact located,
+  <a href="https://github.com/improper/lando-image-orocommerce"><code>improper/lando-image-orocommerce</code></a>, is an
+  unofficial community image whose author never completed the intended recipe and which has been
+  archived since 2020, so it is not a currently maintained path.</li>
+<li><strong>Warden</strong> — its own docs list explicit support for "Magento 1, Magento 2, Laravel, Symfony 4,
+  Shopware 6" on macOS and Linux (<a href="https://docs.warden.dev/">docs.warden.dev</a>), plus a <code>Local</code> and
+  a fully custom environment type; OroCommerce is not among the named environments. Warden provides
+  shared infrastructure (Traefik SSL/routing, DNS, Xdebug configuration support) that a custom
+  environment definition could build on, but no ready-made Oro environment was found.</li>
+</ul>
+<p>For a team already standardized on one of these tools for other PHP projects, the realistic choice
+is between adopting Orobox specifically for Oro work, or investing in a custom Oro configuration on
+top of the tool they already use — both are legitimate paths, and the effort of the latter was not
+measured here.</p>
+<h2 id="when-not-to-use-orobox">When <em>not</em> to use Orobox<a class="headerlink" href="#when-not-to-use-orobox" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Non-Oro projects.</strong> Orobox is purpose-built around OroCommerce/OroPlatform's install flow,
+  bundle structure, QA standards and deploy recipe. It has nothing to offer a Laravel, WordPress,
+  Drupal, Magento or plain Symfony project — a generic tool like DDEV, Lando or Warden (or a
+  framework-specific one) fits that work better.</li>
+<li><strong>Production environments.</strong> Orobox says so directly: <em>"This tool is designed EXCLUSIVELY for
+  local development. It MUST NOT be used in production environments."</em> (<a href="../README.md">README.md</a>)
+  The <code>demo</code> install type is production-<em>tuned</em> for realistic performance testing, but it is still
+  generated and run by the same dev-only tool — it is not a production deployment mechanism.
+  <code>orobox deploy</code> ships application releases to a remote host via Deployer, but the local Orobox
+  stack itself remains a development environment, never the production runtime.</li>
+<li><strong>Teams with an already-consolidated internal Docker stack.</strong> If an organization already
+  maintains its own Compose files, base images, CI templates and deploy scripts across several Oro
+  projects — tuned to its own infrastructure, registries and conventions — swapping that for
+  Orobox means migrating working tooling for a rewrite of already-solved problems. Orobox is aimed
+  at projects and teams that do not already have that investment, or that are starting fresh; it is
+  not designed to replace a mature, working internal stack just because it exists.</li>
+</ul>
+<h2 id="sources-consulted">Sources consulted<a class="headerlink" href="#sources-consulted" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="https://doc.oroinc.com/backend/setup/dev-environment/">doc.oroinc.com/backend/setup/dev-environment/</a></li>
+<li><a href="https://doc.oroinc.com/backend/setup/dev-environment/docker-and-symfony/">doc.oroinc.com/backend/setup/dev-environment/docker-and-symfony/</a></li>
+<li><a href="https://doc.oroinc.com/backend/setup/demo-environment/docker/">doc.oroinc.com/backend/setup/demo-environment/docker/</a></li>
+<li><a href="https://doc.oroinc.com/backend/setup/jenkins/">doc.oroinc.com/backend/setup/jenkins/</a></li>
+<li><a href="https://github.com/oroinc/orocommerce-application-demo-docker">github.com/oroinc/orocommerce-application-demo-docker</a></li>
+<li><a href="https://github.com/topics/orocommerce">github.com/topics/orocommerce</a></li>
+<li><a href="https://github.com/kiboko-labs/kloud">github.com/kiboko-labs/kloud</a></li>
+<li><a href="https://github.com/vtsykun/docker-orocommerce">github.com/vtsykun/docker-orocommerce</a></li>
+<li><a href="https://github.com/improper/lando-image-orocommerce">github.com/improper/lando-image-orocommerce</a></li>
+<li><a href="https://ddev.com/">ddev.com</a></li>
+<li><a href="https://docs.ddev.com/en/stable/users/debugging-profiling/step-debugging/">docs.ddev.com — step debugging (via search, direct fetch failed)</a></li>
+<li><a href="https://docs.lando.dev/core/v3/recipes.html">docs.lando.dev/core/v3/recipes.html</a></li>
+<li><a href="https://docs.warden.dev/">docs.warden.dev</a></li>
+<li><a href="https://docs.warden.dev/environments/types.html">docs.warden.dev/environments/types.html</a></li>
+</ul>
+<p>No GitHub code-search access was available for this comparison — findings about community
+repositories are based on their README/description text as fetched or as returned by search
+results, not on reading their Dockerfiles or Compose definitions.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
