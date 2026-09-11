@@ -1,7 +1,7 @@
 # Orobox - CLI Tool for OroCommerce Development
 
 [![CI](https://github.com/algoritma-dev/orobox/actions/workflows/ci.yml/badge.svg)](https://github.com/algoritma-dev/orobox/actions/workflows/ci.yml)
-[![Latest release](https://img.shields.io/github/v/release/algoritma-dev/orobox?include_prereleases&sort=semver)](https://github.com/algoritma-dev/orobox/releases)
+[![Latest release](https://img.shields.io/github/v/release/algoritma-dev/orobox?include_prereleases&sort=date)](https://github.com/algoritma-dev/orobox/releases)
 [![Go version](https://img.shields.io/github/go-mod/go-version/algoritma-dev/orobox)](go.mod)
 [![License: GPL v3](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 [![Downloads](https://img.shields.io/github/downloads/algoritma-dev/orobox/total)](https://github.com/algoritma-dev/orobox/releases)
