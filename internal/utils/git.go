@@ -86,3 +86,40 @@ func compareVersions(v1, v2 string) int {
 
 	return len(parts1) - len(parts2)
 }
+
+// StagedFiles returns the files a commit staged in dir, as paths relative to dir.
+//
+// --relative is what makes the result usable without a second path mapping: git reports staged
+// paths from the repository root, while every caller here works from the directory holding
+// .orobox.yaml, which on a bundle checkout is not the same directory. It also drops the staged
+// files that live outside dir entirely, which is what the QA tools would have had to ignore
+// anyway.
+//
+// --diff-filter=ACMR leaves out the deletions: a file this commit removes is not a file any tool
+// can open.
+//
+// The staged set is exactly the subset an IDE selected. PhpStorm stages the checked files — and,
+// for a partial commit, the checked hunks — before it runs the hook, so the index is already the
+// commit's own contents by the time this reads it.
+func StagedFiles(dir string) ([]string, error) {
+	cmd := exec.Command("git", "-C", dir, "diff", "--cached", "--name-only", "--diff-filter=ACMR", "--relative", "-z")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("could not list the staged files: %w", err)
+	}
+
+	var files []string
+	for _, name := range strings.Split(string(output), "\x00") {
+		if name != "" {
+			files = append(files, name)
+		}
+	}
+	return files, nil
+}
+
+// ShellQuote renders s as a single POSIX sh word, so a path can be dropped into a shell line
+// whatever it contains. The shell lines Orobox builds are assembled by hand rather than by an
+// argv, which is why the quoting has to be too.
+func ShellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}

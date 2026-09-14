@@ -2,7 +2,12 @@
 package cmd
 
 import (
+	"bufio"
+	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/algoritma-dev/orobox/internal/config"
@@ -164,6 +169,8 @@ func runQaInitCommand(conf config.OroConfig) error {
 	writeQaStubs(config.GetHostBundlePath(), conf.Type)
 
 	utils.PrintSuccess("QA tools initialized successfully!")
+
+	offerPreCommitHook(config.GetHostBundlePath())
 	return nil
 }
 
@@ -200,4 +207,120 @@ func runQaScript(progress, success, script string) {
 		return
 	}
 	utils.PrintSuccess(success)
+}
+
+// preCommitHookFile is the hook git runs before it writes a commit.
+const preCommitHookFile = "pre-commit"
+
+// offerPreCommitHook asks whether to install the pre-commit hook, and installs it on a yes.
+//
+// It is the last thing qa-init does, because it is the only part that is worth nothing until the
+// tools it calls are installed.
+//
+// Everything here warns rather than fails, for the same reason writeQaStubs does: the tools are
+// installed and usable without a hook, and reporting the whole initialization as failed because a
+// git directory could not be read would be misleading.
+func offerPreCommitHook(projectDir string) {
+	// SkipPrompts rather than isTTY, like every other question Orobox asks: a CI job or the e2e
+	// harness inherits a stdin that never produces a newline, and a prompt would hang there.
+	if utils.SkipPrompts(stdin) {
+		return
+	}
+
+	hooksDir, err := gitHooksDir(projectDir)
+	if err != nil {
+		// A checkout that is not a git repository yet is a normal state right after `orobox
+		// create`, and has no hook to install. Nothing to report.
+		return
+	}
+
+	reader := bufio.NewReader(stdin)
+	if !utils.AskYesNo(reader, "Install a git pre-commit hook? It checks the files each commit stages with the enabled QA tools, and runs the tests when the commit touches PHP", true) {
+		return
+	}
+
+	hookPath := filepath.Join(hooksDir, preCommitHookFile)
+	if _, err := os.Stat(hookPath); err == nil {
+		if !utils.AskYesNo(reader, fmt.Sprintf("%s already exists. Replace it? The current one is kept as %s.bak", hookPath, preCommitHookFile), false) {
+			utils.PrintInfo("Left the existing pre-commit hook in place.")
+			return
+		}
+		if err := os.Rename(hookPath, hookPath+".bak"); err != nil {
+			utils.PrintWarning(fmt.Sprintf("Could not back up %s: %v", hookPath, err))
+			return
+		}
+		utils.PrintSuccess("Kept the previous hook as " + hookPath + ".bak.")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		utils.PrintWarning(fmt.Sprintf("Could not check %s: %v", hookPath, err))
+		return
+	}
+
+	if err := writePreCommitHook(hooksDir, projectDir, oroboxBinary()); err != nil {
+		utils.PrintWarning(fmt.Sprintf("Could not install the pre-commit hook: %v", err))
+		return
+	}
+	utils.PrintSuccess("Wrote " + hookPath + " (skip it with OROBOX_SKIP_PRECOMMIT=1 or git commit --no-verify).")
+}
+
+// oroboxBinary is the absolute path of the running orobox, which the hook calls instead of the
+// bare name; the template says why. A build whose own path cannot be resolved falls back to that
+// bare name, which is what the hook itself falls back to anyway.
+func oroboxBinary() string {
+	binary, err := os.Executable()
+	if err != nil {
+		return "orobox"
+	}
+	return binary
+}
+
+// writePreCommitHook renders the hook into hooksDir. The binary is a parameter rather than read
+// here so the rendered file is decided by one caller and can be asserted whole.
+func writePreCommitHook(hooksDir, projectDir, binary string) error {
+	rendered, err := scaffold.Render(scaffold.QaHookTemplate, scaffold.QaHookData{
+		Binary:     utils.ShellQuote(binary),
+		ProjectDir: utils.ShellQuote(projectDir),
+	})
+	if err != nil {
+		return err
+	}
+
+	// 0o755 and not the 0o644 the scaffolded files get: git skips a hook it cannot execute, and
+	// skips it silently, so a hook written without the bit is a hook that never reports anything.
+	return os.WriteFile(filepath.Join(hooksDir, preCommitHookFile), rendered, 0o755)
+}
+
+// gitHooksDir resolves where this checkout keeps its hooks, as an absolute path.
+//
+// core.hooksPath is asked for first because `rev-parse --git-path hooks` does not honour it: it
+// answers with the repository's own hooks directory, which for a checkout managed by husky or
+// lefthook is not the directory git actually runs. Writing there would install a hook that never
+// runs, and never says so.
+//
+// `rev-parse --git-path` is what covers the rest: a worktree, a submodule and a repository with a
+// separate .git file all keep their hooks somewhere other than <root>/.git/hooks.
+func gitHooksDir(projectDir string) (string, error) {
+	if out, err := exec.Command("git", "-C", projectDir, "config", "--get", "core.hooksPath").Output(); err == nil {
+		if configured := strings.TrimSpace(string(out)); configured != "" {
+			return absoluteUnder(projectDir, configured), nil
+		}
+	}
+
+	out, err := exec.Command("git", "-C", projectDir, "rev-parse", "--git-path", "hooks").Output()
+	if err != nil {
+		return "", fmt.Errorf("%s is not a git repository: %w", projectDir, err)
+	}
+
+	hooksDir := absoluteUnder(projectDir, strings.TrimSpace(string(out)))
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		return "", err
+	}
+	return hooksDir, nil
+}
+
+// absoluteUnder resolves a path git reported, which is relative to the directory git ran in.
+func absoluteUnder(dir, path string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(dir, path)
 }

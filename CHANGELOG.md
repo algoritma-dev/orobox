@@ -10,6 +10,16 @@ group commits by theme rather than listing every commit. There is no stable `1.0
 
 ## [Unreleased]
 
+- Added `orobox qa --staged`, which checks only the files the current commit stages. Each tool is
+  narrowed by extension and a tool with nothing staged for it does not run; PHPStan still analyses
+  the whole tree, because a changed class breaks callers the commit never touched. A staged run is
+  always check-only.
+- Added a `pre-commit` hook offered at the end of `orobox qa-init`. It runs `orobox qa --staged`
+  and then `orobox test`, the latter only when the commit stages PHP. The staged set is the subset
+  an IDE ticked, so a partial commit from PhpStorm checks exactly what it commits. Skip it with
+  `OROBOX_SKIP_PRECOMMIT=1` or `git commit --no-verify`. An existing hook is kept as
+  `pre-commit.bak` after a confirmation.
+
 ## [1.0.0-rc31] - 2026-09-07
 
 - Added `dockerfile` to `.orobox.yaml`: a project-owned Dockerfile that extends the published

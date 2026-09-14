@@ -45,6 +45,9 @@ The finder in `.php-cs-fixer.dist.php` and `.twig-cs-fixer.php` is the tree thos
 walk — the merge takes rules from both sides but the finder from yours. Edit it rather than deleting
 it.
 
+Last, `qa-init` offers to install a git `pre-commit` hook. See
+[The pre-commit hook](#the-pre-commit-hook).
+
 ### 10. Run QA Tools (`qa`)
 Executes the QA analysis tools. When no flag is provided, runs the tools enabled in `.orobox.yaml` under `test.qa` (all tools are enabled by default if not configured).
 ```bash
@@ -63,11 +66,72 @@ Options:
 - `--cache-scope`, `--base-cache-scope`: Dagger engine only; same meaning as on `orobox deploy`.
 - `--generate-baseline`: Record PHPStan's current findings instead of failing on them. See
   [The PHPStan baseline](#the-phpstan-baseline).
+- `--staged`: Check only the files the current commit stages. See
+  [The pre-commit hook](#the-pre-commit-hook).
 
 CLI flags always override the configuration. Example:
 ```bash
 orobox qa --phpstan --eslint
 ```
+
+#### The pre-commit hook
+
+At the end of its run, `orobox qa-init` offers to install a git `pre-commit` hook. The hook checks
+each commit before it is written:
+
+```
+orobox qa --staged      # the enabled QA tools, over the staged files
+orobox test             # only when the commit stages at least one .php file
+```
+
+Either one failing stops the commit. Nothing is rewritten: `--staged` puts every tool in check-only
+mode, because the hook runs between the index being built and the commit being written, and a fix
+applied there would change contents you already reviewed and staged — in the working tree, while the
+commit records the index.
+
+**The staged set is the subset you ticked.** PhpStorm stages the checked files, and for a partial
+commit the checked hunks, before it runs the hook, so the tools see exactly what the commit
+contains. The same holds for `git add -p`.
+
+**Two things are never narrowed:**
+
+| | why |
+| --- | --- |
+| PHPStan | a changed class breaks the type checks of callers this commit never touched |
+| The test suite | a changed entity or service breaks tests in files this commit never touched |
+
+Narrowing either one would report a green run that is not green. The test suite is skipped
+altogether when the commit stages no PHP, which is what keeps a commit of templates or assets from
+paying for it.
+
+Everything else is narrowed by extension, and a tool with nothing staged for it does not run at all:
+
+| Tool | Files |
+| --- | --- |
+| Rector, PHP-CS-Fixer | `.php` |
+| Twig-CS-Fixer | `.twig` |
+| ESLint | `.js` |
+| Stylelint | `.scss`, `.less`, `.sass`, `.html` |
+| Stylelint (CSS) | `.css` |
+
+PHP-CS-Fixer is given `--path-mode=intersection`, so the finder in your `.php-cs-fixer.dist.php`
+still decides what is in scope: a staged file you deliberately excluded stays excluded.
+
+To skip the hook for one commit:
+
+```bash
+OROBOX_SKIP_PRECOMMIT=1 git commit -m "wip"
+```
+
+`git commit --no-verify` does the same. If you prefer to run the checks by hand, `orobox qa
+--staged` works as a normal command outside the hook too.
+
+The hook is written to the directory git actually runs hooks from — `core.hooksPath` when your
+checkout sets one, otherwise the repository's own hooks directory, which covers worktrees and
+submodules. It records the absolute path of the `orobox` that installed it, because PhpStorm and
+the other GUI clients run hooks with a stripped-down `PATH` where a bare `orobox` is not found. If
+a `pre-commit` hook is already there, `qa-init` asks before replacing it and keeps the previous one
+as `pre-commit.bak`.
 
 #### The PHPStan baseline
 

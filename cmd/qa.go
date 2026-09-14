@@ -35,6 +35,7 @@ var (
 	qaBaseCacheScope string
 
 	qaGenerateBaseline bool
+	qaStaged           bool
 )
 
 var qaCmd = &cobra.Command{
@@ -64,6 +65,7 @@ func init() {
 	qaCmd.Flags().StringVar(&qaCacheScope, "cache-scope", "", "Name the cache volume family, dagger engine only (default: the current branch)")
 	qaCmd.Flags().StringVar(&qaBaseCacheScope, "base-cache-scope", "", "Seed a missing test database dump from this cache scope, dagger engine only")
 	qaCmd.Flags().BoolVar(&qaGenerateBaseline, "generate-baseline", false, "Record PHPStan's current findings in "+qatools.BaselineFile+" instead of failing on them")
+	qaCmd.Flags().BoolVar(&qaStaged, "staged", false, "Check only the files the current commit stages; PHPStan still analyses the whole tree")
 }
 
 // checkMissingToolBinaries returns the names of tools whose binaries are not present in the container.
@@ -153,11 +155,57 @@ func runQaCommand() {
 		qaPhpstan = true
 	}
 
+	staged, err := resolveStaged(engine)
+	if err != nil {
+		utils.PrintError(err.Error())
+		os.Exit(1)
+	}
+
 	if engine == engineDagger {
 		runQaOnDagger(format)
 		return
 	}
-	runQaOnCompose(format, baseline)
+	runQaOnCompose(format, baseline, staged)
+}
+
+// resolveStaged turns --staged into the container paths the tools are narrowed to, or returns nil
+// when the flag is absent.
+//
+// The Dagger engine is refused for the same reason it refuses --generate-baseline: it analyses a
+// clean clone of a git ref inside a container, and a git ref has no index, so there are no staged
+// files there to narrow anything to.
+//
+// A baseline is refused because the two mean opposite things. A baseline records what the whole
+// tree reports today; recording it from one commit's files would declare every finding in every
+// file the commit left alone as already-accepted.
+//
+// An empty result is not an error and not the same as nil: a commit that stages nothing the tools
+// read still runs PHPStan, which is not narrowed. The distinction is the returned slice being
+// non-nil, which is what the caller tests.
+func resolveStaged(engine string) ([]string, error) {
+	if !qaStaged {
+		return nil, nil
+	}
+	if engine == engineDagger {
+		return nil, fmt.Errorf("--staged needs --engine=%s: the %s engine analyses a clean clone of a git ref, which has no staged files", engineCompose, engineDagger)
+	}
+	if qaGenerateBaseline {
+		return nil, fmt.Errorf("--staged and --generate-baseline cannot be combined: a baseline records what the whole tree reports, not what one commit touches")
+	}
+
+	files, err := utils.StagedFiles(config.GetHostBundlePath())
+	if err != nil {
+		return nil, err
+	}
+
+	// The source root is bind-mounted, so a path relative to the host source root is the same path
+	// relative to the container's.
+	root := config.GetSourceRootContainerPath()
+	paths := make([]string, 0, len(files))
+	for _, file := range files {
+		paths = append(paths, root+"/"+file)
+	}
+	return paths, nil
 }
 
 // resolveBaseline validates --generate-baseline against the rest of the command and returns the
@@ -201,7 +249,7 @@ func resolveBaseline(engine string, format qatools.Report) (string, error) {
 	return qatools.BaselinePath(config.GetSourceRootContainerPath()), nil
 }
 
-func runQaOnCompose(format qatools.Report, baseline string) {
+func runQaOnCompose(format qatools.Report, baseline string, staged []string) {
 	workingDir := config.GetSourceRootContainerPath()
 	env := resolveQaEnv()
 
@@ -229,6 +277,13 @@ func runQaOnCompose(format qatools.Report, baseline string) {
 	// rewrites the platform the running application is served from.
 	mode := qatools.ModeFix
 	if format != qatools.ReportNone {
+		mode = qatools.ModeCheck
+	}
+	// A staged run is check-only whatever else was asked for. It runs from a git hook, between the
+	// index being built and the commit being written, and a tool that rewrote a file there would
+	// change contents the developer already reviewed and staged — silently, since the fix lands in
+	// the working tree while the commit records the index.
+	if staged != nil {
 		mode = qatools.ModeCheck
 	}
 
@@ -267,6 +322,16 @@ func runQaOnCompose(format qatools.Report, baseline string) {
 	if len(enabledTools) == 0 {
 		utils.PrintWarning("No QA tools enabled.")
 		return
+	}
+
+	// The narrowing happens before the binaries are checked, so a commit of three templates is not
+	// failed over a missing Stylelint it was never going to run.
+	if staged != nil {
+		enabledTools = qatools.Restrict(enabledTools, staged)
+		if len(enabledTools) == 0 {
+			utils.PrintSuccess("Nothing staged for the enabled QA tools.")
+			return
+		}
 	}
 
 	if missing := checkMissingToolBinaries(workingDir, enabledTools); len(missing) > 0 {

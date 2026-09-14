@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -249,7 +250,7 @@ func TestQaComposeReportModeUsesTheAggregatingScript(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runQaOnCompose(format, "")
+	runQaOnCompose(format, "", nil)
 
 	var script string
 	for _, args := range calls {
@@ -336,4 +337,148 @@ func TestWriteQaStubsForBundleIncludesJSConfigs(t *testing.T) {
 			t.Errorf("%s was not written for a bundle install: %v", want, err)
 		}
 	}
+}
+
+// TestQaStagedNarrowsToTheCommit is the whole feature read from the command: the script that
+// reaches the container checks the staged files and nothing else, except PHPStan.
+func TestQaStagedNarrowsToTheCommit(t *testing.T) {
+	oldRun := docker.RunComposeCommand
+	oldRunSilently := docker.RunComposeCommandSilently
+	oldRunWithOutput := docker.RunComposeCommandWithOutput
+	defer func() {
+		docker.RunComposeCommand = oldRun
+		docker.RunComposeCommandSilently = oldRunSilently
+		docker.RunComposeCommandWithOutput = oldRunWithOutput
+	}()
+
+	var script string
+	docker.RunComposeCommand = func(_ string, args ...string) error {
+		if len(args) > 0 {
+			script = args[len(args)-1]
+		}
+		return nil
+	}
+	docker.RunComposeCommandSilently = docker.RunComposeCommand
+	docker.RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "ps" {
+			return psRunningRequested(args), nil
+		}
+		return []byte("[]"), nil
+	}
+
+	stagedProject(t, "src/Entity.php", "src/Resources/views/list.html.twig")
+	viper.Set("type", "project")
+	defer viper.Set("type", nil)
+
+	docker.ResetEnsuredServices()
+	qaStaged = true
+	defer func() { qaStaged = false }()
+
+	runQaOnCompose(qatools.ReportNone, "", mustResolveStaged(t))
+
+	if script == "" {
+		t.Fatal("the staged run never reached the container")
+	}
+
+	sourceRoot := config.GetSourceRootContainerPath()
+	for _, want := range []string{
+		"Running phpstan",
+		"'" + sourceRoot + "/src/Entity.php'",
+		"'" + sourceRoot + "/src/Resources/views/list.html.twig'",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("the staged script is missing %q:\n%s", want, script)
+		}
+	}
+	// Nothing staged for the linters, so they are not in the script at all.
+	for _, unwanted := range []string{"Running eslint", "Running stylelint"} {
+		if strings.Contains(script, unwanted) {
+			t.Errorf("the staged script runs %q with nothing staged for it:\n%s", unwanted, script)
+		}
+	}
+	// A staged run never rewrites the files it was handed: the developer already reviewed them.
+	if strings.Contains(script, "--fix") {
+		t.Errorf("the staged script runs the tools in fix mode:\n%s", script)
+	}
+	if !strings.Contains(script, "--dry-run") {
+		t.Errorf("the staged script does not run php-cs-fixer and rector in check mode:\n%s", script)
+	}
+}
+
+func TestResolveStagedRejectsDaggerAndBaseline(t *testing.T) {
+	stagedProject(t)
+	qaStaged = true
+	defer func() { qaStaged = false }()
+
+	if _, err := resolveStaged(engineDagger); err == nil {
+		t.Error("--staged was accepted on the dagger engine, which analyses a clean clone")
+	}
+
+	qaGenerateBaseline = true
+	defer func() { qaGenerateBaseline = false }()
+	if _, err := resolveStaged(engineCompose); err == nil {
+		t.Error("--staged was accepted alongside --generate-baseline")
+	}
+}
+
+// TestResolveStagedWithoutTheFlag: the nil result is what tells the run it is not narrowed.
+func TestResolveStagedWithoutTheFlag(t *testing.T) {
+	qaStaged = false
+
+	staged, err := resolveStaged(engineCompose)
+	if err != nil {
+		t.Fatalf("resolveStaged: %v", err)
+	}
+	if staged != nil {
+		t.Errorf("resolveStaged without --staged = %v, want nil", staged)
+	}
+}
+
+func mustResolveStaged(t *testing.T) []string {
+	t.Helper()
+	staged, err := resolveStaged(engineCompose)
+	if err != nil {
+		t.Fatalf("resolveStaged: %v", err)
+	}
+	return staged
+}
+
+// stagedProject builds a repository holding a .orobox.yaml, with the given files staged, and points
+// viper at that config file so GetHostBundlePath resolves to it.
+func stagedProject(t *testing.T, staged ...string) string {
+	t.Helper()
+
+	root := t.TempDir()
+	for _, args := range [][]string{{"init"}, {"config", "user.email", "test@example.test"}, {"config", "user.name", "Test"}} {
+		if out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+
+	configPath := filepath.Join(root, ".orobox.yaml")
+	if err := os.WriteFile(configPath, []byte("type: project\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range staged {
+		path := filepath.Join(root, file)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(staged) > 0 {
+		if out, err := exec.Command("git", append([]string{"-C", root, "add", "--"}, staged...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git add: %v: %s", err, out)
+		}
+	}
+
+	viper.SetConfigFile(configPath)
+	if err := viper.ReadInConfig(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(viper.Reset)
+
+	return root
 }

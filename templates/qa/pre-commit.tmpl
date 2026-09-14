@@ -1,0 +1,35 @@
+#!/bin/sh
+#
+# Installed by `orobox qa-init`.
+#
+# Runs the enabled QA tools over the files this commit stages, then the test suite when the commit
+# touches PHP. Set OROBOX_SKIP_PRECOMMIT=1, or commit with --no-verify, to skip both.
+
+if [ -n "$OROBOX_SKIP_PRECOMMIT" ]; then
+    exit 0
+fi
+
+# The absolute path of the orobox that installed this hook, because a hook does not run in the
+# developer's shell: PhpStorm and the other GUI clients start git with a stripped-down PATH, where
+# a bare `orobox` is typically not found. The bare name is still the fallback, for the checkout
+# whose orobox was moved or reinstalled elsewhere since.
+OROBOX=[[.Binary]]
+if [ ! -x "$OROBOX" ]; then
+    OROBOX=orobox
+fi
+
+# git runs a hook from the repository root, which on a bundle checkout is not the directory holding
+# .orobox.yaml.
+cd [[.ProjectDir]] || exit 1
+
+"$OROBOX" qa --staged || exit 1
+
+# The test suite is not narrowed to the staged files, the way PHPStan is not: a changed entity or
+# service breaks tests in files this commit never touched, so a narrowed run would report a green
+# suite that is not green. It is skipped entirely when the commit stages no PHP, which is what
+# keeps a commit of templates or assets from paying for the whole suite.
+if git diff --cached --name-only --diff-filter=ACMR | grep -qi '\.php$'; then
+    "$OROBOX" test || exit 1
+fi
+
+exit 0

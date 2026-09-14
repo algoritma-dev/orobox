@@ -94,3 +94,19 @@ func QaStubs(typeName string) []Artifact {
 
 	return artifacts
 }
+
+// QaHookTemplate is the pre-commit hook's template. It is not a QaStubs artifact because the hook
+// does not live in the repository: it is written into the git hooks directory, which is not
+// tracked, and it has to be executable — neither of which Artifact describes.
+const QaHookTemplate = "templates/qa/pre-commit.tmpl"
+
+// QaHookData is what the pre-commit hook template renders against. Both fields are already quoted
+// as POSIX sh words by the caller, because the hook is a shell script and a developer's checkout
+// can sit under a path with a space in it.
+type QaHookData struct {
+	// Binary is the absolute path of the orobox that installed the hook.
+	Binary string
+	// ProjectDir is the directory holding .orobox.yaml, which the hook changes into before it runs
+	// anything: git runs hooks from the repository root instead.
+	ProjectDir string
+}
