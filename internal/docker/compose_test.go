@@ -1,8 +1,10 @@
 package docker
 
 import (
+	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"github.com/algoritma-dev/orobox/internal/config"
+	"github.com/algoritma-dev/orobox/internal/output"
 	yamlv3 "gopkg.in/yaml.v3"
 )
 
@@ -839,5 +842,34 @@ func mustNotContain(t *testing.T, haystack, needle string) {
 	t.Helper()
 	if strings.Contains(haystack, needle) {
 		t.Errorf("expected output NOT to contain %q\n---\n%s", needle, haystack)
+	}
+}
+
+// TestSilentRunnerSendsAFailureDumpToStderrInAgentMode pins where a failed command's own output
+// goes. It is the one thing agent mode still prints from a silent runner, and printing it on
+// stdout would mix a diagnostic into the payload a caller parses.
+func TestSilentRunnerSendsAFailureDumpToStderrInAgentMode(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker is not installed, so no compose command can fail here")
+	}
+
+	var stdout, stderr bytes.Buffer
+	restore := output.SetWriters(&stdout, &stderr)
+	defer restore()
+
+	output.SetAgent(true)
+	defer output.SetAgent(false)
+
+	// A subcommand that cannot exist, so the runner takes its failure branch.
+	err := RunComposeCommandSilently("", "this-subcommand-does-not-exist")
+	if err == nil {
+		t.Fatal("RunComposeCommandSilently() succeeded, want a failure")
+	}
+
+	if stdout.Len() != 0 {
+		t.Errorf("the failure dump went to the payload stream: %q", stdout.String())
+	}
+	if stderr.Len() == 0 {
+		t.Error("the failure dump reached neither stream; the diagnostic is lost")
 	}
 }

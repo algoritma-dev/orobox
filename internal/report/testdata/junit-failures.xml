@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="Unit" tests="3" failures="1" errors="1">
+    <testsuite name="Oro\Bundle\AcmeBundle\Tests\Unit\OrderTest" file="/var/www/oro/src/Acme/Tests/Unit/OrderTest.php" tests="3" failures="1" errors="1">
+      <testcase name="testTotal" class="Oro\Bundle\AcmeBundle\Tests\Unit\OrderTest" file="/var/www/oro/src/Acme/Tests/Unit/OrderTest.php" line="88" assertions="1" time="0.001">
+        <failure type="PHPUnit\Framework\ExpectationFailedException">Oro\Bundle\AcmeBundle\Tests\Unit\OrderTest::testTotal
+Failed asserting that 2 matches expected 3.
+
+/var/www/oro/src/Acme/Tests/Unit/OrderTest.php:88</failure>
+      </testcase>
+      <testcase name="testBroken" class="Oro\Bundle\AcmeBundle\Tests\Unit\OrderTest" file="/var/www/oro/src/Acme/Tests/Unit/OrderTest.php" line="95" assertions="0" time="0.001">
+        <error type="Error">Call to a member function total() on null</error>
+      </testcase>
+      <testcase name="testPasses" class="Oro\Bundle\AcmeBundle\Tests\Unit\OrderTest" file="/var/www/oro/src/Acme/Tests/Unit/OrderTest.php" line="101" assertions="1" time="0.001"/>
+    </testsuite>
+  </testsuite>
+</testsuites>

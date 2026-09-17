@@ -96,8 +96,8 @@ func writeCIFiles(projectDir string, conf *config.OroConfig) error {
 	}
 	if !included {
 		utils.PrintWarning("Your " + config.CIRootRelPath + " does not include the generated pipeline. Add:")
-		fmt.Println("include:")
-		fmt.Println("  - local: " + config.CIIncludeRelPath)
+		utils.PrintPlain("include:")
+		utils.PrintPlain("  - local: " + config.CIIncludeRelPath)
 	}
 
 	return nil

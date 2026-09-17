@@ -54,9 +54,9 @@ var runCmd = &cobra.Command{
 			utils.PrintError(err.Error())
 
 			if len(commands) > 0 {
-				fmt.Println("\nAvailable commands:")
+				utils.PrintPlain("\nAvailable commands:")
 				for _, cmd := range commands {
-					fmt.Printf("  %-12s %s\n", cmd.Name, cmd.Description)
+					utils.PrintPlainf("  %-12s %s\n", cmd.Name, cmd.Description)
 				}
 			}
 			return
@@ -225,7 +225,9 @@ func (w *loaderStopperWriter) Write(p []byte) (n int, err error) {
 			// so that command output doesn't mix with the spinner.
 			// The spinner will redraw itself on the next line at the next tick.
 			if !w.stopped.Load() {
-				fmt.Print("\r\033[K")
+				// Routed through the gated helper rather than written directly: agent mode runs no
+				// spinner, so the escape sequence would be stray bytes in the payload.
+				utils.PrintPlainf("\r\033[K")
 			}
 		} else {
 			// If it DOES NOT end with a newline, it could be a prompt or a progress bar.

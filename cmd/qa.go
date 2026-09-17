@@ -11,6 +11,7 @@ import (
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
+	"github.com/algoritma-dev/orobox/internal/output"
 	"github.com/algoritma-dev/orobox/internal/pipeline"
 	"github.com/algoritma-dev/orobox/internal/qatools"
 	"github.com/algoritma-dev/orobox/internal/report"
@@ -253,14 +254,26 @@ func runQaOnCompose(format qatools.Report, baseline string, staged []string) {
 	workingDir := config.GetSourceRootContainerPath()
 	env := resolveQaEnv()
 
+	// Agent mode needs the tools' machine-readable output whatever the caller asked for, so the
+	// report machinery runs underneath it. agentOnly marks the case where nobody asked for the
+	// report itself: no merged document is written and the per-tool files are cleaned up after.
+	effectiveFormat := format
+	agentOnly := false
+	if output.Agent() && format == qatools.ReportNone {
+		effectiveFormat = qatools.ReportGitLab
+		agentOnly = true
+	}
+
 	reportPath := ""
 	containerReportDir := ""
-	if format != qatools.ReportNone {
-		var err error
-		reportPath, err = resolveReportPath(qaReportPath, reportsRelDir+"/code-quality.json")
-		if err != nil {
-			utils.PrintError(err.Error())
-			os.Exit(1)
+	if effectiveFormat != qatools.ReportNone {
+		if !agentOnly {
+			var err error
+			reportPath, err = resolveReportPath(qaReportPath, reportsRelDir+"/code-quality.json")
+			if err != nil {
+				utils.PrintError(err.Error())
+				os.Exit(1)
+			}
 		}
 		// The source root is bind-mounted, so a file the container writes below it is already on
 		// the host: no copy step, and the same path works for every install type.
@@ -275,6 +288,11 @@ func runQaOnCompose(format qatools.Report, baseline string, staged []string) {
 	// under it. It is also the difference between a survivable run and a broken checkout on a
 	// bundle install, where the analysed tree holds OroCommerce's own vendor-oro: fix mode there
 	// rewrites the platform the running application is served from.
+	//
+	// The condition tests format, the report the caller asked for, and never effectiveFormat.
+	// Agent mode forces a report to read the tools' output; it is not a caller asking to be told
+	// what the tree looks like, and switching this to effectiveFormat would silently make
+	// `orobox qa --agent` check-only.
 	mode := qatools.ModeFix
 	if format != qatools.ReportNone {
 		mode = qatools.ModeCheck
@@ -292,7 +310,7 @@ func runQaOnCompose(format qatools.Report, baseline string, staged []string) {
 		AnalyzePath: config.GetQaAnalyzePath(),
 		Env:         env,
 		Mode:        mode,
-		Report:      format,
+		Report:      effectiveFormat,
 		ReportDir:   containerReportDir,
 		Baseline:    baseline,
 		OroVersion:  viper.GetString("oro_version"),
@@ -349,7 +367,9 @@ func runQaOnCompose(format qatools.Report, baseline string, staged []string) {
 
 	args := []string{"exec"}
 	args = append(args, "-w", workingDir)
-	if !isTTY() {
+	// Agent mode never allocates a TTY: there is no terminal to attach for an automated caller,
+	// and a TTY is also what lets the tools decide to emit colour.
+	if !isTTY() || output.Agent() {
 		args = append(args, "-T")
 	}
 
@@ -358,10 +378,23 @@ func runQaOnCompose(format qatools.Report, baseline string, staged []string) {
 	args = append(args, "-e", "ORO_ENV="+string(env))
 
 	script := qatools.Script(enabledTools)
-	if format != qatools.ReportNone {
+	if effectiveFormat != qatools.ReportNone {
 		script = qatools.ReportScript(enabledTools, containerReportDir)
 	}
 	args = append(args, "application", "sh", "-c", script)
+
+	// A baseline run is its own thing: PHPStan writes a file and prints nothing worth reading, so
+	// it keeps the streaming runner whatever mode the caller is in.
+	if output.Agent() && baseline == "" {
+		captured, runErr := docker.RunComposeCommandWithOutput(args...)
+		if agentOnly {
+			// The raw per-tool files were an implementation detail of this run, not something the
+			// caller asked to keep.
+			defer func() { _ = os.RemoveAll(rawReportDir("qa")) }()
+		}
+		finishQaAgent(rawReportDir("qa"), engineCompose, mode, runErr, captured)
+		return
+	}
 
 	err := docker.RunComposeCommand("", args...)
 
@@ -374,7 +407,7 @@ func runQaOnCompose(format qatools.Report, baseline string, staged []string) {
 		return
 	}
 
-	if format != qatools.ReportNone {
+	if effectiveFormat != qatools.ReportNone {
 		// The script exits 0 whatever the tools concluded, so the outcome comes from the status
 		// file and the reports are merged either way.
 		finishQaReport(rawReportDir("qa"), reportPath, engineCompose, err)
@@ -438,8 +471,18 @@ func runQaOnDagger(format qatools.Report) {
 	}
 
 	projectDir := config.GetHostBundlePath()
+
+	// Same split as the compose path: agent mode runs the report machinery to read the tools, but
+	// a caller that did not ask for the report gets no document written.
+	effectiveFormat := format
+	agentOnly := false
+	if output.Agent() && format == qatools.ReportNone {
+		effectiveFormat = qatools.ReportGitLab
+		agentOnly = true
+	}
+
 	reportPath := ""
-	if format != qatools.ReportNone {
+	if effectiveFormat != qatools.ReportNone && !agentOnly {
 		var err error
 		reportPath, err = resolveReportPath(qaReportPath, reportsRelDir+"/code-quality.json")
 		if err != nil {
@@ -453,7 +496,7 @@ func runQaOnDagger(format qatools.Report) {
 		CacheScope:     resolveCacheScope(qaCacheScope),
 		BaseCacheScope: qaBaseCacheScope,
 		RunQA:          true,
-		Report:         format,
+		Report:         effectiveFormat,
 	})
 
 	utils.PrintInfo("Running the QA tools in the pipeline engine. The first run has no caches and takes a while.")
@@ -467,6 +510,17 @@ func runQaOnDagger(format qatools.Report) {
 		SSHPrivateKey: os.Getenv("OROBOX_DEPLOY_SSH_KEY"),
 		ReportHostDir: filepath.Join(projectDir, rawReportsRelDir),
 	})
+
+	if output.Agent() {
+		if agentOnly && result.QAReportDir != "" {
+			defer func() { _ = os.RemoveAll(result.QAReportDir) }()
+		}
+		// ModeCheck unconditionally: this engine analyses a clean clone inside a container whose
+		// filesystem is thrown away, so it already runs the tools check-only and no tool's report
+		// here describes a file it rewrote.
+		finishQaAgent(result.QAReportDir, engineDagger, qatools.ModeCheck, runErr, nil)
+		return
+	}
 
 	if format != qatools.ReportNone {
 		finishQaReport(result.QAReportDir, reportPath, engineDagger, runErr)
@@ -496,26 +550,10 @@ func finishQaReport(rawDir, reportPath, engine string, runErr error) {
 		os.Exit(1)
 	}
 
-	entries, err := os.ReadDir(rawDir)
+	reports, _, err := readRawReports(rawDir)
 	if err != nil {
-		utils.PrintError(fmt.Sprintf("could not read the raw reports in %s: %v", rawDir, err))
+		utils.PrintError(err.Error())
 		os.Exit(1)
-	}
-
-	var reports []report.ToolReport
-	for _, entry := range entries {
-		if filepath.Ext(entry.Name()) != ".json" {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(rawDir, entry.Name()))
-		if err != nil {
-			utils.PrintError(fmt.Sprintf("could not read %s: %v", entry.Name(), err))
-			os.Exit(1)
-		}
-		reports = append(reports, report.ToolReport{
-			Tool: strings.TrimSuffix(entry.Name(), ".json"),
-			Data: data,
-		})
 	}
 
 	merged, err := report.MergeCodeQuality(reports, qaPathPrefix(engine))

@@ -2,10 +2,13 @@ package utils
 
 import (
 	"bufio"
+	"bytes"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/algoritma-dev/orobox/internal/output"
 )
 
 func TestLoader(t *testing.T) {
@@ -194,5 +197,81 @@ func TestSkipPrompts(t *testing.T) {
 	defer devNull.Close()
 	if !SkipPrompts(devNull) {
 		t.Errorf("%s must be skipped rather than read", os.DevNull)
+	}
+}
+
+func TestPrintHelpersAreSilentInAgentMode(t *testing.T) {
+	var human bytes.Buffer
+	restoreUtils := SetWriter(&human)
+	defer restoreUtils()
+
+	var payload, errs bytes.Buffer
+	restoreOutput := output.SetWriters(&payload, &errs)
+	defer restoreOutput()
+
+	output.SetAgent(true)
+	defer output.SetAgent(false)
+
+	PrintSuccess("All selected QA tools passed!")
+	PrintInfo("Running QA tools...")
+	PrintWarning("No QA tools enabled.")
+	PrintTitle("Summary")
+	StartLoader("Starting the containers")
+	StopLoader()
+	PrintError("QA tools reported errors or warnings.")
+
+	if human.Len() != 0 {
+		t.Errorf("agent mode wrote %q to the human stream, want nothing", human.String())
+	}
+	if payload.Len() != 0 {
+		t.Errorf("agent mode wrote %q to the payload stream, want nothing", payload.String())
+	}
+	if got, want := errs.String(), "error: QA tools reported errors or warnings.\n"; got != want {
+		t.Errorf("agent mode wrote %q to stderr, want %q", got, want)
+	}
+}
+
+func TestPrintHelpersKeepHumanOutputWhenAgentModeIsOff(t *testing.T) {
+	var human bytes.Buffer
+	restore := SetWriter(&human)
+	defer restore()
+
+	PrintSuccess("done")
+	PrintError("boom")
+
+	got := human.String()
+	if !strings.Contains(got, "✔ done") {
+		t.Errorf("PrintSuccess wrote %q, want it to contain %q", got, "✔ done")
+	}
+	if !strings.Contains(got, "✘ boom") {
+		t.Errorf("PrintError wrote %q, want it to contain %q", got, "✘ boom")
+	}
+}
+
+func TestAskFunctionsTakeDefaultsInAgentMode(t *testing.T) {
+	var human bytes.Buffer
+	restoreUtils := SetWriter(&human)
+	defer restoreUtils()
+
+	output.SetAgent(true)
+	defer output.SetAgent(false)
+
+	// A reader that would supply an answer, to prove it is never read.
+	reader := bufio.NewReader(strings.NewReader("typed answer\ny\n2\n"))
+
+	if got := AskQuestion(reader, "Bundle name", "acme"); got != "acme" {
+		t.Errorf("AskQuestion() = %q, want the default %q", got, "acme")
+	}
+	if got, eof := AskQuestionOrEOF(reader, "Bundle name", "acme"); got != "acme" || !eof {
+		t.Errorf("AskQuestionOrEOF() = (%q, %v), want (%q, true)", got, eof, "acme")
+	}
+	if got := AskYesNo(reader, "Overwrite?", false); got != false {
+		t.Errorf("AskYesNo() = %v, want the default false", got)
+	}
+	if got := AskSelection(reader, "Type", []string{"project", "bundle"}, "bundle"); got != "bundle" {
+		t.Errorf("AskSelection() = %q, want the default %q", got, "bundle")
+	}
+	if human.Len() != 0 {
+		t.Errorf("agent mode printed the prompts: %q", human.String())
 	}
 }

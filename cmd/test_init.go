@@ -143,11 +143,11 @@ var testInitCmd = &cobra.Command{
 		utils.PrintSuccess("Test environment initialized successfully!")
 
 		utils.PrintTitle("Test Database Connection (e.g. PhpStorm):")
-		fmt.Println("  - Host: localhost")
-		fmt.Println("  - Port: 5433")
-		fmt.Printf("  - User: %s\n", dbUser)
-		fmt.Printf("  - Password: %s\n", dbPass)
-		fmt.Printf("  - Database: %s\n", dbName)
+		utils.PrintPlain("  - Host: localhost")
+		utils.PrintPlain("  - Port: 5433")
+		utils.PrintPlainf("  - User: %s\n", dbUser)
+		utils.PrintPlainf("  - Password: %s\n", dbPass)
+		utils.PrintPlainf("  - Database: %s\n", dbName)
 		return nil
 	},
 }

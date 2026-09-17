@@ -47,7 +47,7 @@ var upCmd = &cobra.Command{
 			}
 		}
 
-		fmt.Println()
+		utils.PrintPlain("")
 		utils.PrintSuccess("Orobox is up and running!")
 
 		var urls = docker.GetApplicationURLs()
@@ -55,56 +55,56 @@ var upCmd = &cobra.Command{
 		utils.PrintTitle("The application is available at:")
 
 		if len(urls) > 0 {
-			fmt.Printf("Backoffice: %s/admin (admin/admin)\n", urls[0])
-			fmt.Println("Storefront:")
+			utils.PrintPlainf("Backoffice: %s/admin (admin/admin)\n", urls[0])
+			utils.PrintPlain("Storefront:")
 
 			for _, url := range urls {
-				fmt.Printf("  - %s\n", url)
+				utils.PrintPlainf("  - %s\n", url)
 			}
 		} else {
-			fmt.Println("No application URLs configured. Set at least one domain in your config.")
+			utils.PrintPlain("No application URLs configured. Set at least one domain in your config.")
 		}
 
 		if viper.GetBool("services.mailpit") {
 			utils.PrintTitle("Mailpit is available at:")
-			fmt.Println("  - http://localhost:8025")
-			fmt.Printf("  - Set in your .env:\n")
-			fmt.Printf("	- ORO_MAILER_DSN=smtp://mail:1025\n")
+			utils.PrintPlain("  - http://localhost:8025")
+			utils.PrintPlainf("  - Set in your .env:\n")
+			utils.PrintPlainf("	- ORO_MAILER_DSN=smtp://mail:1025\n")
 		}
 
 		if viper.GetBool("services.adminer") {
 			utils.PrintTitle("Adminer is available at:")
-			fmt.Println("  - http://localhost:8081")
+			utils.PrintPlain("  - http://localhost:8081")
 			dbUser, dbPass, dbName, _ := docker.GetDatabaseCredentials()
-			fmt.Printf("  - Credentials: %s / %s (Database: %s)\n", dbUser, dbPass, dbName)
+			utils.PrintPlainf("  - Credentials: %s / %s (Database: %s)\n", dbUser, dbPass, dbName)
 
 			utils.PrintTitle("External Database Connection (e.g. PhpStorm):")
-			fmt.Println("  - Host: localhost")
-			fmt.Println("  - Port: 5432")
-			fmt.Printf("  - User: %s\n", dbUser)
-			fmt.Printf("  - Password: %s\n", dbPass)
-			fmt.Printf("  - Database: %s\n", dbName)
+			utils.PrintPlain("  - Host: localhost")
+			utils.PrintPlain("  - Port: 5432")
+			utils.PrintPlainf("  - User: %s\n", dbUser)
+			utils.PrintPlainf("  - Password: %s\n", dbPass)
+			utils.PrintPlainf("  - Database: %s\n", dbName)
 		}
 
 		if viper.GetBool("services.redis") {
 			utils.PrintTitle("Redis is available at:")
-			fmt.Printf("  - RedisInsight UI: http://localhost:8001\n")
-			fmt.Printf("  - Set in your .env:\n")
-			fmt.Printf("	- ORO_REDIS_URL=redis://redis:6379\n")
+			utils.PrintPlainf("  - RedisInsight UI: http://localhost:8001\n")
+			utils.PrintPlainf("  - Set in your .env:\n")
+			utils.PrintPlainf("	- ORO_REDIS_URL=redis://redis:6379\n")
 		}
 
 		if viper.GetBool("services.rabbitmq") {
 			utils.PrintTitle("RabbitMQ is available at:")
-			fmt.Printf("  - Management UI: http://localhost:15672 (guest/guest)\n")
-			fmt.Printf("  - Set in your .env:\n")
-			fmt.Printf("	- MESSENGER_TRANSPORT_DSN=amqp://guest:guest@rabbitmq:5672/%%2f/messages\n")
+			utils.PrintPlainf("  - Management UI: http://localhost:15672 (guest/guest)\n")
+			utils.PrintPlainf("  - Set in your .env:\n")
+			utils.PrintPlainf("	- MESSENGER_TRANSPORT_DSN=amqp://guest:guest@rabbitmq:5672/%%2f/messages\n")
 		}
 
 		if viper.GetBool("services.elasticsearch") {
 			utils.PrintTitle("Elasticsearch is available at:")
-			fmt.Printf("  - Kibana UI: http://localhost:5601\n")
-			fmt.Printf("  - Set in your .env:\n")
-			fmt.Printf("	- ORO_SEARCH_URL=http://elasticsearch:9200\n")
+			utils.PrintPlainf("  - Kibana UI: http://localhost:5601\n")
+			utils.PrintPlainf("  - Set in your .env:\n")
+			utils.PrintPlainf("	- ORO_SEARCH_URL=http://elasticsearch:9200\n")
 		}
 
 		return nil

@@ -72,7 +72,7 @@ the configuration, the Docker Compose files, and runs the OroCommerce install. U
 			utils.PrintTitle("Missing domains in hosts file")
 			utils.PrintWarning("The following domains are missing from your hosts file. Please add them manually to /etc/hosts:")
 			for _, host := range missingHosts {
-				fmt.Printf("127.0.0.1 %s\n", host)
+				utils.PrintPlainf("127.0.0.1 %s\n", host)
 			}
 		}
 		return nil

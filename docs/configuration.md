@@ -202,3 +202,41 @@ How it works, and what it costs:
 ### Global Flags
 These options can be used with any command:
 - `--config`: Specifies an alternative configuration file (default: `.orobox.yaml`).
+- `--debug` / `-d`: Shows all Docker output.
+- `--agent`: Minimal output for automated callers.
+
+#### Agent mode (`--agent`)
+
+`--agent` reduces a command's output to what an automated caller — an LLM agent, a script, a CI
+job that parses results — actually needs. Everything Orobox says about itself is dropped:
+banners, spinners, progress lines, per-tool headers and success confirmations.
+
+What is left:
+
+- **stdout** carries the payload only: QA findings, test failures, and the verbatim output of the
+  commands whose child process output *is* the result (`logs`, `shell`, `console`, `run`, `db`).
+- **stderr** carries errors, one line each, prefixed `error: `, with no colour. A multi-line
+  message gets the prefix on every line, so a caller splitting on newlines cannot mistake a
+  continuation for payload.
+- The **exit code** is unchanged from a normal run. It is what an agent reads.
+
+A command that succeeds with nothing to report prints nothing at all:
+
+```bash
+orobox qa --agent
+```
+
+On a clean tree that writes zero bytes and exits 0.
+
+Details worth knowing:
+
+- **`--debug` wins.** Passing both prints everything, as `--debug` alone would. `--debug` exists to
+  show the full picture, and silently discarding it would be the worse surprise.
+- **Flag only.** There is no environment variable and no auto-detection from a non-terminal
+  stdout. Agent mode is never entered because of an inherited shell or a pipe — existing CI
+  pipelines and scripts keep the output they have today.
+- **Prompts are never shown.** Interactive questions take their default instead of reading stdin,
+  so a command cannot hang waiting for an answer nobody is there to give. When a required value
+  has no default, the command writes one `error:` line naming what to set and exits non-zero.
+- **`--report` still works.** `orobox qa --report=gitlab --agent` writes the report file as usual;
+  only the summary on the terminal is suppressed.

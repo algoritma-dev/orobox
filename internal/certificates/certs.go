@@ -2,7 +2,6 @@
 package certificates
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -47,7 +46,7 @@ func InstallSslCertificates() {
 
 	err := os.MkdirAll(certsDirs, 0755)
 	if err != nil {
-		fmt.Printf("Warning: could not create certs directory: %v\n", err)
+		utils.PrintPlainf("Warning: could not create certs directory: %v\n", err)
 		return
 	}
 
@@ -70,13 +69,13 @@ func InstallSslCertificates() {
 			}
 		}
 
-		fmt.Printf("Generating certificates for %s...\n", domain.Host)
+		utils.PrintPlainf("Generating certificates for %s...\n", domain.Host)
 		cmd := exec.Command("mkcert", "-cert-file", certFile, "-key-file", keyFile, domain.Host)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		err = cmd.Run()
 		if err != nil {
-			fmt.Printf("Warning: could not generate certificates for %s: %v\n", domain.Host, err)
+			utils.PrintPlainf("Warning: could not generate certificates for %s: %v\n", domain.Host, err)
 		}
 	}
 }

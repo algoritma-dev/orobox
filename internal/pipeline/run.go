@@ -15,6 +15,7 @@ import (
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/qatools"
+	"github.com/algoritma-dev/orobox/internal/utils"
 )
 
 // artifactContainerDir is where every build step writes its tarballs and where the release
@@ -261,12 +262,12 @@ func (r *runner) resolveSource(ctx context.Context) error {
 		dir := r.plan.Source.Dir
 		excludes := HostExcludes(dir)
 		r.source = r.client.Host().Directory(dir, dagger.HostDirectoryOpts{Exclude: excludes})
-		fmt.Printf("Building the working tree in %s (%d excluded paths)\n", dir, len(excludes))
+		utils.PrintPlainf("Building the working tree in %s (%d excluded paths)\n", dir, len(excludes))
 		// Named, not counted: a count is what made the "stat vendor-bin/qa: no such file or
 		// directory" failure unreconstructable. Absent patterns are not an error — see
 		// MissingExcludes — so this is a note, printed only when there are any.
 		if missing := MissingExcludes(dir, excludes); len(missing) > 0 {
-			fmt.Printf("Excluded paths no longer on disk (harmless, listed for diagnosis): %s\n",
+			utils.PrintPlainf("Excluded paths no longer on disk (harmless, listed for diagnosis): %s\n",
 				strings.Join(missing, ", "))
 		}
 	case SourceGit:
@@ -305,7 +306,7 @@ func (r *runner) resolveGitSource(ctx context.Context) error {
 		// cannot authenticate an SSH URL, so one is converted here — for the clone only, since
 		// Deployer still needs the configured value.
 		if derived, ok := httpsCloneURL(cloneURL); ok {
-			fmt.Printf("No SSH agent available: cloning over https from %s\n", derived)
+			utils.PrintPlainf("No SSH agent available: cloning over https from %s\n", derived)
 			cloneURL = derived
 		}
 		gitOpts.HTTPAuthToken = r.client.SetSecret("orobox-git-token", r.opts.GitHTTPToken)
@@ -320,7 +321,7 @@ func (r *runner) resolveGitSource(ctx context.Context) error {
 		return r.cloneError(err)
 	}
 	r.source = ref.Tree()
-	fmt.Printf("Building %s at %s (%s)\n", r.plan.Ref, commit, r.plan.Repository)
+	utils.PrintPlainf("Building %s at %s (%s)\n", r.plan.Ref, commit, r.plan.Repository)
 	return nil
 }
 

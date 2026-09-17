@@ -74,6 +74,48 @@ CLI flags always override the configuration. Example:
 orobox qa --phpstan --eslint
 ```
 
+#### Agent mode (`--agent`)
+
+`--agent` is the global flag described in
+[Agent mode](configuration.md#agent-mode---agent); on `orobox qa` it changes what the run prints
+rather than what it does. The tools still run exactly as they would without it — locally they still
+fix what they can — but instead of each tool's own output, the command prints one line per finding:
+
+```
+fixed 7 files (php-cs-fixer 5, rector 2)
+src/Entity/Order.php:42 error phpstan Access to undefined property App\Entity\Order::$foo
+src/Form/Type/OrderType.php:11 major eslint semi Missing semicolon.
+```
+
+The grammar is `path:line severity tool [check] message`. The line number is omitted when the tool
+reported none. Findings are sorted by path and then by line, so two runs over an unchanged tree
+produce identical output. Severity is the tool's own value — `blocker`, `critical`, `major`,
+`minor`, `info` — not remapped.
+
+The first line appears only when a fixer rewrote something. PHP-CS-Fixer and Rector report the
+files they *changed* rather than problems left behind, so they are counted rather than listed: the
+caller's next move is to re-read the tree, whatever the file names were.
+
+At most 50 findings are printed. When there are more, a final line says how many were dropped:
+
+```
+... 38 more (--report=gitlab for the full list)
+```
+
+A tool that exits non-zero without writing any findings did not fail the tree, it failed to run — a
+missing binary, a broken configuration, a PHP fatal. That is reported on stderr and fails the run:
+
+```
+error: phpstan could not run (exit 255)
+```
+
+Exit codes:
+
+- **0** — nothing left to act on. Fixes alone do not fail the run.
+- **1** — findings remain, or a tool could not run.
+
+A clean tree prints nothing at all and exits 0.
+
 #### The pre-commit hook
 
 At the end of its run, `orobox qa-init` offers to install a git `pre-commit` hook. The hook checks

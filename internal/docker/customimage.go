@@ -16,6 +16,7 @@ import (
 	"sync"
 
 	"github.com/algoritma-dev/orobox/internal/config"
+	"github.com/algoritma-dev/orobox/internal/output"
 	"github.com/algoritma-dev/orobox/internal/utils"
 	"github.com/spf13/viper"
 )
@@ -284,12 +285,18 @@ func buildCustomImage(ref, base, contextDir, dockerfile, hash string) error {
 		return nil
 	}
 
-	var output bytes.Buffer
-	cmd.Stdout = &output
-	cmd.Stderr = &output
+	var buildLog bytes.Buffer
+	cmd.Stdout = &buildLog
+	cmd.Stderr = &buildLog
 	if err := cmd.Run(); err != nil {
 		utils.StopLoader()
-		fmt.Print(output.String())
+		// A failed build's own log is the only diagnostic there is, so agent mode keeps it — on
+		// stderr, where a caller can tell it apart from the payload.
+		if output.Agent() {
+			output.Err(buildLog.String())
+		} else {
+			fmt.Print(buildLog.String())
+		}
 		return fmt.Errorf("could not build %s from %s: %w", ref, config.GetDockerfile(), err)
 	}
 	return nil

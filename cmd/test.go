@@ -10,6 +10,7 @@ import (
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
+	"github.com/algoritma-dev/orobox/internal/output"
 	"github.com/algoritma-dev/orobox/internal/pipeline"
 	"github.com/algoritma-dev/orobox/internal/qatools"
 	"github.com/algoritma-dev/orobox/internal/report"
@@ -111,8 +112,9 @@ func runTestOnCompose(format qatools.Report) {
 
 	args = append(args, "exec")
 
-	// Check if we have a TTY
-	if !isTTY() {
+	// Check if we have a TTY. Agent mode never allocates one: there is no terminal to attach for
+	// an automated caller, and a TTY is also what lets PHPUnit decide to emit colour.
+	if !isTTY() || output.Agent() {
 		args = append(args, "-T")
 	}
 
@@ -139,7 +141,17 @@ func runTestOnCompose(format qatools.Report) {
 		args = append(args, "--testsuite", strings.Join(testsuites, ","))
 	}
 
-	if format != qatools.ReportNone {
+	// Agent mode needs the JUnit log whatever the caller asked for: it is the only machine-readable
+	// account of which tests failed. agentOnly marks the case where nobody asked for the report
+	// itself, so no merged document is written and the log is cleaned up after.
+	effectiveFormat := format
+	agentOnly := false
+	if output.Agent() && format == qatools.ReportNone {
+		effectiveFormat = qatools.ReportGitLab
+		agentOnly = true
+	}
+
+	if effectiveFormat != qatools.ReportNone {
 		// The source root is bind-mounted, so the directory created here is the one PHPUnit writes
 		// into and the file it produces is already on the host.
 		if err := os.MkdirAll(rawReportDir("test"), 0o755); err != nil {
@@ -148,6 +160,15 @@ func runTestOnCompose(format qatools.Report) {
 		}
 		args = append(args, "--log-junit",
 			config.GetSourceRootContainerPath()+"/"+rawReportsRelDir+"/test/junit.xml")
+	}
+
+	if output.Agent() {
+		captured, runErr := docker.RunComposeCommandWithOutput(args...)
+		if agentOnly {
+			defer func() { _ = os.RemoveAll(rawReportDir("test")) }()
+		}
+		finishTestAgent(rawReportDir("test"), runErr, captured)
+		return
 	}
 
 	err = docker.RunComposeCommand("", args...)
@@ -177,6 +198,16 @@ func runTestOnDagger(format qatools.Report) {
 	}
 
 	projectDir := config.GetHostBundlePath()
+
+	// Same split as the compose path: agent mode runs the report machinery to read the JUnit log,
+	// but a caller that did not ask for the report gets no document written.
+	effectiveFormat := format
+	agentOnly := false
+	if output.Agent() && format == qatools.ReportNone {
+		effectiveFormat = qatools.ReportGitLab
+		agentOnly = true
+	}
+
 	plan := pipeline.NewChecks(&conf, pipeline.ChecksOptions{
 		ProjectDir:     projectDir,
 		CacheScope:     resolveCacheScope(testCacheScope),
@@ -184,7 +215,7 @@ func runTestOnDagger(format qatools.Report) {
 		RunTest:        true,
 		Suites:         testsuites,
 		Filter:         filter,
-		Report:         format,
+		Report:         effectiveFormat,
 	})
 
 	utils.PrintInfo("Running the tests in the pipeline engine. The first run has no caches and takes a while.")
@@ -198,6 +229,22 @@ func runTestOnDagger(format qatools.Report) {
 		SSHPrivateKey: os.Getenv("OROBOX_DEPLOY_SSH_KEY"),
 		ReportHostDir: filepath.Join(projectDir, rawReportsRelDir),
 	})
+
+	if output.Agent() {
+		if agentOnly && result.TestReportDir != "" {
+			defer func() { _ = os.RemoveAll(result.TestReportDir) }()
+		}
+		// In report mode the step exits 0 whatever PHPUnit concluded, so a failing suite arrives
+		// through the status file rather than through runErr.
+		var suiteErr error
+		if runErr == nil && reportStatusFailed(result.TestReportDir) {
+			suiteErr = fmt.Errorf("the test suites reported failures")
+		} else {
+			suiteErr = runErr
+		}
+		finishTestAgent(result.TestReportDir, suiteErr, nil)
+		return
+	}
 
 	if format != qatools.ReportNone {
 		if runErr != nil {

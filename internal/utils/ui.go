@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"golang.org/x/term"
+
+	"github.com/algoritma-dev/orobox/internal/output"
 )
 
 var (
@@ -29,29 +31,81 @@ const (
 	colorCyan   = "\033[36m"
 )
 
-// PrintSuccess prints a success message in green.
+// out is where the human-facing helpers write. It is a variable so tests can capture what a
+// command printed, which is the only way to assert that agent mode printed nothing.
+var out io.Writer = os.Stdout
+
+// SetWriter redirects the print helpers and returns a function restoring the previous writer.
+func SetWriter(w io.Writer) func() {
+	prev := out
+	out = w
+	return func() { out = prev }
+}
+
+// PrintPlain writes one line verbatim: no glyph, no colour, nothing prepended.
+//
+// It exists for the blocks of URLs, credentials and .env snippets the commands print as a unit,
+// where a per-line glyph would be noise. Gating those through here rather than through fmt.Println
+// is what lets agent mode drop them; the output a human sees is unchanged.
+func PrintPlain(message string) {
+	if output.Agent() {
+		return
+	}
+	fmt.Fprintln(out, message)
+}
+
+// PrintPlainf is PrintPlain with a format string. The format supplies its own newline, exactly as
+// the fmt.Printf calls it replaces did.
+func PrintPlainf(format string, a ...any) {
+	if output.Agent() {
+		return
+	}
+	fmt.Fprintf(out, format, a...)
+}
+
+// PrintSuccess prints a success message in green. Agent mode drops it: a caller that reads the
+// exit code does not need to be told the exit code was zero.
 func PrintSuccess(message string) {
-	fmt.Printf("%s✔ %s%s\n", colorGreen, message, colorReset)
+	if output.Agent() {
+		return
+	}
+	fmt.Fprintf(out, "%s✔ %s%s\n", colorGreen, message, colorReset)
 }
 
-// PrintError prints an error message in red.
+// PrintError prints an error message in red. Agent mode is the one case that still prints: an
+// error is the only thing an automated caller cannot reconstruct from the exit code.
 func PrintError(message string) {
-	fmt.Printf("%s✘ %s%s\n", colorRed, message, colorReset)
+	if output.Agent() {
+		output.Err(message)
+		return
+	}
+	fmt.Fprintf(out, "%s✘ %s%s\n", colorRed, message, colorReset)
 }
 
-// PrintWarning prints a warning message in yellow.
+// PrintWarning prints a warning message in yellow. Dropped in agent mode: a warning is by
+// definition something the run survived, so the caller can act on the result without it.
 func PrintWarning(message string) {
-	fmt.Printf("%s⚠ %s%s\n", colorYellow, message, colorReset)
+	if output.Agent() {
+		return
+	}
+	fmt.Fprintf(out, "%s⚠ %s%s\n", colorYellow, message, colorReset)
 }
 
-// PrintInfo prints an informational message in blue.
+// PrintInfo prints an informational message in blue. Dropped in agent mode.
 func PrintInfo(message string) {
-	fmt.Printf("%sℹ %s%s\n", colorBlue, message, colorReset)
+	if output.Agent() {
+		return
+	}
+	fmt.Fprintf(out, "%sℹ %s%s\n", colorBlue, message, colorReset)
 }
 
-// PrintTitle prints a title message in cyan.
+// PrintTitle prints a title message in cyan. Dropped in agent mode: a section header structures
+// output for a human reading it scroll past, which is not what agent mode produces.
 func PrintTitle(message string) {
-	fmt.Printf("\n%s%s%s\n", colorCyan, message, colorReset)
+	if output.Agent() {
+		return
+	}
+	fmt.Fprintf(out, "\n%s%s%s\n", colorCyan, message, colorReset)
 }
 
 // AskQuestion asks a question to the user and returns the answer or a default value.
@@ -66,7 +120,13 @@ func AskQuestion(reader *bufio.Reader, question string, defaultValue string) str
 // non-interactive run — a script, a CI job, the e2e harness — hits EOF on the first read, so a
 // loop that only checked for an empty answer would never end.
 func AskQuestionOrEOF(reader *bufio.Reader, question string, defaultValue string) (string, bool) {
-	fmt.Printf("%s%s%s [%s]: ", colorCyan, question, colorReset, defaultValue)
+	// Agent mode never prompts. The eof result is what a caller looping for a required value
+	// tests, so returning true here ends that loop with the same "nothing more is coming" answer
+	// a closed stdin gives — see SkipPrompts.
+	if output.Agent() {
+		return defaultValue, true
+	}
+	fmt.Fprintf(out, "%s%s%s [%s]: ", colorCyan, question, colorReset, defaultValue)
 	input, err := reader.ReadString('\n')
 	eof := errors.Is(err, io.EOF)
 	input = strings.TrimSpace(input)
@@ -78,11 +138,16 @@ func AskQuestionOrEOF(reader *bufio.Reader, question string, defaultValue string
 
 // AskYesNo asks a yes/no question to the user and returns the boolean response.
 func AskYesNo(reader *bufio.Reader, question string, defaultValue bool) bool {
+	// Agent mode takes the default rather than prompting. A yes/no question an automated caller
+	// cannot see would block the run until its stdin closed.
+	if output.Agent() {
+		return defaultValue
+	}
 	defaultStr := "y"
 	if !defaultValue {
 		defaultStr = "n"
 	}
-	fmt.Printf("%s%s (y/n)%s [%s]: ", colorCyan, question, colorReset, defaultStr)
+	fmt.Fprintf(out, "%s%s (y/n)%s [%s]: ", colorCyan, question, colorReset, defaultStr)
 	input, _ := reader.ReadString('\n')
 	input = strings.TrimSpace(strings.ToLower(input))
 	if input == "" {
@@ -111,9 +176,14 @@ func SkipPrompts(r io.Reader) bool {
 
 // AskSelection asks a multiple choice question to the user and returns the selected value.
 func AskSelection(reader *bufio.Reader, question string, options []string, defaultValue string) string {
-	fmt.Printf("%s%s%s\n", colorCyan, question, colorReset)
+	// Agent mode takes the default. Printing the options would cost the caller a line each to
+	// describe a choice it is not being offered.
+	if output.Agent() {
+		return defaultValue
+	}
+	fmt.Fprintf(out, "%s%s%s\n", colorCyan, question, colorReset)
 	for i, option := range options {
-		fmt.Printf("  [%d] %s\n", i+1, option)
+		fmt.Fprintf(out, "  [%d] %s\n", i+1, option)
 	}
 
 	defaultIdx := -1
@@ -125,9 +195,9 @@ func AskSelection(reader *bufio.Reader, question string, options []string, defau
 	}
 
 	if defaultIdx != -1 {
-		fmt.Printf("Selection [%d]: ", defaultIdx)
+		fmt.Fprintf(out, "Selection [%d]: ", defaultIdx)
 	} else {
-		fmt.Printf("Selection: ")
+		fmt.Fprint(out, "Selection: ")
 	}
 
 	input, _ := reader.ReadString('\n')
@@ -140,7 +210,7 @@ func AskSelection(reader *bufio.Reader, question string, options []string, defau
 	var idx int
 	_, err := fmt.Sscanf(input, "%d", &idx)
 	if err != nil || idx < 1 || idx > len(options) {
-		fmt.Println("Invalid selection, please try again.")
+		fmt.Fprintln(out, "Invalid selection, please try again.")
 		return AskSelection(reader, question, options, defaultValue)
 	}
 
@@ -167,9 +237,15 @@ func StartLoader(message string) {
 		return // Loader already running
 	}
 
+	// Agent mode starts no spinner and prints no fallback message. The spinner is a human's
+	// reassurance that a long step is still alive; an automated caller reads the result.
+	if output.Agent() {
+		return
+	}
+
 	if !stdoutIsTerminal() {
 		if message != "" {
-			fmt.Println(message)
+			fmt.Fprintln(out, message)
 		}
 		return
 	}
@@ -188,10 +264,10 @@ func StartLoader(message string) {
 		for {
 			select {
 			case <-stopCh:
-				fmt.Print("\r\033[K") // Clear the line
+				fmt.Fprint(out, "\r\033[K") // Clear the line
 				return
 			case <-ticker.C:
-				fmt.Printf("\r%s%s %s%s", colorCyan, frames[i], message, colorReset)
+				fmt.Fprintf(out, "\r%s%s %s%s", colorCyan, frames[i], message, colorReset)
 				i = (i + 1) % len(frames)
 			}
 		}

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/algoritma-dev/orobox/internal/config"
+	"github.com/algoritma-dev/orobox/internal/output"
 	"github.com/algoritma-dev/orobox/internal/utils"
 )
 
@@ -455,7 +456,7 @@ func writeComposeFile(internalDir string, filename string, data any) bool {
 	src := filepath.Join("templates/docker", filename)
 	composeTemplate, err := fs.ReadFile(Templates, src)
 	if err != nil {
-		fmt.Printf("Warning: could not read template %s: %v\n", src, err)
+		utils.PrintPlainf("Warning: could not read template %s: %v\n", src, err)
 		return false
 	}
 
@@ -557,11 +558,22 @@ var RunComposeCommandSilently = func(message string, args ...string) error {
 	if err != nil {
 		utils.StopLoader() // Stop loader before printing error
 		stderrStr := stderr.String()
-		if stderr.Len() > 0 {
-			fmt.Print(stderrStr)
-		}
-		if stdout.Len() > 0 {
-			fmt.Print(stdout.String())
+		// A failed command's own output is the only diagnostic there is, so agent mode keeps it —
+		// on stderr, where a caller can tell it apart from the payload.
+		if output.Agent() {
+			if stderr.Len() > 0 {
+				output.Err(stderrStr)
+			}
+			if stdout.Len() > 0 {
+				output.Err(stdout.String())
+			}
+		} else {
+			if stderr.Len() > 0 {
+				fmt.Print(stderrStr)
+			}
+			if stdout.Len() > 0 {
+				fmt.Print(stdout.String())
+			}
 		}
 
 		if strings.Contains(stderrStr, "unauthorized: incorrect username or password") {
@@ -622,11 +634,22 @@ var RunSetupComposeCommandSilently = func(message string, args ...string) error 
 	if err != nil {
 		utils.StopLoader()
 		stderrStr := stderr.String()
-		if stderr.Len() > 0 {
-			fmt.Print(stderrStr)
-		}
-		if stdout.Len() > 0 {
-			fmt.Print(stdout.String())
+		// A failed command's own output is the only diagnostic there is, so agent mode keeps it —
+		// on stderr, where a caller can tell it apart from the payload.
+		if output.Agent() {
+			if stderr.Len() > 0 {
+				output.Err(stderrStr)
+			}
+			if stdout.Len() > 0 {
+				output.Err(stdout.String())
+			}
+		} else {
+			if stderr.Len() > 0 {
+				fmt.Print(stderrStr)
+			}
+			if stdout.Len() > 0 {
+				fmt.Print(stdout.String())
+			}
 		}
 		return err
 	}
@@ -1347,7 +1370,7 @@ func writeDockerfile(internalDir string, data any) bool {
 	src := "templates/docker/Dockerfile"
 	dockerfileContent, err := fs.ReadFile(Templates, src)
 	if err != nil {
-		fmt.Printf("Warning: could not read template %s: %v\n", src, err)
+		utils.PrintPlainf("Warning: could not read template %s: %v\n", src, err)
 		return false
 	}
 
@@ -1383,7 +1406,7 @@ func writeEnvFile(path string, internalDir string, data any) bool {
 	if _, err := os.Stat(filename); err == nil {
 		content, err := os.ReadFile(filename)
 		if err != nil {
-			fmt.Printf("Warning: could not read local file %s: %v\n", filename, err)
+			utils.PrintPlainf("Warning: could not read local file %s: %v\n", filename, err)
 			return false
 		}
 
@@ -1402,7 +1425,7 @@ func writeEnvFile(path string, internalDir string, data any) bool {
 
 	envContent, err := fs.ReadFile(Templates, path)
 	if err != nil {
-		fmt.Printf("Warning: could not read template %s: %v\n", path, err)
+		utils.PrintPlainf("Warning: could not read template %s: %v\n", path, err)
 		return false
 	}
 
@@ -1435,7 +1458,7 @@ func writeNginxConf(internalDir string, data any) bool {
 	src := "templates/docker/nginx.conf"
 	nginxContent, err := fs.ReadFile(Templates, src)
 	if err != nil {
-		fmt.Printf("Warning: could not read template %s: %v\n", src, err)
+		utils.PrintPlainf("Warning: could not read template %s: %v\n", src, err)
 		return false
 	}
 
@@ -1468,7 +1491,7 @@ func writeInitDbSQL(internalDir string, data any) bool {
 	src := "templates/docker/init-db.sql"
 	content, err := fs.ReadFile(Templates, src)
 	if err != nil {
-		fmt.Printf("Warning: could not read template %s: %v\n", src, err)
+		utils.PrintPlainf("Warning: could not read template %s: %v\n", src, err)
 		return false
 	}
 
@@ -1501,7 +1524,7 @@ func writeEntrypoint(internalDir string, data any) bool {
 	src := "templates/docker/docker-entrypoint.sh"
 	content, err := fs.ReadFile(Templates, src)
 	if err != nil {
-		fmt.Printf("Warning: could not read template %s: %v\n", src, err)
+		utils.PrintPlainf("Warning: could not read template %s: %v\n", src, err)
 		return false
 	}
 

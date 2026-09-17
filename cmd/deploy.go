@@ -285,30 +285,30 @@ func printDeploySummary(plan *pipeline.Plan) {
 	stage := plan.Stage
 
 	utils.PrintTitle("Deploy plan")
-	fmt.Printf("  Stage:      %s\n", stage.Name)
-	fmt.Printf("  Ref:        %s\n", plan.Ref)
-	fmt.Printf("  Repository: %s\n", plan.Repository)
-	fmt.Printf("  Cache:      %s\n", plan.CacheScope)
+	utils.PrintPlainf("  Stage:      %s\n", stage.Name)
+	utils.PrintPlainf("  Ref:        %s\n", plan.Ref)
+	utils.PrintPlainf("  Repository: %s\n", plan.Repository)
+	utils.PrintPlainf("  Cache:      %s\n", plan.CacheScope)
 	if plan.BaseCacheScope != "" {
-		fmt.Printf("  Cache base: %s\n", plan.BaseCacheScope)
+		utils.PrintPlainf("  Cache base: %s\n", plan.BaseCacheScope)
 	}
 	if plan.SourceDir != "" {
-		fmt.Printf("  Source dir: %s\n", plan.SourceDir)
+		utils.PrintPlainf("  Source dir: %s\n", plan.SourceDir)
 	}
-	fmt.Printf("  Target:     %s@%s:%d%s\n", stage.User, stage.Host, stage.SSHPort(), stage.DeployPath)
-	fmt.Printf("  Image:      %s\n", plan.Image)
-	fmt.Printf("  Suites:     %v\n", stage.Suites())
+	utils.PrintPlainf("  Target:     %s@%s:%d%s\n", stage.User, stage.Host, stage.SSHPort(), stage.DeployPath)
+	utils.PrintPlainf("  Image:      %s\n", plan.Image)
+	utils.PrintPlainf("  Suites:     %v\n", stage.Suites())
 	if plan.BuildsAssets() {
-		fmt.Println("  Assets:     built in the pipeline and uploaded")
+		utils.PrintPlain("  Assets:     built in the pipeline and uploaded")
 	} else {
-		fmt.Println("  Assets:     taken from the repository (pre_built_assets_enabled: true)")
+		utils.PrintPlain("  Assets:     taken from the repository (pre_built_assets_enabled: true)")
 	}
 	if plan.BuildsArtifacts() {
-		fmt.Printf("  Artifacts:  %v\n", plan.Artifacts())
+		utils.PrintPlainf("  Artifacts:  %v\n", plan.Artifacts())
 	} else {
-		fmt.Println("  Artifacts:  none (nothing to release)")
+		utils.PrintPlain("  Artifacts:  none (nothing to release)")
 	}
 	if skipped := plan.SkippedSteps(); len(skipped) > 0 {
-		fmt.Printf("  Skipping:   %v\n", skipped)
+		utils.PrintPlainf("  Skipping:   %v\n", skipped)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/algoritma-dev/orobox/internal/config"
+	"github.com/algoritma-dev/orobox/internal/output"
 	"github.com/algoritma-dev/orobox/internal/utils"
 
 	"github.com/spf13/cobra"
@@ -23,6 +24,15 @@ var rootCmd = &cobra.Command{
 	Long:    `Orobox is a CLI tool to quickly configure an isolated development environment for OroCommerce bundles.`,
 	Version: Version,
 	PersistentPreRun: func(cmd *cobra.Command, _ []string) {
+		// --debug wins. It exists to show everything, and silently discarding it would be a worse
+		// surprise than ignoring the flag that asked for silence.
+		//
+		// cmd.Flags() rather than rootCmd.PersistentFlags(): cobra merges inherited flags into the
+		// executing command, so this reads the value whether --agent came before or after the
+		// subcommand name.
+		agent, _ := cmd.Flags().GetBool("agent")
+		output.SetAgent(agent && !viper.GetBool("debug"))
+
 		if ConfigError != nil && !isConfigExempt(cmd) {
 			utils.PrintError(ConfigError.Error())
 			os.Exit(1)
@@ -45,6 +55,12 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is .orobox.yaml)")
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "show all docker output")
 	_ = viper.BindPFlag("debug", rootCmd.PersistentFlags().Lookup("debug"))
+
+	// Deliberately not bound to viper. Binding is what exposes a setting to AutomaticEnv under the
+	// ORO_ prefix, and agent mode must never switch on because of an inherited environment: a
+	// developer whose shell exported it once would get silent commands for the rest of the day.
+	rootCmd.PersistentFlags().Bool("agent", false,
+		"minimal output for automated callers: payload and errors only (ignored with --debug)")
 }
 
 // ConfigError contains the error if the configuration file is invalid.

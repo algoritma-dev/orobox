@@ -174,6 +174,10 @@ func runGreenPath(t *testing.T, c Case) {
 	// while the job stayed green.
 	assertQa(t, box, c)
 
+	// 9b. qa --agent — the same tools, graded on the output contract rather than on the analysis.
+	// It runs right after assertQa so it inherits the tools that step proved are installed.
+	assertQaAgent(t, box, c)
+
 	// 10. test-init is not a generator: it provisions the test database and cache (its only
 	// write to the checkout is .orobox.yaml, and only behind --tmpfs), so counting files
 	// would always report "created no new files". Assert that it completes instead. It runs
@@ -189,6 +193,51 @@ func runGreenPath(t *testing.T, c Case) {
 	// "clean": it removes every container and volume so the next run starts fresh.
 	box.Run("clear")
 	box.Run("down")
+}
+
+// assertQaAgent drives `orobox qa --agent` and grades it on the contract that mode promises: the
+// payload on stdout, one finding per line, diagnostics on stderr, and nothing else anywhere.
+//
+// It deliberately does not use the suite's `failed` helper. That helper looks for the ✘ glyph
+// utils.PrintError writes, and agent mode writes `error: ` to stderr with no glyph at all — so a
+// failing agent-mode run would grade as a success there.
+//
+// What is under test is the formatting, not the analysis: assertQa has already established that
+// the tools run in this box, and whether stock OroCommerce is clean is not this step's business.
+func assertQaAgent(t *testing.T, box *Box, c Case) {
+	t.Helper()
+
+	res := box.TryRun("qa", "--agent")
+
+	// Nothing Orobox says about itself, and nothing the tools print for a human, may appear.
+	for _, banner := range []string{"Running QA tools", "--- Running ", "✔", "✘", "⚠", "ℹ"} {
+		if strings.Contains(res.Stdout, banner) {
+			t.Errorf("qa --agent leaked %q into stdout for %s %s:\n%s", banner, c.Version, c.Type, res.Stdout)
+		}
+	}
+
+	for _, line := range strings.Split(strings.TrimSpace(res.Stdout), "\n") {
+		if line == "" || strings.HasPrefix(line, "fixed ") || strings.HasPrefix(line, "... ") {
+			continue
+		}
+		// path[:line] severity tool [check] message
+		if fields := strings.Fields(line); len(fields) < 3 {
+			t.Errorf("qa --agent printed a line that does not parse for %s %s: %q", c.Version, c.Type, line)
+		}
+	}
+
+	// A failure with no output anywhere is the one outcome an automated caller cannot act on.
+	if res.ExitCode != 0 && strings.TrimSpace(res.Stdout) == "" && strings.TrimSpace(res.Stderr) == "" {
+		t.Errorf("qa --agent failed for %s %s with no output at all", c.Version, c.Type)
+	}
+
+	// The zero-bytes promise, checked on the narrowest tool available. The run above left the tree
+	// in whatever state its fixers produced, so a second pass over the same files has nothing left
+	// to report or to fix.
+	clean := box.TryRun("qa", "--agent", "--php-cs-fixer")
+	if clean.ExitCode == 0 && clean.Stdout != "" {
+		t.Errorf("a passing qa --agent wrote %q for %s %s, want nothing at all", clean.Stdout, c.Version, c.Type)
+	}
 }
 
 // assertQa drives `orobox qa` in report mode and grades each tool on what it recorded, not on the
