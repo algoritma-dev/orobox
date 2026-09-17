@@ -6,9 +6,17 @@ All notable changes to this project are documented here. The format follows
 "release candidate" means for this project.
 
 Entries below `1.0.0-rc1` are reconstructed and aggregated from `git log` for readability; they
-group commits by theme rather than listing every commit. There is no stable `1.0.0` yet.
+group commits by theme rather than listing every commit.
 
 ## [Unreleased]
+
+## [1.0.0] - 2026-09-17
+
+- First stable release. It carries the same code as `1.0.0-rc34`; the release-candidate series
+  that started at `1.0.0-rc1` ends here.
+- `releases/latest` now resolves to a stable tag, so the README install commands use
+  `releases/latest/download/` instead of pinning an explicit `rcN`, and `orobox self-update` and
+  the update notice track stable releases.
 
 ## [1.0.0-rc34] - 2026-09-17
 
@@ -30,9 +38,10 @@ group commits by theme rather than listing every commit. There is no stable `1.0
   property of the install type rather than a hard-coded choice.
 - Fixed the QA config merge: project overrides stay in effect when only one half of the config
   pair is present.
-- Release candidates are now published as full GitHub releases instead of pre-releases, so
-  `releases/latest`, `orobox self-update` and the update notice resolve to the newest `rcN` while
-  no stable `1.0.0` exists.
+- Release candidates are published as GitHub pre-releases again (`release.prerelease: auto` in
+  `.goreleaser.yaml`), so `releases/latest`, `orobox self-update` and the update notice resolve to
+  the newest stable tag rather than to the newest `rcN`. Every existing `rcN` and `-dev` release
+  was re-flagged as a pre-release to match.
 - Bumped `golang.org/x/term` to 0.46.0, `golang.org/x/sync` to 0.23.0, and the GitHub Actions used
   in CI (`checkout`, `setup-go`, `setup-python`, `upload-artifact`, `stale`, `docker/login-action`).
 

@@ -61,7 +61,6 @@ pre-release validation; GoReleaser marks it as a GitHub pre-release
 tagged. A stable release is cut once the checklist in the tracking issue for that version is
 complete (see the "Release 1.0.0" issue for the current one).
 
-Because no stable tag exists yet, `releases/latest` has nothing to resolve to, so the README
-install commands pin the current release candidate explicitly. Bump that pin in `README.md`
-along with `cmd/root.go` when cutting a new `rcN`; once `1.0.0` is tagged, the commands can go
-back to `releases/latest`.
+Since `1.0.0`, a stable tag exists, so the README install commands use `releases/latest/download/`
+and need no version bump of their own. `make set-version v=X.Y.Z` still rewrites `cmd/root.go`
+and any explicit version in `README.md`.
