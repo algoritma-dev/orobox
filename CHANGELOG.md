@@ -10,6 +10,8 @@ group commits by theme rather than listing every commit. There is no stable `1.0
 
 ## [Unreleased]
 
+## [1.0.0-rc34] - 2026-09-17
+
 - Added `orobox qa --staged`, which checks only the files the current commit stages. Each tool is
   narrowed by extension and a tool with nothing staged for it does not run; PHPStan still analyses
   the whole tree, because a changed class breaks callers the commit never touched. A staged run is
@@ -19,6 +21,20 @@ group commits by theme rather than listing every commit. There is no stable `1.0
   an IDE ticked, so a partial commit from PhpStorm checks exactly what it commits. Skip it with
   `OROBOX_SKIP_PRECOMMIT=1` or `git commit --no-verify`. An existing hook is kept as
   `pre-commit.bak` after a confirmation.
+- Added an update notice: commands print a one-line hint when a newer release exists. The lookup
+  is cached for 24 hours, bounded by a 3-second timeout, and skipped when stdout is not a
+  terminal, so it never delays or clutters scripted runs.
+- Added agent mode to the QA and PHPUnit commands, so their output can be consumed by a coding
+  agent instead of a human reader.
+- Added `BindsVarToHost` to the installation-type configuration, making the `var/` bind mount a
+  property of the install type rather than a hard-coded choice.
+- Fixed the QA config merge: project overrides stay in effect when only one half of the config
+  pair is present.
+- Release candidates are now published as full GitHub releases instead of pre-releases, so
+  `releases/latest`, `orobox self-update` and the update notice resolve to the newest `rcN` while
+  no stable `1.0.0` exists.
+- Bumped `golang.org/x/term` to 0.46.0, `golang.org/x/sync` to 0.23.0, and the GitHub Actions used
+  in CI (`checkout`, `setup-go`, `setup-python`, `upload-artifact`, `stale`, `docker/login-action`).
 
 ## [1.0.0-rc31] - 2026-09-07
 
