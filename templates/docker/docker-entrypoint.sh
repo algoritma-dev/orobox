@@ -87,8 +87,8 @@ case "$1" in
 
         # Fix permissions before install if running as root
         if [ "$(id -u)" = "0" ]; then
-            chown -R ${ORO_USER_RUNTIME:-www-data} var/cache var/logs var/data 2>/dev/null || true
-            chmod -R 777 var/cache var/logs var/data 2>/dev/null || true
+            chown -R ${ORO_USER_RUNTIME:-www-data} var/cache var/logs var/data var/sessions 2>/dev/null || true
+            chmod -R 777 var/cache var/logs var/data var/sessions 2>/dev/null || true
         fi
         rm -rf var/cache/* var/logs/* var/sessions/*
 

@@ -16,6 +16,11 @@ type InstallType interface {
 	RequiresBundleNamespace() bool // bundle only — gates init prompts + validation
 	WarnOnMissingComposerJSON() bool
 	BindWholeRepo() bool // project/demo: bind repo onto OroRoot; bundle: false
+	// BindsVarToHost reports whether <project>/var and its subfolders live on the host bind
+	// instead of Docker-managed volumes. Project/demo bind the whole checkout, so var/cache and
+	// var/data must stay visible on the host; bundle has no var tree on the host and keeps them
+	// in named volumes.
+	BindsVarToHost() bool
 	// MountsInternalEnvFiles reports whether Orobox bind-mounts its generated .env and
 	// .env.test over the app's .env-app.local and .env-app.test. Bundle only: when the
 	// whole checkout is bound onto OroRoot it already carries those files and owns them.
@@ -55,6 +60,9 @@ func (bundleType) WarnOnMissingComposerJSON() bool { return true }
 // BindWholeRepo returns false for bundle install type.
 func (bundleType) BindWholeRepo() bool { return false }
 
+// BindsVarToHost returns false for bundle install type.
+func (bundleType) BindsVarToHost() bool { return false }
+
 // MountsInternalEnvFiles returns true for bundle install type.
 func (bundleType) MountsInternalEnvFiles() bool { return true }
 
@@ -90,6 +98,9 @@ func (projectType) WarnOnMissingComposerJSON() bool { return false }
 
 // BindWholeRepo returns true for project install type.
 func (projectType) BindWholeRepo() bool { return true }
+
+// BindsVarToHost returns true for project install type.
+func (projectType) BindsVarToHost() bool { return true }
 
 // MountsInternalEnvFiles returns false for project install type.
 func (projectType) MountsInternalEnvFiles() bool { return false }

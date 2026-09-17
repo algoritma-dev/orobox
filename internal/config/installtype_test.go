@@ -61,6 +61,9 @@ func TestBundleTypeFlags(t *testing.T) {
 	if !it.MountsInternalEnvFiles() {
 		t.Error("bundle should MountsInternalEnvFiles")
 	}
+	if it.BindsVarToHost() {
+		t.Error("bundle should not BindsVarToHost")
+	}
 }
 
 func TestProjectTypeFlags(t *testing.T) {
@@ -88,6 +91,9 @@ func TestProjectTypeFlags(t *testing.T) {
 	}
 	if it.MountsInternalEnvFiles() {
 		t.Error("project should not MountsInternalEnvFiles")
+	}
+	if !it.BindsVarToHost() {
+		t.Error("project should BindsVarToHost")
 	}
 }
 
@@ -119,6 +125,9 @@ func TestDemoTypeFlags(t *testing.T) {
 	}
 	if it.MountsInternalEnvFiles() {
 		t.Error("demo should not MountsInternalEnvFiles")
+	}
+	if !it.BindsVarToHost() {
+		t.Error("demo should BindsVarToHost")
 	}
 }
 

@@ -84,7 +84,7 @@ var dbRestoreCmd = &cobra.Command{
 // because both steps have to happen in the container, in that order, in one exec.
 //
 // The fresh directory is recreated by the same exec rather than left to whoever gets there first.
-// var/cache is a volume every Oro container shares, so the directory's mode is whatever the
+// var/cache is shared by every Oro container, so the directory's mode is whatever the
 // winning process's umask made it; creating it here means it is always the application container's.
 const cacheClearScript = `set -e
 dir=var/cache/dev
@@ -96,7 +96,7 @@ if [ -d "$dir" ]; then
 fi`
 
 // oroKernelServices are the long-running services that boot an Oro kernel of their own against
-// the same var/cache volume the application container writes to.
+// the same var/cache directory the application container writes to.
 //
 // They are stopped for the duration of a restore, and that is not only about the cache. A restore
 // drops and recreates the database under them: a consumer mid-message, a cron job mid-run or a

@@ -265,6 +265,7 @@ func EnsureDockerCompose() bool {
 		ImageSuffix             string
 		SourceRootContainer     string
 		BindWholeRepo           bool
+		BindsVarToHost          bool
 		RunsComposerRequire     bool
 		RunsComposerInstall     bool
 		SyncsVendorToHost       bool
@@ -303,6 +304,7 @@ func EnsureDockerCompose() bool {
 	data.ImageSuffix = installType.ImageSuffix()
 	data.SourceRootContainer = installType.SourceRootContainer()
 	data.BindWholeRepo = installType.BindWholeRepo()
+	data.BindsVarToHost = installType.BindsVarToHost()
 	data.RunsComposerRequire = installType.RunsComposerRequire()
 	data.RunsComposerInstall = installType.RunsComposerInstall()
 	data.SyncsVendorToHost = installType.SyncsVendorToHost()
