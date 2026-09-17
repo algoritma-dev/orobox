@@ -1,0 +1,977 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Docker-based local development environment for OroCommerce.">
+      
+      
+      
+        <link rel="canonical" href="https://algoritma-dev.github.io/orobox/deployment/">
+      
+      
+        <link rel="prev" href="../qa/">
+      
+      
+        <link rel="next" href="../debugging/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Deployment - Orobox</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#deployment" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Orobox" class="md-header__button md-logo" aria-label="Orobox" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Orobox
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Deployment
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/algoritma-dev/orobox" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    algoritma-dev/orobox
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Orobox" class="md-nav__button md-logo" aria-label="Orobox" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Orobox
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/algoritma-dev/orobox" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    algoritma-dev/orobox
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../qa/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    QA tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#13-deployment-initialization-deploy-init" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Deployment Initialization (deploy-init)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#14-ci-initialization-ci-init" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14. CI Initialization (ci-init)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#15-deploy-deploy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15. Deploy (deploy)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="15. Deploy (deploy)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#keeping-development-files-out-of-a-release" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keeping development files out of a release
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gitlab-ci-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GitLab CI example
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-pipeline-caches" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the pipeline caches
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cache-warmth-in-ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cache warmth in CI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../debugging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Debugging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../domains-and-ssl/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Domains and SSL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Internal structure & development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../comparison/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Comparison with alternatives
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#13-deployment-initialization-deploy-init" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Deployment Initialization (deploy-init)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#14-ci-initialization-ci-init" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14. CI Initialization (ci-init)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#15-deploy-deploy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15. Deploy (deploy)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="15. Deploy (deploy)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#keeping-development-files-out-of-a-release" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keeping development files out of a release
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gitlab-ci-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GitLab CI example
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-pipeline-caches" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the pipeline caches
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cache-warmth-in-ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cache warmth in CI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<p><a href="../README.md">← Back to README</a> · <a href="../">Documentation index</a></p>
+<h1 id="deployment">Deployment<a class="headerlink" href="#deployment" title="Permanent link">&para;</a></h1>
+<h3 id="13-deployment-initialization-deploy-init">13. Deployment Initialization (<code>deploy-init</code>)<a class="headerlink" href="#13-deployment-initialization-deploy-init" title="Permanent link">&para;</a></h3>
+<p>Installs PHP Deployer into the isolated <code>vendor-bin/deploy</code> namespace, asks for the deploy stages, writes them under <code>deploy</code> in <code>.orobox.yaml</code>, and generates two PHP files.</p>
+<p><strong>Available for <code>type: project</code> only</strong> — deployment ships the whole application checkout, which is what the project type is.
+<div class="highlight"><pre><span></span><code>orobox<span class="w"> </span>deploy-init
+</code></pre></div>
+Generated files:
+- <code>deploy.php</code> — the Deployer entry point. Created only when absent, and yours afterwards: put shared files/dirs and any project-specific tasks here.
+- <code>vendor-bin/deploy/orobox/oro.php</code> — the Oro recipe. Rewritten on every <code>deploy-init</code> run, so recipe fixes reach existing projects without a manual merge.</p>
+<p>Commit <code>deploy.php</code>, <code>vendor-bin/deploy/orobox/oro.php</code>, <code>vendor-bin/deploy/composer.json</code> and <code>vendor-bin/deploy/composer.lock</code>. The recipe is committed even though <code>deploy-init</code> rewrites it: nothing in the pipeline regenerates it, and <code>deploy.php</code> requires it by path. The pipeline installs Deployer's vendor tree itself, so that does not need to be committed.</p>
+<p>Resulting <code>deploy</code> block:
+<div class="highlight"><pre><span></span><code><span class="nt">deploy</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">pre_built_assets_enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<span class="w">  </span><span class="nt">repository</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">git@gitlab.com:acme/shop.git</span>
+<span class="w">  </span><span class="c1"># source_dir: b2b   # monorepo only: the subdirectory holding the Oro application</span>
+<span class="w">  </span><span class="nt">stages</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">staging</span>
+<span class="w">      </span><span class="nt">ref</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">develop</span>
+<span class="w">      </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">staging.acme.com</span>
+<span class="w">      </span><span class="nt">user</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">deploy</span>
+<span class="w">      </span><span class="nt">deploy_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/var/www/oro</span>
+<span class="w">      </span><span class="nt">test_suites</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">unit</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">functional</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">production</span>
+<span class="w">      </span><span class="nt">ref</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">main</span>
+<span class="w">      </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">acme.com</span>
+<span class="w">      </span><span class="nt">user</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">deploy</span>
+<span class="w">      </span><span class="nt">port</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2222</span>
+<span class="w">      </span><span class="nt">deploy_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/var/www/oro</span>
+<span class="w">      </span><span class="nt">keep_releases</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5</span>
+<span class="w">      </span><span class="nt">test_suites</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">unit</span><span class="p p-Indicator">]</span>
+<span class="w">      </span><span class="nt">restart_command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sudo systemctl restart oro-consumer</span>
+</code></pre></div></p>
+<p>Re-running <code>deploy-init</code> reuses the existing values as prompt defaults, so it doubles as an edit flow.</p>
+<h3 id="14-ci-initialization-ci-init">14. CI Initialization (<code>ci-init</code>)<a class="headerlink" href="#14-ci-initialization-ci-init" title="Permanent link">&para;</a></h3>
+<p>Generates the GitLab CI pipeline from <code>.orobox.yaml</code>.</p>
+<p><strong>Available for <code>type: project</code> only</strong> — the only CI-viable engine is Dagger, and its image exists
+for the project type alone. Any other type falls back to the compose engine, which would need a full
+<code>composer install</code> and a full <code>oro:install</code> per job.</p>
+<div class="highlight"><pre><span></span><code>orobox<span class="w"> </span>ci-init
+</code></pre></div>
+<p>Generated files:
+- <code>.gitlab-ci-orobox.yml</code> — the <code>orobox:lint</code>, <code>orobox:test</code> and <code>orobox:deploy:&lt;stage&gt;</code> jobs.
+  Rewritten on every run, so job improvements reach existing projects without a manual merge.
+- <code>.gitlab-ci.yml</code> — created only when absent, and yours afterwards. It does nothing but
+  <code>include: - local: .gitlab-ci-orobox.yml</code>; put your own stages, variables and jobs here.</p>
+<p>One deploy job is generated per stage in the <code>deploy</code> block, gated on that stage's <code>ref</code> and set to
+<code>when: manual</code>. Remove <code>when: manual</code> in your own file to release on every push instead.</p>
+<p>The generated jobs install the <code>orobox</code> binary pinned to the version that generated the file, plus
+<code>git</code>, which the pipeline needs to derive its upload exclude list from <code>.gitignore</code>.</p>
+<p>If <code>.gitlab-ci.yml</code> already existed without the include, <code>ci-init</code> prints the two lines to add.</p>
+<h3 id="15-deploy-deploy">15. Deploy (<code>deploy</code>)<a class="headerlink" href="#15-deploy-deploy" title="Permanent link">&para;</a></h3>
+<p>Runs the full pipeline for one stage: build and check in <a href="https://dagger.io">Dagger</a>, then release through PHP Deployer.
+<div class="highlight"><pre><span></span><code>orobox<span class="w"> </span>deploy<span class="w"> </span>production
+</code></pre></div>
+The stage argument may be omitted when exactly one stage is configured.</p>
+<p>Options:
+- <code>--yes</code>, <code>-y</code>: Skip the confirmation prompt (implied when there is no TTY, e.g. in CI).
+- <code>--debug</code>, <code>-d</code>: Print every command's full output instead of its last lines, and stream the Dagger engine output.
+- <code>--no-cache</code>: Rebuild everything the run could have reused — the dependency layers, the QA install and the test database.
+- <code>--skip-qa</code>: Skip the QA checks. The QA tool set is not installed either, so nothing is paid for it.
+- <code>--skip-test</code>: Skip the test suites.
+- <code>--skip-release</code>: Check the code, then stop before the remote release. Nothing connects to the stage host, so the confirmation prompt is skipped and no SSH deploy credentials are needed — only whatever the clone requires.</p>
+<p>The three <code>--skip-*</code> flags may be combined freely, including all at once. When at least one is set,
+the deploy plan printed before the run names the skipped steps on a <code>Skipping:</code> line.</p>
+<p>The release artifacts — the vendor tree and, unless the repository ships them, the assets — are
+built by a run that releases, and by a run that has nothing to check either
+(<code>--skip-qa --skip-test --skip-release</code>), which is how a build is asked for on its own. They are
+<em>not</em> built by a run that only checks, because nothing but a release reads them and, unlike the
+dependency layers, they are rebuilt from scratch at every commit: a lint job that produced them
+would pay an authoritative <code>dump-autoload</code> and a tar of the whole vendor tree for a file it then
+discards. The plan's <code>Artifacts:</code> line says which of the two a run is.</p>
+<p>Every command the pipeline runs is reported as it happens: a line when it starts, then its own
+output — <code>composer install</code>, <code>oro:assets:install</code>, each QA tool, <code>bin/simple-phpunit</code>, the
+Deployer run — with the elapsed time and, without <code>--debug</code>, only the last lines of the output.
+A command that is still running says so once a minute. QA and tests run concurrently, so each
+line is prefixed with the step it belongs to (<code>[qa]</code>, <code>[test]</code>).</p>
+<p>A command the engine serves from its cache is reported as <code>(0s, from cache)</code> and shows no output.
+Its output does exist — a cached exec's stdout is part of what the cache holds, and the SDK replays
+it verbatim — but it is what the command printed the last time it really ran, so printing it would
+report an installation that did not happen.</p>
+<p>What happens, in order:</p>
+<ol>
+<li><strong>Build</strong> — Dagger clones the stage's <code>ref</code> and installs the dependencies in the published <code>algoritmadev/orobox:&lt;oro_version&gt;-project-latest</code> image, then dumps the production autoloader and packs <code>vendor.tar.gz</code>. The install itself sees only <code>composer.json</code> and <code>composer.lock</code>, which is what makes it reusable between runs (see <a href="#what-the-pipeline-caches">What the pipeline caches</a>). With <code>source_dir</code> set, only that subdirectory of the clone becomes the application root, so a monorepo builds just its Oro project.</li>
+<li><strong>Assets</strong> — only when <code>pre_built_assets_enabled: false</code>: runs <code>oro:assets:install --env=prod</code> and packs <code>public/build</code>, <code>public/js</code> and <code>public/media/js</code> into <code>assets.tar.gz</code>.</li>
+<li><strong>QA and tests</strong> — run concurrently off a shared tree that also carries the dev dependencies, PHPUnit among them, so the <code>--no-dev</code> artifact from step 1 stays dev-free. QA runs every tool enabled under <code>test.qa</code> in check-only mode (<code>--dry-run</code>, no <code>--fix</code>), because a fix inside the pipeline container would be discarded. Tests run the suites listed in the stage's <code>test_suites</code> against a Dagger-managed PostgreSQL service; <code>functional</code> first restores the cached Oro test install, or performs one when the cache no longer matches.</li>
+<li><strong>Release</strong> — only if everything passed. Deployer clones the same <code>ref</code> on the remote host (only <code>source_dir</code> when set, through its <code>sub_directory</code> option), uploads and extracts the tarballs, updates the application, installs the served assets, warms the cache, swaps the <code>current</code> symlink and runs the stage's <code>restart_command</code>.</li>
+</ol>
+<p>The tarballs are also exported to <code>var/orobox/deploy/&lt;stage&gt;/</code> on the host, so a CI job can publish them as artifacts.</p>
+<p><strong>Migrations.</strong> <code>oro:platform:update</code> cannot skip migrations selectively, so the recipe compares the migration files of the new release (<code>src/</code> plus <code>vendor/oro/</code>) with the previous one. When they differ — or on a first deploy — it runs <code>oro:platform:update --force</code>. When they do not, it runs the same chain without the two migration commands, so changed cron, workflow, process, permission and translation definitions still get applied.</p>
+<p><strong>Assets on the remote.</strong> No supported Oro version accepts <code>--skip-assets</code> on <code>oro:platform:update</code>, and that command never runs webpack. The remote therefore only ever runs Symfony's <code>assets:install</code>; the built assets come either from the repository (<code>pre_built_assets_enabled: true</code>) or from <code>assets.tar.gz</code>.</p>
+<h4 id="keeping-development-files-out-of-a-release">Keeping development files out of a release<a class="headerlink" href="#keeping-development-files-out-of-a-release" title="Permanent link">&para;</a></h4>
+<p>Use git's own mechanism: mark the paths <code>export-ignore</code> in <code>.gitattributes</code>.</p>
+<div class="highlight"><pre><span></span><code>/tests           export-ignore
+/.github         export-ignore
+/.gitlab-ci.yml  export-ignore
+/.orobox.yaml    export-ignore
+/docker-compose.yml export-ignore
+/phpstan.neon    export-ignore
+</code></pre></div>
+<p>Deployer checks the code out with <code>git archive</code> (<code>update_code_strategy</code> defaults to <code>archive</code>), and <code>git archive</code> honors <code>export-ignore</code>, so those files never reach the remote host at all.</p>
+<p>Three things to know:</p>
+<ul>
+<li>The rules are read from the <code>.gitattributes</code> of the tree being deployed. A tag created before you added them still carries the files.</li>
+<li>Keep <code>update_code_strategy</code> on <code>archive</code>. Switching it to <code>clone</code> in <code>deploy.php</code> — which you would only do to get the <code>.git</code> directory into the release — disables <code>export-ignore</code>.</li>
+<li><strong>With <code>deploy.source_dir</code> set, the <code>.gitattributes</code> must live inside that directory.</strong> Deployer archives the subtree (<code>git archive &lt;ref&gt;:&lt;source_dir&gt;</code>), and git only reads <code>.gitattributes</code> files that are part of the archived tree, so a repository-root <code>.gitattributes</code> is never consulted. Put the rules in <code>&lt;source_dir&gt;/.gitattributes</code> with paths relative to that directory:</li>
+</ul>
+<div class="highlight"><pre><span></span><code>/tests           export-ignore
+/.orobox.yaml    export-ignore
+</code></pre></div>
+<p>A root <code>.gitattributes</code> listing <code>&lt;source_dir&gt;/tests</code> still works for a full-tree <code>git archive</code>, but not for the deploy.</p>
+<p><strong>Failed deploys.</strong> If any remote step fails, the recipe removes <code>releases/&lt;n&gt;</code>, points <code>current</code> back at the previous release, drops <code>.dep/deploy.lock</code> and rewrites Deployer's bookkeeping — so the migration comparison above always has an intact previous release to work with.</p>
+<p>Requirements:
+- A reachable Docker daemon: the Dagger SDK provisions its engine as a container.
+- SSH access to the stage host, either through an agent (<code>eval "$(ssh-agent)" &amp;&amp; ssh-add</code>) or a key in <code>OROBOX_DEPLOY_SSH_KEY</code>.
+- <code>rsync</code> on the remote host, which Deployer uses to upload the artifacts. It is installed in the pipeline container automatically.</p>
+<p>Environment variables read by <code>orobox deploy</code>:
+- <code>OROBOX_DEPLOY_SSH_KEY</code>: private key for the remote host, used instead of an agent. Intended for CI.
+- <code>OROBOX_DEPLOY_GIT_TOKEN</code> / <code>OROBOX_DEPLOY_GIT_USER</code>: credentials for cloning an <code>https</code> repository. <code>CI_JOB_TOKEN</code> is picked up automatically with the <code>gitlab-ci-token</code> username.</p>
+<h4 id="gitlab-ci-example">GitLab CI example<a class="headerlink" href="#gitlab-ci-example" title="Permanent link">&para;</a></h4>
+<p><code>orobox ci-init</code> generates the three-job pipeline — lint, test, deploy — see
+<a href="#14-ci-initialization-ci-init">CI Initialization (<code>ci-init</code>)</a>. The lint and test jobs use
+<code>orobox qa</code> and <code>orobox test</code> rather than a <code>deploy</code> in disguise.</p>
+<p>Add the deploy key as a masked CI variable named <code>OROBOX_DEPLOY_SSH_KEY</code>.</p>
+<p>In CI the pipeline builds from the job's checkout, so no clone happens and no git credentials are
+needed for it; the release still checks out the built commit on the remote host. A deploy run
+outside CI clones the configured <code>repository</code> instead, using the SSH agent, or <code>CI_JOB_TOKEN</code> when
+the URL is <code>https</code>.</p>
+<h4 id="what-the-pipeline-caches">What the pipeline caches<a class="headerlink" href="#what-the-pipeline-caches" title="Permanent link">&para;</a></h4>
+<p>The pipeline installs the dependencies from <code>composer.json</code> and <code>composer.lock</code> alone, before the
+application sources are added, so Dagger reuses the whole vendor tree — production, development
+and the QA tools — for as long as the lock file does not change. A commit that touches only
+application code pays nothing for it.</p>
+<p>For a stage running the <code>functional</code> suite, the Oro test install is cached as a database dump and
+restored at the start of every run. The dump is rebuilt when <code>composer.lock</code> or any migration file
+under <code>src/</code> changes. Restoring rather than reusing the cluster means each run starts from an
+identical database.</p>
+<p>The QA and test caches are scoped to the Oro version and the stage's git ref, so two stages on
+different refs do not invalidate each other.</p>
+<p><code>orobox deploy &lt;stage&gt; --no-cache</code> rebuilds all of it.</p>
+<h4 id="cache-warmth-in-ci">Cache warmth in CI<a class="headerlink" href="#cache-warmth-in-ci" title="Permanent link">&para;</a></h4>
+<p>Both the layer cache and the mounted volumes live inside the Dagger engine, not in the repository.
+A GitLab job that starts a throwaway <code>docker:dind</code> service therefore begins with an empty cache
+every time.</p>
+<p>This now governs three jobs, not one: with the Dagger engine, <code>orobox qa</code> and <code>orobox test</code> depend
+on the same caches. It is also the whole reason to use that engine in CI — against a cold engine,
+<code>orobox qa</code> is <em>slower</em> than running the tools in a development stack, because it pays for a full
+<code>composer install</code> and a full <code>oro:install</code> before analysing anything.</p>
+<p>Two ways to keep it warm:</p>
+<ul>
+<li>give the dind service a persistent data volume in the runner configuration, so the engine
+  container and its caches survive between jobs:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># /etc/gitlab-runner/config.toml</span>
+<span class="k">[runners.docker]</span>
+<span class="w">  </span><span class="n">volumes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"/certs/client"</span><span class="p">,</span><span class="w"> </span><span class="s2">"/var/lib/gitlab-runner/dind:/var/lib/docker"</span><span class="p">]</span>
+</code></pre></div>
+<ul>
+<li>or run one long-lived Dagger engine and point the jobs at it:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="nt">variables</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">_EXPERIMENTAL_DAGGER_RUNNER_HOST</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tcp://dagger-engine.internal:8080</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
