@@ -117,6 +117,17 @@ repositories to be set up — see `.goreleaser.yaml`.*
 orobox self-update
 ```
 
+Once a day, on the first command run in a terminal, Orobox asks GitHub for the latest release and
+prints a one-line notice when a newer one exists. The result is cached for 24 hours in
+`<user config dir>/orobox/update-check.json`, and a failed check is silent.
+
+The check never runs with `--agent`, when `CI` is set, when stdout is not a terminal, or when
+`ORO_NO_UPDATE_CHECK` is set:
+
+```bash
+export ORO_NO_UPDATE_CHECK=1
+```
+
 ## Commands at a glance
 
 | Command | What it does | Docs |

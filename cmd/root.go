@@ -37,6 +37,10 @@ var rootCmd = &cobra.Command{
 			utils.PrintError(ConfigError.Error())
 			os.Exit(1)
 		}
+
+		// Started here rather than in Execute because agent mode is only known once the flags are
+		// parsed, and a check that ignored it would print into a machine-readable stream.
+		startUpdateCheck(cmd.Name())
 	},
 }
 
@@ -47,6 +51,10 @@ func Execute() {
 	if err != nil {
 		os.Exit(1)
 	}
+
+	// After the command, never before: the notice is an aside, and it would push the output the
+	// user asked for further up the scrollback.
+	printUpdateNotice()
 }
 
 func init() {

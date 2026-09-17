@@ -103,7 +103,13 @@ func init() {
 }
 
 func getLatestRelease() (*release, error) {
-	resp, err := httpClient.Get("https://api.github.com/repos/algoritma-dev/orobox/releases/latest")
+	return getLatestReleaseWith(httpClient)
+}
+
+// getLatestReleaseWith takes the client as an argument so a caller with different patience can
+// supply its own: the update notice runs beside the user's command and cannot wait 30 seconds.
+func getLatestReleaseWith(client *http.Client) (*release, error) {
+	resp, err := client.Get("https://api.github.com/repos/algoritma-dev/orobox/releases/latest")
 	if err != nil {
 		return nil, err
 	}
