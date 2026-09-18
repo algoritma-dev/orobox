@@ -10,6 +10,16 @@ group commits by theme rather than listing every commit.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-18
+
+- Fixed `orobox self-update` installing a distribution package instead of the binary. The asset
+  filter only skipped archives and checksums, so `orobox_1.0.0_linux_amd64.apk` — which contains
+  both `linux` and `amd64` in its name and is listed before the raw binary — was downloaded and
+  written over the executable, and the next run failed with `exec format error`. The update now
+  matches the published binary by its exact name, falls back to an allowlist of executable file
+  extensions rather than a list of extensions to skip, and verifies the download starts with an
+  executable magic number before replacing the installed binary.
+
 ## [1.0.0] - 2026-09-17
 
 - First stable release. It carries the same code as `1.0.0-rc34`; the release-candidate series
