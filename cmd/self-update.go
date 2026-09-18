@@ -127,6 +127,35 @@ func getLatestReleaseWith(client *http.Client) (*release, error) {
 	return &r, nil
 }
 
+// binaryAssetExtensions lists the only extensions a raw, directly executable release asset may
+// carry. The check is an allowlist rather than a list of things to skip on purpose: the release
+// also publishes .deb/.rpm/.apk packages (the nfpms block in .goreleaser.yaml), and a skip list
+// silently accepts every format added there later. That is how orobox_1.0.0_linux_amd64.apk —
+// a gzip stream whose name contains both "linux" and "amd64" — was once written over the
+// installed binary, leaving "exec format error" on the next run.
+var binaryAssetExtensions = map[string]bool{
+	"":     true,
+	".exe": true,
+}
+
+// expectedBinaryName mirrors the `binaries` archive name_template in .goreleaser.yaml.
+func expectedBinaryName(goos, goarch string) string {
+	arch := goarch
+	switch goarch {
+	case "amd64":
+		arch = "x86_64"
+	case "386":
+		arch = "i386"
+	}
+
+	name := fmt.Sprintf("orobox_%s_%s", strings.ToUpper(goos[:1])+goos[1:], arch)
+	if goos == "windows" {
+		name += ".exe"
+	}
+
+	return name
+}
+
 func findBestAsset(r *release) (url, name string) {
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
@@ -139,16 +168,20 @@ func findBestAsset(r *release) (url, name string) {
 		archs = append(archs, "aarch64")
 	}
 
-	// Look for an asset that contains both the OS and a matching architecture in its name.
+	// Prefer the asset GoReleaser publishes for this platform by its exact name, so asset
+	// ordering in the GitHub API response cannot decide which file we install.
+	expected := strings.ToLower(expectedBinaryName(goos, goarch))
+	for _, asset := range r.Assets {
+		if strings.ToLower(asset.Name) == expected {
+			return asset.BrowserDownloadURL, asset.Name
+		}
+	}
+
+	// Otherwise fall back to an asset that names both the OS and a matching architecture.
 	for _, asset := range r.Assets {
 		nameLower := strings.ToLower(asset.Name)
 
-		// Skip archives and checksum files to ensure we get the raw binary
-		if strings.HasSuffix(nameLower, ".tar.gz") ||
-			strings.HasSuffix(nameLower, ".zip") ||
-			strings.HasSuffix(nameLower, ".tgz") ||
-			strings.HasSuffix(nameLower, ".sha256") ||
-			strings.HasSuffix(nameLower, ".sig") {
+		if !binaryAssetExtensions[strings.ToLower(filepath.Ext(nameLower))] {
 			continue
 		}
 
@@ -202,6 +235,21 @@ func applyUpdate(url string) error {
 	defer f.Close()
 	defer os.Remove(tmpFile)
 
+	head := make([]byte, 4)
+	n, err := io.ReadFull(resp.Body, head)
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		return fmt.Errorf("failed to read update: %w", err)
+	}
+	head = head[:n]
+
+	if !isExecutable(head) {
+		return fmt.Errorf("downloaded file is not an executable for this platform; refusing to install it")
+	}
+
+	if _, err := f.Write(head); err != nil {
+		return fmt.Errorf("failed to write to temporary file: %w", err)
+	}
+
 	if _, err := io.Copy(f, resp.Body); err != nil {
 		return fmt.Errorf("failed to write to temporary file: %w", err)
 	}
@@ -214,4 +262,24 @@ func applyUpdate(url string) error {
 	}
 
 	return nil
+}
+
+// isExecutable reports whether head — the first bytes of a download — starts with the magic
+// number of a format this platform can exec. It is the last guard before an arbitrary file is
+// renamed over the running binary: a release asset that is an archive or a distro package gets
+// rejected here instead of turning the next `orobox` run into "exec format error".
+func isExecutable(head []byte) bool {
+	magics := map[string][][]byte{
+		"linux":   {{0x7f, 'E', 'L', 'F'}},
+		"darwin":  {{0xcf, 0xfa, 0xed, 0xfe}, {0xce, 0xfa, 0xed, 0xfe}, {0xca, 0xfe, 0xba, 0xbe}, {0xbe, 0xba, 0xfe, 0xca}},
+		"windows": {{'M', 'Z'}},
+	}
+
+	for _, magic := range magics[runtime.GOOS] {
+		if len(head) >= len(magic) && string(head[:len(magic)]) == string(magic) {
+			return true
+		}
+	}
+
+	return false
 }

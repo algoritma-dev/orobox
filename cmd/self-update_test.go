@@ -87,3 +87,65 @@ func TestFindBestAsset(t *testing.T) {
 		}
 	})
 }
+
+// TestFindBestAssetSkipsDistroPackages pins the real asset list of release 1.0.0. The .apk,
+// .deb and .rpm packages all contain "linux" and "amd64" in their names and sort before the
+// raw binary, so an earlier substring match downloaded orobox_1.0.0_linux_amd64.apk — a gzip
+// stream — and installing it produced "exec format error".
+func TestFindBestAssetSkipsDistroPackages(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skip("asset list is pinned to linux/amd64")
+	}
+
+	names := []string{
+		"checksums.txt",
+		"orobox_1.0.0_linux_amd64.apk",
+		"orobox_1.0.0_linux_amd64.deb",
+		"orobox_1.0.0_linux_amd64.rpm",
+		"orobox_1.0.0_linux_arm64.apk",
+		"orobox_1.0.0_linux_arm64.deb",
+		"orobox_1.0.0_linux_arm64.rpm",
+		"orobox_Darwin_arm64",
+		"orobox_Darwin_arm64.tar.gz",
+		"orobox_Darwin_x86_64",
+		"orobox_Darwin_x86_64.tar.gz",
+		"orobox_Linux_arm64",
+		"orobox_Linux_arm64.tar.gz",
+		"orobox_Linux_x86_64",
+		"orobox_Linux_x86_64.tar.gz",
+		"orobox_Windows_arm64.exe",
+		"orobox_Windows_arm64.zip",
+		"orobox_Windows_x86_64.exe",
+		"orobox_Windows_x86_64.zip",
+	}
+
+	r := &release{TagName: "1.0.0"}
+	for _, n := range names {
+		r.Assets = append(r.Assets, struct {
+			Name               string `json:"name"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+		}{Name: n, BrowserDownloadURL: "url-" + n})
+	}
+
+	url, name := findBestAsset(r)
+	if name != "orobox_Linux_x86_64" {
+		t.Errorf("expected orobox_Linux_x86_64, got %s (%s)", name, url)
+	}
+}
+
+func TestExpectedBinaryName(t *testing.T) {
+	cases := map[[2]string]string{
+		{"linux", "amd64"}:   "orobox_Linux_x86_64",
+		{"linux", "arm64"}:   "orobox_Linux_arm64",
+		{"darwin", "amd64"}:  "orobox_Darwin_x86_64",
+		{"darwin", "arm64"}:  "orobox_Darwin_arm64",
+		{"windows", "amd64"}: "orobox_Windows_x86_64.exe",
+		{"windows", "386"}:   "orobox_Windows_i386.exe",
+	}
+
+	for in, want := range cases {
+		if got := expectedBinaryName(in[0], in[1]); got != want {
+			t.Errorf("expectedBinaryName(%s, %s) = %s, want %s", in[0], in[1], got, want)
+		}
+	}
+}
