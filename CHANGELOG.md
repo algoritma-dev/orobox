@@ -10,6 +10,20 @@ group commits by theme rather than listing every commit.
 
 ## [Unreleased]
 
+- Fixed `orobox qa --agent` and `orobox test --agent` printing the pipeline's progress on the
+  Dagger engine. Agent mode was honoured everywhere Orobox writes for a human except in
+  `internal/pipeline`, whose reporter wrote its step banners, each command's streamed output and
+  its heartbeats straight to stdout — so an automated caller read `▸ [deps] composer install` and
+  `--- Running phpstan ---` on the stream that promises one finding per line and nothing else.
+  Only project installs were affected, because that is where the Dagger engine is the default in
+  CI.
+- Fixed the QA tool flags (`--phpstan`, `--rector`, `--php-cs-fixer`, `--twig-cs-fixer`,
+  `--eslint`, `--stylelint`) being ignored on the Dagger engine, which filtered on `.orobox.yaml`
+  alone: `orobox qa --php-cs-fixer` answered a one-tool question with every tool's findings. The
+  selection now reaches both engines and means the same thing on each — the named tools run,
+  whatever the configuration enables. A run narrowed away from PHPStan also skips the QA warmup,
+  the Oro install and test-cache warm that only PHPStan reads.
+
 ## [1.0.1] - 2026-09-18
 
 - Fixed `orobox self-update` installing a distribution package instead of the binary. The asset

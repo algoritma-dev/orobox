@@ -43,15 +43,15 @@ func TestAgentModeWritesNothingToStdout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("could not open a pipe: %v", err)
 	}
-	real := os.Stdout
+	stdout := os.Stdout
 	os.Stdout = write
-	defer func() { os.Stdout = real }()
+	defer func() { os.Stdout = stdout }()
 
 	newReporter(progressWriter(), false, nil).
 		start("qa", "php-cs-fixer fix").
 		ok("--- Running php-cs-fixer ---")
 
-	os.Stdout = real
+	os.Stdout = stdout
 	if err := write.Close(); err != nil {
 		t.Fatalf("could not close the pipe: %v", err)
 	}
