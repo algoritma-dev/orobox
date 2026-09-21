@@ -14,6 +14,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/algoritma-dev/orobox/internal/config"
+	"github.com/algoritma-dev/orobox/internal/output"
 	"github.com/algoritma-dev/orobox/internal/qatools"
 	"github.com/algoritma-dev/orobox/internal/utils"
 )
@@ -81,6 +82,23 @@ type runner struct {
 	sshKey    *dagger.Secret
 }
 
+// progressWriter is where the pipeline's own progress goes: the step banners, each command's
+// streamed output, the heartbeats.
+//
+// Agent mode gets none of it. All of it is Orobox talking about itself, and an automated caller
+// reads the payload the command writes at the end instead. Gating it here rather than inside the
+// reporter keeps the reporter a formatter with no mode of its own, and covers every command that
+// runs a pipeline rather than only the one that noticed.
+//
+// --debug needs no case of its own: output.SetAgent already refuses the mode when debug asked to
+// be shown everything.
+func progressWriter() io.Writer {
+	if output.Agent() {
+		return io.Discard
+	}
+	return os.Stdout
+}
+
 // Run executes the whole pipeline: build, QA and tests in Dagger, then the remote release
 // through Deployer. It returns the host paths of the exported artifacts. QA and test failures
 // cancel each other, so nothing reaches the remote host after a violation.
@@ -110,7 +128,7 @@ func Run(ctx context.Context, plan *Plan, opts Options) (Result, error) {
 		plan:   plan,
 		opts:   opts,
 		log:    log,
-		report: newReporter(os.Stdout, opts.Debug, log),
+		report: newReporter(progressWriter(), opts.Debug, log),
 		runID:  strconv.FormatInt(time.Now().UnixNano(), 10),
 	}
 

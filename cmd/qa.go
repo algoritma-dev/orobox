@@ -113,6 +113,32 @@ func missingJSLinters(missing []string) []string {
 	return out
 }
 
+// qaToolFlagNames lists every tool a CLI flag can select, in the order qatools.Tools returns
+// them. It is the companion of qaFlagFor: that function answers for one name, this one is what
+// lets a caller enumerate the selection without building the tool set first, which the Dagger
+// path has to do before there is a source root to build it against.
+var qaToolFlagNames = []string{
+	"phpstan",
+	"rector",
+	"php-cs-fixer",
+	"twig-cs-fixer",
+	"eslint",
+	"stylelint",
+	"stylelint-css",
+}
+
+// selectedQaTools returns the tools the CLI flags name, nil when no flag names one. Nil is the
+// unnarrowed run, where .orobox.yaml decides.
+func selectedQaTools() []string {
+	var names []string
+	for _, name := range qaToolFlagNames {
+		if qaFlagFor(name) {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 // qaFlagFor maps a tool name to the CLI flag that selects it explicitly.
 func qaFlagFor(name string) bool {
 	switch name {
@@ -497,6 +523,10 @@ func runQaOnDagger(format qatools.Report) {
 		BaseCacheScope: qaBaseCacheScope,
 		RunQA:          true,
 		Report:         effectiveFormat,
+		// The tool flags are not a compose-engine feature: `orobox qa --php-cs-fixer` means the
+		// same thing on both engines, and without this the Dagger run answered a one-tool
+		// question with every tool's findings.
+		Tools: selectedQaTools(),
 	})
 
 	utils.PrintInfo("Running the QA tools in the pipeline engine. The first run has no caches and takes a while.")

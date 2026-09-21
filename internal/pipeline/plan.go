@@ -133,6 +133,12 @@ type Plan struct {
 	// Report makes the QA and test steps emit machine-readable output into ContainerReportDir.
 	Report qatools.Report
 
+	// SelectedQaTools narrows the QA step to the tools named here, whatever .orobox.yaml
+	// enables. Nil means the configuration decides, which is what a deploy and a plain
+	// `orobox qa` both want; a caller that passed a tool flag on the command line asked for
+	// those tools and nothing else.
+	SelectedQaTools []string
+
 	// Deps, DepsDev and QaTools are built from composer.json and composer.lock alone, before the
 	// application sources are overlaid. Dagger keys each exec on the container state before it, so
 	// they are reused across runs and across refs for as long as the lock does not change. That is
@@ -413,6 +419,9 @@ type ChecksOptions struct {
 	Suites []string
 	Filter string
 	Report qatools.Report
+	// Tools narrows the QA step to these tool names, nil meaning the configuration decides.
+	// It carries the CLI's tool flags, which are otherwise a compose-engine-only feature.
+	Tools []string
 }
 
 // NewChecks builds a plan for `orobox qa` or `orobox test` on the Dagger engine: the same steps a
@@ -435,6 +444,7 @@ func NewChecks(conf *config.OroConfig, o ChecksOptions) *Plan {
 	p.Suites = o.Suites
 	p.Filter = o.Filter
 	p.Report = o.Report
+	p.SelectedQaTools = o.Tools
 	// `orobox test` prepares the database whatever the suites are: the command's contract on the
 	// compose engine is that `orobox test-init` has run, and the two engines must not disagree
 	// about what the command does.
@@ -852,7 +862,9 @@ func (p *Plan) qaCommands(oroVersion string) []string {
 	if plan.NeedsComposerTools && plan.NeedsTwigCS {
 		commands = append(commands, qatools.TwigConfigScript())
 	}
-	if plan.NeedsPhpstan {
+	// The warmup installs Oro and warms the test cache, which is the longest command in the
+	// step. Only PHPStan reads that cache, so a run narrowed to any other tool skips it.
+	if plan.NeedsPhpstan && p.runsQaTool("phpstan") {
 		commands = append(commands, qaWarmupCommand(config.GetVersionsForOro(oroVersion).Postgres))
 	}
 
@@ -866,7 +878,7 @@ func (p *Plan) qaCommands(oroVersion string) []string {
 		ReportDir:   QAReportDir(),
 		OroVersion:  oroVersion,
 	}) {
-		if config.IsQaToolEnabled(tool.Name) {
+		if p.runsQaTool(tool.Name) {
 			enabled = append(enabled, tool)
 		}
 	}
@@ -885,6 +897,24 @@ func (p *Plan) qaCommands(oroVersion string) []string {
 	}
 
 	return commands
+}
+
+// runsQaTool reports whether the QA step runs the named tool.
+//
+// An explicit selection replaces the configuration rather than intersecting with it, which is
+// what the compose engine does with the same flags: `orobox qa --php-cs-fixer` on a project that
+// left PHP-CS-Fixer off in .orobox.yaml asked for PHP-CS-Fixer. With no selection the
+// configuration decides, which is every deploy and every unnarrowed run.
+func (p *Plan) runsQaTool(name string) bool {
+	if len(p.SelectedQaTools) == 0 {
+		return config.IsQaToolEnabled(name)
+	}
+	for _, selected := range p.SelectedQaTools {
+		if selected == name {
+			return true
+		}
+	}
+	return false
 }
 
 // testEnv points the application at the Dagger Postgres service. The variable names and

@@ -1375,3 +1375,71 @@ func TestCacheScriptsSurviveAnUncomputableFingerprint(t *testing.T) {
 		}
 	}
 }
+
+// TestChecksNarrowsTheQaStepToTheSelectedTools is the regression for a `--php-cs-fixer` run that
+// answered with every tool's findings: the CLI's tool flags reached the compose engine only, and
+// the Dagger plan filtered on the configuration alone.
+func TestChecksNarrowsTheQaStepToTheSelectedTools(t *testing.T) {
+	qa := joined(NewChecks(testConf("7.0", false), ChecksOptions{
+		ProjectDir: "/p",
+		RunQA:      true,
+		Tools:      []string{"php-cs-fixer"},
+	}).QA.Commands)
+
+	if !strings.Contains(qa, "--- Running php-cs-fixer ---") {
+		t.Errorf("the QA step does not run the selected tool:\n%s", qa)
+	}
+	for _, other := range []string{"phpstan", "rector", "twig-cs-fixer", "eslint", "stylelint"} {
+		if strings.Contains(qa, "--- Running "+other+" ---") {
+			t.Errorf("the QA step runs %s, which was not selected:\n%s", other, qa)
+		}
+	}
+}
+
+// TestChecksSkipsTheWarmupWhenPhpstanIsNotSelected keeps the longest command in the step off the
+// runs that cannot read what it produces: the warmup installs Oro and warms the test cache, and
+// PHPStan is the only tool that reads it.
+func TestChecksSkipsTheWarmupWhenPhpstanIsNotSelected(t *testing.T) {
+	qa := joined(NewChecks(testConf("7.0", false), ChecksOptions{
+		ProjectDir: "/p",
+		RunQA:      true,
+		Tools:      []string{"php-cs-fixer"},
+	}).QA.Commands)
+
+	if strings.Contains(qa, "oro:platform:update") {
+		t.Errorf("the QA step warms the test cache for a run without PHPStan:\n%s", qa)
+	}
+}
+
+// TestChecksWithoutASelectionFollowsTheConfiguration is the other half of the contract: a
+// selection replaces the configuration, and no selection leaves it in charge.
+func TestChecksWithoutASelectionFollowsTheConfiguration(t *testing.T) {
+	viper.Set("test.qa.rector", false)
+	defer viper.Set("test.qa.rector", nil)
+
+	qa := joined(NewChecks(testConf("7.0", false), ChecksOptions{ProjectDir: "/p", RunQA: true}).QA.Commands)
+
+	if strings.Contains(qa, "--- Running rector ---") {
+		t.Errorf("the QA step runs a tool the configuration disabled:\n%s", qa)
+	}
+	if !strings.Contains(qa, "--- Running php-cs-fixer ---") {
+		t.Errorf("the QA step drops a tool the configuration enables:\n%s", qa)
+	}
+}
+
+// TestChecksSelectionOverridesADisabledTool records that the flags win over .orobox.yaml, which
+// is what the compose engine already does: naming a tool on the command line is asking for it.
+func TestChecksSelectionOverridesADisabledTool(t *testing.T) {
+	viper.Set("test.qa.php-cs-fixer", false)
+	defer viper.Set("test.qa.php-cs-fixer", nil)
+
+	qa := joined(NewChecks(testConf("7.0", false), ChecksOptions{
+		ProjectDir: "/p",
+		RunQA:      true,
+		Tools:      []string{"php-cs-fixer"},
+	}).QA.Commands)
+
+	if !strings.Contains(qa, "--- Running php-cs-fixer ---") {
+		t.Errorf("an explicitly selected tool was dropped by the configuration:\n%s", qa)
+	}
+}
