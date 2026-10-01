@@ -15,6 +15,7 @@ import (
 	"github.com/algoritma-dev/orobox/internal/utils"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var deployInitCmd = &cobra.Command{
@@ -48,6 +49,16 @@ func init() {
 	rootCmd.AddCommand(deployInitCmd)
 }
 
+// deployInitConfigPath is the config file deploy-init rewrites: the one the command loaded,
+// which with --config is not ./.orobox.yaml. Writing the fixed name instead would leave the
+// loaded config without the new stages and drop a second config into the working directory.
+func deployInitConfigPath() string {
+	if configFile := viper.ConfigFileUsed(); configFile != "" {
+		return configFile
+	}
+	return ".orobox.yaml"
+}
+
 func runDeployInitCommand(conf *config.OroConfig) {
 	docker.EnsureDockerCompose()
 
@@ -68,7 +79,7 @@ func runDeployInitCommand(conf *config.OroConfig) {
 		os.Exit(1)
 	}
 
-	configPath := ".orobox.yaml"
+	configPath := deployInitConfigPath()
 	if err := config.SaveConfig(configPath, conf); err != nil {
 		utils.PrintError(fmt.Sprintf("Could not write %s: %v", configPath, err))
 		os.Exit(1)

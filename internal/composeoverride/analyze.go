@@ -17,81 +17,137 @@ type ServiceURL struct{ Service, URL string }
 
 // Analysis is what Orobox needs to know about a resolved override before running compose.
 type Analysis struct {
-	MissingPaths       []string     // absolute bind sources that do not exist on the host
-	CoreImageOverrides []string     // core services whose `image` is redefined
-	HasBuild           bool         // any service has a `build` key
-	URLs               []ServiceURL // services with a dev.orobox.url label, sorted by service
+	MissingPaths       []MissingPath // absolute bind sources that do not exist on the host
+	CoreImageOverrides []string      // core services whose `image` is redefined
+	HasBuild           bool          // any service has a `build` key
+	URLs               []ServiceURL  // services with a dev.orobox.url label, sorted by service
+}
+
+// MissingPath is a bind source that does not exist. The syntax matters because Docker treats
+// the two differently: a short-syntax source is created as an empty root-owned directory, a
+// long-syntax one makes the container fail to start.
+type MissingPath struct {
+	Path       string
+	LongSyntax bool
 }
 
 // Analyze inspects a resolved compose file (relative paths already made absolute by Resolve).
-// exists is injected so the package stays free of I/O. An empty document yields a zero Analysis.
+// exists is injected so the package stays free of I/O. Every document of the file is inspected
+// and the findings are aggregated; an empty file yields a zero Analysis.
 //
-// Only bind sources are checked: a missing host path makes Docker silently create an empty
-// root-owned directory, which is almost never what the user meant. Named volumes have no host
-// path and are never reported.
+// Only bind sources are checked: either way a missing host path is almost never what the user
+// meant. Named volumes have no host path and are never reported, nor are sources that compose
+// still has to interpolate, nor long-syntax binds that ask compose to create the path.
 func Analyze(resolved []byte, coreServices []string, exists func(string) bool) (Analysis, error) {
 	var a Analysis
-	doc, err := parse(resolved)
+	docs, err := parseAll(resolved)
 	if err != nil {
 		return a, err
 	}
-	if doc == nil {
-		return a, nil
-	}
 
 	seen := map[string]bool{}
-	checkPath := func(p string) {
-		if p == "" || !filepath.IsAbs(p) || seen[p] {
+	checkPath := func(p string, long bool) {
+		p, literal := literalPath(p)
+		if !literal || p == "" || !filepath.IsAbs(p) || seen[p] {
 			return
 		}
 		seen[p] = true
 		if !exists(p) {
-			a.MissingPaths = append(a.MissingPaths, p)
+			a.MissingPaths = append(a.MissingPaths, MissingPath{Path: p, LongSyntax: long})
 		}
 	}
 
-	mapEntries(mapGet(doc.Content[0], "services"), func(name string, svc *yamlv3.Node) {
-		if svc == nil || svc.Kind != yamlv3.MappingNode {
-			return
-		}
-		if mapGet(svc, "image") != nil && slices.Contains(coreServices, name) {
-			a.CoreImageOverrides = append(a.CoreImageOverrides, name)
-		}
-		if mapGet(svc, "build") != nil {
-			a.HasBuild = true
-		}
-		if vols := mapGet(svc, "volumes"); vols != nil && vols.Kind == yamlv3.SequenceNode {
-			for _, v := range vols.Content {
-				checkPath(bindSource(deref(v)))
+	// Compose merges the documents in order, so a URL set by a later document wins and a
+	// service is profiled when any document gives it profiles.
+	coreSeen := map[string]bool{}
+	urls := map[string]string{}
+	profiled := map[string]bool{}
+	for _, doc := range docs {
+		mapEntries(mapGet(doc.Content[0], "services"), func(name string, svc *yamlv3.Node) {
+			if svc == nil || svc.Kind != yamlv3.MappingNode {
+				return
 			}
-		}
-		if url, ok := labelValue(mapGet(svc, "labels"), urlLabel); ok {
+			if isSet(mapGet(svc, "image")) && slices.Contains(coreServices, name) && !coreSeen[name] {
+				coreSeen[name] = true
+				a.CoreImageOverrides = append(a.CoreImageOverrides, name)
+			}
+			if isSet(mapGet(svc, "build")) {
+				a.HasBuild = true
+			}
+			if vols := mapGet(svc, "volumes"); vols != nil && vols.Kind == yamlv3.SequenceNode {
+				for _, v := range vols.Content {
+					if src, long, ok := bindSource(deref(v)); ok {
+						checkPath(src, long)
+					}
+				}
+			}
+			if hasProfiles(mapGet(svc, "profiles")) {
+				profiled[name] = true
+			}
+			if url, ok := labelValue(mapGet(svc, "labels"), urlLabel); ok {
+				urls[name] = url
+			}
+		})
+	}
+
+	// `up` starts no service that declares profiles, so advertising its URL would point at
+	// nothing.
+	for name, url := range urls {
+		if !profiled[name] {
 			a.URLs = append(a.URLs, ServiceURL{Service: name, URL: url})
 		}
-	})
-
-	sort.SliceStable(a.URLs, func(i, j int) bool { return a.URLs[i].Service < a.URLs[j].Service })
+	}
+	sort.Slice(a.URLs, func(i, j int) bool { return a.URLs[i].Service < a.URLs[j].Service })
 	return a, nil
 }
 
-// bindSource returns the host path of a volume entry, or "" when the entry is not a bind mount.
-func bindSource(v *yamlv3.Node) string {
+// hasProfiles reports whether a profiles value names at least one profile.
+func hasProfiles(n *yamlv3.Node) bool {
+	if !isSet(n) {
+		return false
+	}
+	switch n.Kind {
+	case yamlv3.SequenceNode:
+		return len(n.Content) > 0
+	case yamlv3.ScalarNode:
+		return n.Value != ""
+	}
+	return false
+}
+
+// literalPath returns the path a resolved value stands for once compose has interpolated it:
+// "$$" is a literal "$". A value with any other "$" depends on the environment compose runs in,
+// so it cannot be checked here and literal is false.
+func literalPath(p string) (path string, literal bool) {
+	if strings.Contains(strings.ReplaceAll(p, "$$", ""), "$") {
+		return "", false
+	}
+	return strings.ReplaceAll(p, "$$", "$"), true
+}
+
+// bindSource returns the host path of a volume entry and whether it is in long syntax. ok is
+// false when the entry is not a bind mount, or is a long-syntax bind compose creates when
+// missing (bind.create_host_path).
+func bindSource(v *yamlv3.Node) (src string, long, ok bool) {
 	switch v.Kind {
 	case yamlv3.ScalarNode:
 		src, _, found := strings.Cut(v.Value, ":")
 		if !found {
-			return "" // a lone path is an anonymous volume at that container path
+			return "", false, false // a lone path is an anonymous volume at that container path
 		}
-		return src
+		return src, false, true
 	case yamlv3.MappingNode:
 		if t := mapGet(v, "type"); t == nil || t.Value != "bind" {
-			return ""
+			return "", true, false
+		}
+		if c := mapGet(mapGet(v, "bind"), "create_host_path"); c != nil && c.Kind == yamlv3.ScalarNode && c.Value == "true" {
+			return "", true, false
 		}
 		if s := mapGet(v, "source"); s != nil && s.Kind == yamlv3.ScalarNode {
-			return s.Value
+			return s.Value, true, true
 		}
 	}
-	return ""
+	return "", false, false
 }
 
 // labelValue looks key up in a labels node, which Compose allows as a mapping or as a list of

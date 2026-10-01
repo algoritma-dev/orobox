@@ -32,6 +32,11 @@ OroCommerce **project**, and a production-tuned **demo** instance.
 - **Debugging wired up everywhere.** Xdebug is preinstalled and hot-patchable for the web, CLI,
   consumer and cron processes, and the websocket server is proxied through nginx on the same
   origin as your app.
+- **Customizable without forking.** Add Alpine packages, PHP extensions or your own Dockerfile
+  under `image:`, PHP settings under `php_ini:`, host ports under `ports:`, and extra services
+  through a plain Docker Compose override; `orobox extend add` drops in Varnish, Selenium, an SFTP
+  server or Blackfire. The deploy pipeline runs the same image layer — see
+  [Customizing the environment](docs/customization.md).
 
 ## Quick start
 
@@ -140,15 +145,19 @@ export ORO_NO_UPDATE_CHECK=1
 | `console` | Run a Symfony console command | [commands.md](docs/commands.md#7-symfony-console-console) |
 | `test` | Run the PHPUnit suites | [commands.md](docs/commands.md#8-run-tests-test) |
 | `qa-init` / `qa` | Install and run the QA toolchain | [qa.md](docs/qa.md) |
-| `clean` | Remove all containers and volumes | [commands.md](docs/commands.md#11-total-cleanup-clean) |
+| `clear` (alias `clean`) | Remove all containers and volumes | [commands.md](docs/commands.md#11-total-cleanup-clear) |
 | `run` | Run a custom command from `.orobox.yaml` | [commands.md](docs/commands.md#12-run-custom-commands-run) |
-| `extend` | Scaffold a project Dockerfile or a compose override | [commands.md](docs/commands.md#13-extending-the-environment-extend) |
+| `extend` | Scaffold a project Dockerfile or a compose override, add ready-made services (Varnish, Selenium, SFTP, Blackfire) | [commands.md](docs/commands.md#16-extending-the-environment-extend) |
+| `test-init` | Create or reset the test database | [commands.md](docs/commands.md#17-test-environment-test-init) |
+| `db backup` / `db restore` | Dump the development database to a file, or load one back | [commands.md](docs/commands.md#18-database-backup-and-restore-db) |
+| `self-update` | Update Orobox to the latest release | [commands.md](docs/commands.md#19-update-orobox-self-update) |
 | `deploy-init` / `ci-init` / `deploy` | Configure and run the build/check/release pipeline | [deployment.md](docs/deployment.md) |
 | `xdebug` | Hot-patch Xdebug in running containers | [debugging.md](docs/debugging.md) |
 
 ## Documentation
 
-- [docs/configuration.md](docs/configuration.md) — `.orobox.yaml`, installation types, environment files, global flags.
+- [docs/configuration.md](docs/configuration.md) — `.orobox.yaml` reference: installation types, `image`, `php_ini`, `ports`, compose overrides, environment files, global flags.
+- [docs/customization.md](docs/customization.md) — task-oriented guide to customizing the image and the stack, recipes, troubleshooting.
 - [docs/commands.md](docs/commands.md) — the commands not covered by QA/deployment below.
 - [docs/qa.md](docs/qa.md) — the QA toolchain, the PHPStan baseline, the shared vendor tree, CI reports.
 - [docs/deployment.md](docs/deployment.md) — `deploy-init`, `ci-init`, `deploy`, caching in CI.

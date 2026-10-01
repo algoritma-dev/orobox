@@ -9,10 +9,10 @@ import (
 	"github.com/algoritma-dev/orobox/internal/docker"
 	"github.com/algoritma-dev/orobox/internal/utils"
 
+	"github.com/algoritma-dev/orobox/internal/yamledit"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-
-	yamlv3 "gopkg.in/yaml.v3"
 )
 
 var testInitUseTmpfs bool
@@ -28,14 +28,11 @@ var testInitCmd = &cobra.Command{
 		if testInitUseTmpfs {
 			viper.Set("test.use_tmpfs", true)
 			viper.Set("test.tmpfs_size", testInitTmpfsSize)
-			// Rewrites .orobox.yaml, so it starts from the file, not from viper: a viper round
-			// trip would mangle php_ini directive names (see config.LoadConfigFile).
-			if conf, err := config.LoadConfigFile(); err == nil {
-				conf.Test.UseTmpfs = true
-				conf.Test.TmpfsSize = testInitTmpfsSize
-				data, err := yamlv3.Marshal(conf)
-				if err == nil {
-					_ = os.WriteFile(".orobox.yaml", data, 0644)
+			// The choice is remembered in the config file the command was started with. Failing
+			// to record it does not stop this run, which already uses the flag through viper.
+			if configFile := viper.ConfigFileUsed(); configFile != "" {
+				if err := persistTmpfsSettings(configFile, testInitTmpfsSize); err != nil {
+					utils.PrintWarning(fmt.Sprintf("Could not record the tmpfs settings in %s: %v", configFile, err))
 				}
 			}
 		}
@@ -154,6 +151,32 @@ var testInitCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+// persistTmpfsSettings sets test.use_tmpfs and test.tmpfs_size in the config file at path,
+// editing the YAML in place so its comments and every other key stay exactly as the user wrote
+// them. Re-marshalling the whole config instead would drop the comments, and decoding through viper
+// would also mangle dotted php_ini directive names.
+func persistTmpfsSettings(path, size string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	doc, err := yamledit.Parse(data)
+	if err != nil {
+		return err
+	}
+	if err := doc.SetBool([]string{"test", "use_tmpfs"}, true); err != nil {
+		return err
+	}
+	if err := doc.SetScalar([]string{"test", "tmpfs_size"}, size); err != nil {
+		return err
+	}
+	out, err := doc.Bytes()
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, out, 0644)
 }
 
 // testInitRunArgs builds a one-off `docker compose run` in the application service for the

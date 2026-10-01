@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -853,5 +854,192 @@ func TestDeprecatedDockerfileKeyUsed(t *testing.T) {
 	viper.Set("dockerfile", "docker/Dockerfile")
 	if !DeprecatedDockerfileKeyUsed() {
 		t.Error("expected true when the top-level key is set")
+	}
+}
+
+// validateYAML parses and validates imageConfigBase plus extra, returning the first error either
+// step reports, so a test can assert on a rejection whichever layer produces it.
+func validateYAML(t *testing.T, extra string) error {
+	t.Helper()
+	conf, err := ParseConfig([]byte(imageConfigBase + extra))
+	if err != nil {
+		return err
+	}
+	return conf.Validate()
+}
+
+// The legacy nginx_*_port keys are documented and read by GetNginxPorts, so ParseConfig must not
+// refuse them as unknown fields.
+func TestLegacyNginxPortKeys(t *testing.T) {
+	tests := []struct {
+		name    string
+		extra   string
+		wantErr string
+	}{
+		{"http accepted", "nginx_http_port: 8090\n", ""},
+		{"https accepted", "nginx_https_port: 8453\n", ""},
+		{"zero is not a port", "nginx_http_port: 0\n", "nginx_http_port"},
+		{"too large", "nginx_https_port: 70000\n", "nginx_https_port"},
+		{"negative", "nginx_http_port: -1\n", "nginx_http_port"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateYAML(t, tt.extra)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected the config to be accepted, got %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected an error naming %q, got %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
+// A null port value decodes to 0 in a map[string]int, which Validate would accept and GetPorts
+// would read as unset: the user asked for something and silently got the default.
+func TestNullPortIsRejected(t *testing.T) {
+	err := validateYAML(t, "ports:\n  db: ~\n")
+	if err == nil {
+		t.Fatal("expected `ports.db: ~` to be rejected")
+	}
+	for _, want := range []string{"ports.db", "0 to not publish"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should mention %q", err, want)
+		}
+	}
+	if err := validateYAML(t, "ports:\n  db: 0\n  redis: 6380\n"); err != nil {
+		t.Errorf("explicit numbers must stay accepted, got %v", err)
+	}
+}
+
+// A folded scalar (`>`) ends in a newline the user never typed; it is stripped rather than
+// rejected, and every reader of image.run sees the stripped value.
+func TestImageRunFoldedScalar(t *testing.T) {
+	yaml := "image:\n  run:\n    - >\n      apk add git\n      && echo done\n"
+	conf, err := ParseConfig([]byte(imageConfigBase + yaml))
+	if err != nil {
+		t.Fatalf("ParseConfig failed: %v", err)
+	}
+	if err := conf.Validate(); err != nil {
+		t.Fatalf("expected a folded scalar to be accepted, got %v", err)
+	}
+	want := "apk add git && echo done"
+	if got := conf.ImageSettings().Run; len(got) != 1 || got[0] != want {
+		t.Errorf("ImageSettings().Run = %q, want [%q]", got, want)
+	}
+	if conf.Image.Run[0] != want+"\n" {
+		t.Errorf("ImageSettings must not mutate the config, Run[0] is now %q", conf.Image.Run[0])
+	}
+
+	viper.Reset()
+	defer viper.Reset()
+	viper.Set("image.run", []string{want + "\r\n"})
+	if got := GetImageConfig().Run; len(got) != 1 || got[0] != want {
+		t.Errorf("GetImageConfig().Run = %q, want [%q]", got, want)
+	}
+
+	// Only the trailing terminators go: a line break inside the entry still starts a new
+	// Dockerfile instruction.
+	if err := validateYAML(t, "image:\n  run:\n    - |\n      set -e\n      FROM alpine\n"); err == nil || !strings.Contains(err.Error(), "image.run") {
+		t.Errorf("expected an internal newline to be rejected, got %v", err)
+	}
+}
+
+func TestImageRunRejectsHeredoc(t *testing.T) {
+	tests := []struct {
+		entry   string
+		wantErr bool
+	}{
+		{"cat <<EOF > /etc/x", true},
+		{"cat <<-EOF > /etc/x", true},
+		{"cat << 'EOF' > /etc/x", true},
+		{`cat <<"EOF" > /etc/x`, true},
+		{"cat <<_END", true},
+		// A here-string is single-line and not a Dockerfile heredoc.
+		{`cat <<< "hello"`, false},
+		{"tr a b <<<word", false},
+		{"echo $((1<<4))", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.entry, func(t *testing.T) {
+			err := validateYAML(t, "image:\n  run: ["+strconv.Quote(tt.entry)+"]\n")
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("expected %q to be accepted, got %v", tt.entry, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected %q to be rejected", tt.entry)
+			}
+			if !strings.Contains(err.Error(), "image.run") || !strings.Contains(err.Error(), "image.dockerfile") {
+				t.Errorf("expected the error to name image.run and point at image.dockerfile, got %v", err)
+			}
+		})
+	}
+}
+
+// An entry starting with "-" would be read by apk, docker-php-ext-install or npm as an option.
+func TestImageListEntriesRejectLeadingOption(t *testing.T) {
+	for _, key := range []string{"apk", "php_extensions", "npm"} {
+		for _, entry := range []string{"--allow-untrusted", "-g", ".hidden", "=1.0"} {
+			t.Run(key+" "+entry, func(t *testing.T) {
+				err := validateYAML(t, "image:\n  "+key+": ["+strconv.Quote(entry)+"]\n")
+				if err == nil {
+					t.Fatalf("expected %q in image.%s to be rejected", entry, key)
+				}
+				for _, want := range []string{"image." + key, "move it to image.run"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error %q should mention %q", err, want)
+					}
+				}
+			})
+		}
+	}
+	// Every rejected entry gets the hint, not only the leading-dash case.
+	if err := validateYAML(t, "image:\n  apk: [\"git; rm -rf /\"]\n"); err == nil || !strings.Contains(err.Error(), "move it to image.run") {
+		t.Errorf("expected the image.run hint for a shell metacharacter, got %v", err)
+	}
+	for _, ok := range []string{"@playwright/test", "9base", "php84-pecl-redis=6.1.0-r0"} {
+		if err := validateYAML(t, "image:\n  npm: ["+strconv.Quote(ok)+"]\n"); err != nil {
+			t.Errorf("expected %q to be accepted, got %v", ok, err)
+		}
+	}
+}
+
+// These paths end up in a compose short-syntax volume (`src:dst`) or a build context, where a
+// colon, quote, backslash, variable or control character changes what Docker reads.
+func TestProjectPathKeysRejectComposeMetacharacters(t *testing.T) {
+	keys := []struct {
+		key  string
+		yaml func(string) string
+	}{
+		{"image.dockerfile", func(v string) string { return "image:\n  dockerfile: " + v + "\n" }},
+		{"dockerfile", func(v string) string { return "dockerfile: " + v + "\n" }},
+		{"php_ini", func(v string) string { return "php_ini: " + v + "\n" }},
+	}
+	for _, k := range keys {
+		for _, bad := range []string{"conf/a:b.ini", `conf/a\"b.ini`, `conf\\a.ini`, "conf/$HOME.ini", `conf/a\tb.ini`, `conf/a\x01b.ini`} {
+			t.Run(k.key+" "+bad, func(t *testing.T) {
+				err := validateYAML(t, k.yaml(`"`+bad+`"`))
+				if err == nil {
+					t.Fatalf("expected %s to be rejected for %s", bad, k.key)
+				}
+				if !strings.Contains(err.Error(), "'"+k.key+"'") {
+					t.Errorf("expected the error to name '%s', got %v", k.key, err)
+				}
+			})
+		}
+	}
+}
+
+func TestValidateNamesTheDomainIndex(t *testing.T) {
+	conf := OroConfig{Type: InstallTypeProject, OroVersion: "6.1", Domains: []DomainConfig{{Host: "a.test"}, {Host: ""}}}
+	err := conf.Validate()
+	if err == nil || !strings.HasSuffix(err.Error(), "index 1") {
+		t.Errorf("expected the error to end with \"index 1\", got %q", err)
 	}
 }

@@ -4,7 +4,9 @@
 
 ## Configuration (`.orobox.yaml`)
 
-Orobox uses a configuration file called `.orobox.yaml` in the root of your bundle. If the file does not exist, the `init` command will guide you through its interactive creation.
+Orobox uses a configuration file called `.orobox.yaml` in the root of your bundle or project. If the file does not exist, the `init` command will guide you through its interactive creation.
+
+This page is the reference for every key. For a task-oriented walkthrough of adding packages, PHP extensions, PHP settings, ports and services — with worked examples and troubleshooting — see [Customizing the environment](customization.md).
 
 Example `.orobox.yaml` file:
 ```yaml
@@ -42,6 +44,9 @@ image:
 php_ini:
   memory_limit: 4G
   xdebug.log_level: 0
+ports:
+  http: 8090
+  db: 5434
 composer:
   # Tokens for private repositories. Mirrors Composer's COMPOSER_AUTH schema and is
   # injected only into the containers that run composer (never committed or baked
@@ -147,7 +152,7 @@ The layer is built locally, tagged `orobox-custom/<project>:<oro_version>-<type>
 
 ### Custom Dockerfile (`image.dockerfile`)
 
-For anything the declarative keys cannot express — multi-stage builds, `COPY`ing files in — point `image.dockerfile` at a Dockerfile of your own (`orobox extend image` creates one with the required header and sets the key for you, see [`extend`](commands.md#13-extending-the-environment-extend)):
+For anything the declarative keys cannot express — multi-stage builds, `COPY`ing files in — point `image.dockerfile` at a Dockerfile of your own (`orobox extend image` creates one with the required header and sets the key for you, see [`extend`](commands.md#16-extending-the-environment-extend)):
 
 ```yaml
 image:
@@ -189,7 +194,7 @@ How it works, and what it costs:
 - **Combined with the declarative keys:** when `image.dockerfile` and any other `image.*` key are both set, the generated lines are appended to the project's Dockerfile, i.e. to its final stage — one build, one layer chain, no second image. The generated lines start with `USER root`, because your Dockerfile may end on a non-root `USER` and installs need root. The layer therefore ends as root; where compose sets `user:` for a service, that is the user it runs as.
 - The build reads only `<context>/.dockerignore`. A Dockerfile-specific `<name>.dockerignore` (for example `Dockerfile.dockerignore` next to `Dockerfile`) is not used.
 - The **build context is the directory containing the Dockerfile**, not the repository root. With only the declarative keys there is nothing to `COPY`, so the context is an empty directory under Orobox's internal directory. Put the files you `COPY` next to it (`docker/php.ini`, `docker/entrypoint-extra.sh`) — a context scoped this way keeps builds fast and rebuild detection exact.
-- Rebuilds are automatic. There is **no separate command and no need to re-run `init`**: the next `orobox up` / `run` / `test` notices that the rendered Dockerfile (so any change to an `image.*` key), a file in its build context, or the base image changed, and rebuilds before starting anything. `orobox self-update` therefore only pulls, and the layer follows on the next command.
+- Rebuilds are automatic. There is **no separate command and no need to re-run `init`**: whenever Orobox starts containers (`orobox up`, and `init`, `test`, `test-init`, `db restore`, which bring services up on their own) it notices that the rendered Dockerfile (so any change to an `image.*` key), a file in its build context, or the base image changed, and rebuilds before starting anything. `orobox shell`, `console` and `run` enter the containers that are already running and do not rebuild. `orobox self-update` therefore only pulls, and the layer follows on the next `orobox up`.
 - When nothing changed, the check costs a directory stat and one image inspect — no build runs.
 - `orobox up --rebuild` forces a build with `--no-cache --pull`, for what Docker's cache cannot see: an unpinned `RUN apk add` that should pick up a newer package.
 - The image is tagged `orobox-custom/<project>:<oro_version>-<type>` and exists only on your machine. It is per checkout, so two projects on the same host never share one.
@@ -298,9 +303,21 @@ volumes:
   minio_data:
 ```
 
-`orobox extend compose` writes the team file with commented examples, and `orobox extend compose --local` writes the personal one and adds it to your `.gitignore` (see [`extend`](commands.md#13-extending-the-environment-extend)). `orobox create` also adds `.orobox.compose.local.yaml` to the `.gitignore` of a standalone bundle it generates.
+`orobox extend compose` writes the team file with commented examples, and `orobox extend compose --local` writes the personal one and adds it to your `.gitignore` (see [`extend`](commands.md#16-extending-the-environment-extend)). `orobox create` also adds `.orobox.compose.local.yaml` to the `.gitignore` of a standalone bundle it generates.
 
-**Relative paths.** Write paths relative to the file, as in any compose project. Orobox runs compose from its own internal directory, so it rewrites the relative host paths of a copy of your file (`./docker/fixtures` becomes an absolute path under the directory that holds `.orobox.yaml`) and passes that copy to compose. Your file is never modified. A leading `~` expands to your home directory. Absolute paths, values starting with `$` and named volumes are left as they are.
+**Relative paths.** Write paths relative to the file, as in any compose project. Orobox runs compose from its own internal directory (`~/.config/orobox/<project>/` on Linux, the platform's user config directory elsewhere, `.orobox/` in CI or with `OROBOX_LOCAL_CONFIG` set), so it rewrites the relative host paths of a copy of your file (`./docker/fixtures` becomes an absolute path under the directory that holds `.orobox.yaml`) and passes that copy to compose as `compose.project.resolved.yaml` / `compose.local.resolved.yaml`. Your file is never modified. The rewritten keys are:
+
+| Key | Forms |
+| --- | --- |
+| `services.*.volumes` | short syntax `SRC:DST[:MODE]` when `SRC` starts with `.` or `~`; long syntax `type: bind` with its `source` |
+| `services.*.build` | the string form, or `build.context` (`build.dockerfile` is relative to the context and left alone; remote contexts such as `https://…` or `git@…` are left alone) |
+| `services.*.env_file` | a string, a list of strings, or a list of `{path: …}` |
+| `services.*.extends.file` | string |
+| `services.*.label_file` | string or list |
+| `configs.*.file`, `secrets.*.file` | string |
+| `include` | a string entry, or the `path` / `env_file` / `project_directory` of the long form |
+
+Values reached through YAML anchors and `<<` merge keys are rewritten too, so a `x-mounts: &mounts [...]` fragment shared by several services works as written. A leading `~` expands to your home directory. Absolute paths, values starting with `$` (interpolated by compose itself) and short-syntax sources without a path — named volumes — are left as they are. A file that is empty or holds only comments counts as absent.
 
 **Merge caveats.**
 
@@ -313,11 +330,22 @@ volumes:
         - "9090:80"
   ```
 
-- `orobox up --clean` and `orobox clean` run `down -v`, which deletes the named volumes your override declares as well. Data that must survive belongs in a volume declared `external: true` (create it once with `docker volume create`).
+- `orobox up --clean` and `orobox clear` run `down -v`, which deletes the named volumes your override declares as well. Data that must survive belongs in a volume declared `external: true` (create it once with `docker volume create`).
 - A service with a `build:` section is built by `orobox up` on every run (Orobox passes `--build`), so an edited Dockerfile takes effect.
 - Redefining `image` on one of Orobox's own services (`application`, `web`, `php-fpm-app`, `ws`, `consumer`, `cron`, `volume-init`, `web-init`) detaches it from `oro_version` and from the [custom image layer](#image-customization-image); Orobox prints a warning.
 
-**Errors and warnings.** A file that is not valid YAML, or whose top level is not a mapping, stops every command that runs compose, naming the file; Orobox never runs the stack with the override silently dropped. A bind-mount source that does not exist on the host produces a warning naming the path, because Docker would otherwise create an empty directory there and the problem would show up far from its cause.
+**Project service URLs.** Give a service the label `dev.orobox.url` and `orobox up` lists it under "Project services" after the built-in URLs:
+
+```yaml
+services:
+  minio:
+    labels:
+      dev.orobox.url: http://localhost:9001
+```
+
+Every service of the override can also be named in [`orobox logs`](commands.md#6-view-logs-logs), [`orobox shell`](commands.md#5-shell-access-shell) and in the `service` of a [custom command](commands.md#12-run-custom-commands-run).
+
+**Errors and warnings.** A file that is not valid YAML, or whose top level is not a mapping, stops every command that runs compose, naming the file; Orobox never runs the stack with the override silently dropped. A bind-mount source that does not exist on the host produces a warning naming the path, because Docker would otherwise create an empty directory there and the problem would show up far from its cause. Each warning is printed once per command.
 
 **The deploy pipeline does not use these files.** `orobox deploy` and the generated CI build and test the application image, not your development stack; services added here exist only in local `orobox` commands.
 
@@ -385,7 +413,7 @@ These options can be used with any command:
 - `--debug` / `-d`: Shows all Docker output.
 - `--agent`: Minimal output for automated callers.
 
-#### Agent mode (`--agent`)
+#### Agent mode
 
 `--agent` reduces a command's output to what an automated caller — an LLM agent, a script, a CI
 job that parses results — actually needs. Everything Orobox says about itself is dropped:

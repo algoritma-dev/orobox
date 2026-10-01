@@ -11,7 +11,8 @@ group commits by theme rather than listing every commit.
 ## [Unreleased]
 
 - Added stack customization, so a project no longer has to fork Orobox's templates to change its
-  environment. Everything below is opt-in and documented in `docs/configuration.md`.
+  environment. Everything below is opt-in, documented in the new guide `docs/customization.md` and
+  in the `docs/configuration.md` reference.
   - `image` in `.orobox.yaml` builds a local layer on top of the published image: `apk`,
     `php_extensions`, `npm`, `run` (one `RUN` per key, in that order) or a `dockerfile` of your own.
     Removing every key puts the project back on the published image. `orobox up --rebuild` forces
@@ -52,6 +53,13 @@ group commits by theme rather than listing every commit.
   appended after a `# From .env` comment. A project that keeps a complete copy of `.env` still
   overrides every key it defines, but now also receives the keys it lacked, for example those added
   by a later Orobox release.
+- Documented `test-init`, `db backup` / `db restore` and `self-update` in `docs/commands.md`, and
+  corrected the cleanup command's name in the docs: it is `orobox clear`. `orobox clean`, the name
+  the docs used to give it, is now accepted as an alias.
+- Fixed `orobox test-init --tmpfs` rewriting the whole `.orobox.yaml`: it re-marshalled the config,
+  dropping every comment and rewriting keys it has nothing to do with, and always wrote
+  `./.orobox.yaml` even when `--config` named another file. It now edits only `test.use_tmpfs` and
+  `test.tmpfs_size`, in the config file in use, and warns when it cannot.
 - Deprecated the top-level `dockerfile` key in favour of `image.dockerfile`. It still works and is
   read as `image.dockerfile`, but every command prints a warning asking you to move it, setting
   both is an error, and `orobox deploy-init` rewrites the file with the new key.

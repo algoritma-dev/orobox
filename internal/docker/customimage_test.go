@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -79,7 +80,6 @@ func TestComposeNeedsAppImage(t *testing.T) {
 	needs := [][]string{
 		{"up", "-d"},
 		{"run", "--rm", "application", "bash"},
-		{"exec", "application", "bash"},
 		{"start", "application"},
 		{"create"},
 	}
@@ -89,7 +89,10 @@ func TestComposeNeedsAppImage(t *testing.T) {
 		}
 	}
 
+	// exec runs in a container that already exists, from whatever image it was created with;
+	// building a layer it will not use only delays qa, test and xdebug.
 	skips := [][]string{
+		{"exec", "application", "bash"},
 		{"down", "-v"},
 		{"logs", "-f"},
 		{"config", "--images"},
@@ -142,6 +145,46 @@ func TestCheckExtendsBaseImage(t *testing.T) {
 			// The message has to say what to write, not just that something is wrong.
 			if !strings.Contains(err.Error(), "docker/Dockerfile") {
 				t.Errorf("the error should name the configured path, got %v", err)
+			}
+		})
+	}
+}
+
+// `FROM` flags and lines that only look like a FROM must not decide which stage is final:
+// `--platform` precedes the image, and a heredoc body or a continuation line is not an
+// instruction at all.
+func TestCheckExtendsBaseImageParsing(t *testing.T) {
+	arg := config.DockerfileBaseImageArg
+	head := "ARG " + arg + "\nFROM ${" + arg + "}\n"
+
+	accepted := map[string]string{
+		"platform flag":           "ARG " + arg + "\nFROM --platform=linux/amd64 ${" + arg + "}\n",
+		"platform flag + stage":   "ARG " + arg + "\nFROM --platform=$BUILDPLATFORM ${" + arg + "} AS app\n",
+		"heredoc body":            head + "RUN <<EOF\nFROM alpine\nEOF\n",
+		"quoted heredoc":          head + "COPY <<'EOT' /etc/motd\nFROM alpine\nEOT\n",
+		"dash heredoc":            head + "RUN <<-EOT\n\tFROM alpine\n\tEOT\n",
+		"two heredocs":            head + "RUN <<A cat /dev/stdin; <<B cat /dev/stdin\nFROM x\nA\nFROM y\nB\n",
+		"continuation":            head + "RUN echo one \\\n  FROM alpine\n",
+		"comment in continuation": head + "RUN apk add \\\n# FROM alpine\n  FROM \\\n  alpine\n",
+	}
+	for name, content := range accepted {
+		t.Run("accepts "+name, func(t *testing.T) {
+			if err := CheckExtendsBaseImage("docker/Dockerfile", []byte(content)); err != nil {
+				t.Errorf("expected the Dockerfile to be accepted, got %v", err)
+			}
+		})
+	}
+
+	rejected := map[string]string{
+		"platform flag on another image": "FROM --platform=linux/amd64 alpine\n",
+		"FROM after a closed heredoc":    head + "RUN <<EOF\necho hi\nEOF\nFROM alpine\n",
+		"FROM after a continuation ends": head + "RUN echo one \\\n  two\nFROM alpine\n",
+		"here-string is not a heredoc":   head + "RUN cat <<<\"x\"\nFROM alpine\n",
+	}
+	for name, content := range rejected {
+		t.Run("rejects "+name, func(t *testing.T) {
+			if err := CheckExtendsBaseImage("docker/Dockerfile", []byte(content)); err == nil {
+				t.Error("expected the Dockerfile to be rejected")
 			}
 		})
 	}
@@ -304,7 +347,7 @@ func TestLayerSource(t *testing.T) {
 }
 
 func TestCustomImageBuildArgs(t *testing.T) {
-	args := customImageBuildArgs("orobox-custom/p:6.1-project", "algoritmadev/orobox:6.1-project-latest", "/ctx", "abc123", false)
+	args := customImageBuildArgs("orobox-custom/p:6.1-project", "algoritmadev/orobox:6.1-project-latest", "/ctx", "", "abc123", false)
 
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
@@ -324,12 +367,161 @@ func TestCustomImageBuildArgs(t *testing.T) {
 		t.Errorf("a normal build must keep the layer cache: %v", args)
 	}
 
-	rebuild := customImageBuildArgs("r", "b", "/ctx", "h", true)
+	// The base is pulled before the hash is computed (see ensureCustomImage), so --pull here
+	// would only let the build use a base the hash does not describe.
+	rebuild := customImageBuildArgs("r", "b", "/ctx", "", "h", true)
 	rebuildJoined := strings.Join(rebuild, " ")
-	if !strings.Contains(rebuildJoined, "--no-cache") || !strings.Contains(rebuildJoined, "--pull") {
-		t.Errorf("--rebuild must bypass the cache and refresh the base: %v", rebuild)
+	if !strings.Contains(rebuildJoined, "--no-cache") || strings.Contains(rebuildJoined, "--pull") {
+		t.Errorf("--rebuild must bypass the cache without pulling during the build: %v", rebuild)
 	}
 	if rebuild[len(rebuild)-1] != "/ctx" {
 		t.Errorf("the build context must come last, got %v", rebuild)
+	}
+
+	// A project Dockerfile built as written is passed by path, so Docker applies its
+	// <name>.dockerignore.
+	byPath := strings.Join(customImageBuildArgs("r", "b", "/ctx", "/ctx/Dockerfile", "h", false), " ")
+	if !strings.Contains(byPath, "-f /ctx/Dockerfile") || strings.Contains(byPath, "-f -") {
+		t.Errorf("expected the Dockerfile to be passed by path: %v", byPath)
+	}
+}
+
+// fakeLayerDocker replaces the Docker calls ensureCustomImage makes, recording them in order.
+type fakeLayerDocker struct {
+	calls   []string
+	pulled  bool
+	built   bool
+	buildDF string // the -f argument: a path, or "" for stdin
+	hash    string
+	content []byte
+}
+
+func installFakeLayerDocker(t *testing.T) *fakeLayerDocker {
+	t.Helper()
+	f := &fakeLayerDocker{}
+	oldPull, oldField, oldBuild := layerPullImage, layerImageField, layerBuildImage
+	t.Cleanup(func() { layerPullImage, layerImageField, layerBuildImage = oldPull, oldField, oldBuild })
+
+	layerPullImage = func(image string) error {
+		f.calls = append(f.calls, "pull "+image)
+		f.pulled = true
+		return nil
+	}
+	layerImageField = func(image, format string) (string, error) {
+		f.calls = append(f.calls, "inspect "+image)
+		if IsCustomImageRef(image) {
+			return "", errors.New("no such image")
+		}
+		// The pull is what moves the local base to its newer ID.
+		if f.pulled {
+			return "sha256:new", nil
+		}
+		return "sha256:old", nil
+	}
+	layerBuildImage = func(ref, base, contextDir, dockerfilePath string, dockerfile []byte, hash string) error {
+		f.calls = append(f.calls, "build")
+		f.built = true
+		f.buildDF = dockerfilePath
+		f.hash = hash
+		f.content = dockerfile
+		return nil
+	}
+	return f
+}
+
+// setUpLayerProject writes a project with .orobox.yaml and docker/Dockerfile and points viper at
+// it. It returns the Dockerfile's absolute path.
+func setUpLayerProject(t *testing.T, image map[string]any) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "docker"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dockerfile := filepath.Join(dir, "docker", "Dockerfile")
+	content := "ARG " + config.DockerfileBaseImageArg + "\nFROM ${" + config.DockerfileBaseImageArg + "}\nRUN true\n"
+	if err := os.WriteFile(dockerfile, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	viper.SetConfigFile(filepath.Join(dir, ".orobox.yaml"))
+	viper.Set("type", "project")
+	viper.Set("oro_version", "6.1")
+	viper.Set("image.dockerfile", "docker/Dockerfile")
+	for k, v := range image {
+		viper.Set("image."+k, v)
+	}
+	return dockerfile
+}
+
+// A Dockerfile-only project builds from its file by path: that is how Docker finds the
+// project's <name>.dockerignore, which a Dockerfile on stdin loses.
+func TestEnsureCustomImageDockerfileOnlyBuildsByPath(t *testing.T) {
+	dockerfile := setUpLayerProject(t, nil)
+	f := installFakeLayerDocker(t)
+
+	if err := ensureCustomImage(); err != nil {
+		t.Fatal(err)
+	}
+	if !f.built || f.buildDF != dockerfile {
+		t.Errorf("expected a build from %s, got built=%v -f %q", dockerfile, f.built, f.buildDF)
+	}
+}
+
+// With image.* lines appended, the rendered Dockerfile exists in no file and goes on stdin.
+func TestEnsureCustomImageAppendedLinesBuildFromStdin(t *testing.T) {
+	setUpLayerProject(t, map[string]any{"apk": []string{"git"}})
+	f := installFakeLayerDocker(t)
+
+	if err := ensureCustomImage(); err != nil {
+		t.Fatal(err)
+	}
+	if !f.built || f.buildDF != "" {
+		t.Errorf("expected a build from stdin, got built=%v -f %q", f.built, f.buildDF)
+	}
+	if !strings.Contains(string(f.content), "RUN apk add --no-cache git") {
+		t.Errorf("the rendered layer was not passed to the build:\n%s", f.content)
+	}
+}
+
+// --rebuild refreshes the base before hashing, so the label describes the base the build used;
+// pulling during the build instead would label the layer with the old base's ID, and the next
+// command would rebuild it again.
+func TestEnsureCustomImageRebuildPullsBeforeHashing(t *testing.T) {
+	dockerfile := setUpLayerProject(t, nil)
+	f := installFakeLayerDocker(t)
+	SetForceCustomImageRebuild(true)
+	t.Cleanup(func() { SetForceCustomImageRebuild(false) })
+
+	if err := ensureCustomImage(); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.calls) == 0 || !strings.HasPrefix(f.calls[0], "pull ") {
+		t.Fatalf("expected the base to be pulled first, calls: %v", f.calls)
+	}
+	content, err := os.ReadFile(dockerfile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := customLayerHash(filepath.Dir(dockerfile), "sha256:new", content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.hash != want {
+		t.Errorf("hash = %s, want the hash over the pulled base %s", f.hash, want)
+	}
+}
+
+func TestEnsureCustomImageWithoutRebuildDoesNotPullAPresentBase(t *testing.T) {
+	setUpLayerProject(t, nil)
+	f := installFakeLayerDocker(t)
+
+	if err := ensureCustomImage(); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "pull ") {
+			t.Errorf("a present base must not be pulled without --rebuild, calls: %v", f.calls)
+		}
 	}
 }

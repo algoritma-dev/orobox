@@ -3,7 +3,8 @@
 Full reference docs, split out of the [README](../README.md) so it can stay a landing page.
 
 - [Configuration](configuration.md) — `.orobox.yaml`, installation types, environment files, global flags.
-- [Commands](commands.md) — `create`, `init`, `up`, `down`, `shell`, `logs`, `console`, `test`, `clean`, `run`.
+- [Customizing the environment](customization.md) — packages, PHP extensions, your own Dockerfile, `php_ini`, host ports, env variables, extra services through a compose override, ready-made recipes (Varnish, Selenium, SFTP, Blackfire), what reaches the deploy pipeline.
+- [Commands](commands.md) — `create`, `init`, `up`, `down`, `shell`, `logs`, `console`, `test`, `clear`, `run`, `extend`, `test-init`, `db`, `self-update`.
 - [QA tools](qa.md) — `qa-init`, `qa`, the PHPStan baseline, the shared vendor tree, project configuration files, running checks in CI, reports.
 - [Deployment](deployment.md) — `deploy-init`, `ci-init`, `deploy`, keeping development files out of a release, pipeline caching.
 - [Debugging with Xdebug](debugging.md) — enabling/disabling Xdebug, CLI/consumer/cron, PHPStorm setup.

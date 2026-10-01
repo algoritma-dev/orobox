@@ -472,3 +472,53 @@ func TestUntouchedDocumentRoundTrips(t *testing.T) {
 	out, _ := roundTrip(t, d)
 	assertComments(t, out)
 }
+
+// SetBool is what a caller needs for a boolean key: SetScalar forces string semantics, so
+// `use_tmpfs: "true"` would come back as a string and fail to decode into a bool.
+func TestSetBoolWritesAPlainBoolean(t *testing.T) {
+	d, err := Parse([]byte(fixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetBool([]string{"test", "use_tmpfs"}, true); err != nil {
+		t.Fatal(err)
+	}
+	out, err := d.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "use_tmpfs: true\n") {
+		t.Errorf("want a plain `use_tmpfs: true`, got:\n%s", out)
+	}
+	for _, c := range fixtureComments {
+		if !strings.Contains(string(out), c) {
+			t.Errorf("comment %q lost:\n%s", c, out)
+		}
+	}
+
+	var decoded struct {
+		Test struct {
+			UseTmpfs bool `yaml:"use_tmpfs"`
+		} `yaml:"test"`
+	}
+	if err := yaml.Unmarshal(out, &decoded); err != nil {
+		t.Fatalf("output does not decode into a bool: %v", err)
+	}
+	if !decoded.Test.UseTmpfs {
+		t.Error("use_tmpfs decoded as false")
+	}
+}
+
+func TestSetBoolReplacesAnExistingValue(t *testing.T) {
+	d, err := Parse([]byte("test:\n  use_tmpfs: \"no\" # keep\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetBool([]string{"test", "use_tmpfs"}, false); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := d.Bytes()
+	if !strings.Contains(string(out), "use_tmpfs: false # keep") {
+		t.Errorf("want `use_tmpfs: false # keep`, got:\n%s", out)
+	}
+}

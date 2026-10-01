@@ -36,7 +36,7 @@ services:
       - /host/gone:/again
 `
 	a := analyze(t, src, func(p string) bool { return strings.HasPrefix(p, "/host/present") })
-	assertStrings(t, a.MissingPaths, []string{"/host/gone", "/host/long-gone"})
+	assertStrings(t, missingPaths(a), []string{"/host/gone", "/host/long-gone"})
 }
 
 func TestAnalyzeNothingMissing(t *testing.T) {
@@ -115,4 +115,88 @@ func TestAnalyzeInvalidYAML(t *testing.T) {
 	if _, err := Analyze([]byte("services: [unclosed"), testCore, func(string) bool { return true }); err == nil {
 		t.Fatal("expected an error for invalid YAML")
 	}
+}
+
+func TestAnalyzeMissingPathSyntaxAndSkips(t *testing.T) {
+	src := `
+services:
+  a:
+    volumes:
+      - /gone/short:/a
+      - {type: bind, source: /gone/long, target: /b}
+      - {type: bind, source: /gone/created, target: /c, bind: {create_host_path: true}}
+      - /gone/${VAR}/x:/d
+      - {type: bind, source: "/gone/$${x}", target: /e}
+      - /gone/$$lit:/f
+`
+	var checked []string
+	a := analyze(t, src, func(p string) bool { checked = append(checked, p); return false })
+	want := []MissingPath{
+		{Path: "/gone/short"},
+		{Path: "/gone/long", LongSyntax: true},
+		{Path: "/gone/${x}", LongSyntax: true},
+		{Path: "/gone/$lit"},
+	}
+	if len(a.MissingPaths) != len(want) {
+		t.Fatalf("MissingPaths = %+v, want %+v (checked %v)", a.MissingPaths, want, checked)
+	}
+	for i := range want {
+		if a.MissingPaths[i] != want[i] {
+			t.Errorf("MissingPaths[%d] = %+v, want %+v", i, a.MissingPaths[i], want[i])
+		}
+	}
+}
+
+func TestAnalyzeIgnoresResetImageAndBuild(t *testing.T) {
+	a := analyze(t, `
+services:
+  application:
+    image: !reset null
+  web:
+    image: ~
+  extra:
+    build: !reset
+  other:
+    build: null
+`, nil)
+	if len(a.CoreImageOverrides) != 0 {
+		t.Errorf("an unset image is not an override, got %v", a.CoreImageOverrides)
+	}
+	if a.HasBuild {
+		t.Error("an unset build must not count as a build")
+	}
+}
+
+// `up` does not start a service that declares profiles, so its URL would point at nothing.
+func TestAnalyzeSkipsURLsOfProfiledServices(t *testing.T) {
+	a := analyze(t, `
+services:
+  tools:
+    profiles: [tools]
+    labels:
+      dev.orobox.url: http://localhost:9000
+  web:
+    labels:
+      dev.orobox.url: http://localhost:8080
+`, nil)
+	if len(a.URLs) != 1 || a.URLs[0].Service != "web" {
+		t.Errorf("URLs = %v, want only web", a.URLs)
+	}
+}
+
+func TestAnalyzeMultiDocument(t *testing.T) {
+	a := analyze(t, "services:\n  application:\n    image: x\n---\nservices:\n  extra:\n    build: ./x\n    volumes:\n      - /gone:/g\n", func(string) bool { return false })
+	assertStrings(t, a.CoreImageOverrides, []string{"application"})
+	if !a.HasBuild || len(a.MissingPaths) != 1 {
+		t.Errorf("every document must be analyzed, got %+v", a)
+	}
+}
+
+// missingPaths returns the paths of a.MissingPaths, in order.
+func missingPaths(a Analysis) []string {
+	out := make([]string, len(a.MissingPaths))
+	for i, m := range a.MissingPaths {
+		out[i] = m.Path
+	}
+	return out
 }

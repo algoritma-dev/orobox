@@ -23,6 +23,7 @@ import (
 
 const (
 	tagStr  = "!!str"
+	tagBool = "!!bool"
 	tagNull = "!!null"
 	tagMap  = "!!map"
 	tagSeq  = "!!seq"
@@ -105,6 +106,22 @@ func (d *Doc) Kind(path []string) yaml.Kind {
 // intermediate mappings. An existing scalar keeps its comments and style; an
 // existing non-scalar value is an error rather than being silently replaced.
 func (d *Doc) SetScalar(path []string, value string) error {
+	// Force string semantics: without an explicit !!str, a value like "true" or "8080" would be
+	// written plain and read back as a bool/int.
+	return d.setScalar(path, value, tagStr)
+}
+
+// SetBool sets the scalar at path to a YAML boolean, with the same rules as SetScalar. It exists
+// because SetScalar always writes a string, and a quoted "true" does not decode into a Go bool.
+func (d *Doc) SetBool(path []string, value bool) error {
+	text := "false"
+	if value {
+		text = "true"
+	}
+	return d.setScalar(path, text, tagBool)
+}
+
+func (d *Doc) setScalar(path []string, value, tag string) error {
 	if len(path) == 0 {
 		return errors.New("set scalar: empty path")
 	}
@@ -118,13 +135,16 @@ func (d *Doc) SetScalar(path []string, value string) error {
 			return fmt.Errorf("%s: cannot set a scalar over an existing %s", joinPath(path), kindName(v.Kind))
 		}
 		v.Value = value
-		// Force string semantics: without an explicit !!str, a value like
-		// "true" or "8080" would be written plain and read back as a bool/int.
-		v.Tag = tagStr
+		v.Tag = tag
 		v.Style &^= yaml.TaggedStyle
+		// A replaced value is written plain; a previously quoted "no" must not stay quoted
+		// once it becomes a boolean.
+		if tag != tagStr {
+			v.Style &^= yaml.DoubleQuotedStyle | yaml.SingleQuotedStyle
+		}
 		return nil
 	}
-	mapSet(parent, key, strScalar(value))
+	mapSet(parent, key, &yaml.Node{Kind: yaml.ScalarNode, Tag: tag, Value: value})
 	return nil
 }
 

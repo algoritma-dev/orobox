@@ -93,16 +93,19 @@ func sanitizeImageName(name string) string {
 	return sanitized
 }
 
-// composeNeedsAppImage reports whether a `docker compose` invocation is one that needs the
-// application image to exist. The list is an allow-list rather than a skip-list: a subcommand
-// nobody thought of here costs an image that is built one step later, while a skip-list that
-// missed one would run the stack on a stale layer.
+// composeNeedsAppImage reports whether a `docker compose` invocation is one that creates
+// containers from the application image, and so needs it to exist and be current. `exec` is
+// not one: it runs in a container that already exists, on the image that container was created
+// from, so building a layer there would only delay qa, test and xdebug with a build they never
+// use. The list is an allow-list rather than a skip-list: a subcommand nobody thought of here
+// costs an image that is built one step later, while a skip-list that missed one would run the
+// stack on a stale layer.
 func composeNeedsAppImage(args []string) bool {
 	if len(args) == 0 {
 		return false
 	}
 	switch args[0] {
-	case "up", "run", "exec", "start", "create":
+	case "up", "run", "start", "create":
 		return true
 	default:
 		return false
@@ -171,7 +174,8 @@ func ensureCustomImage() error {
 	// The project Dockerfile is optional: `image.*` keys alone render a complete one.
 	var projectDockerfile []byte
 	contextDir := ""
-	if dockerfile := config.GetDockerfilePath(); dockerfile != "" {
+	dockerfile := config.GetDockerfilePath()
+	if dockerfile != "" {
 		content, err := os.ReadFile(dockerfile)
 		if err != nil {
 			return fmt.Errorf("could not read the 'image.dockerfile' configured in .orobox.yaml (%s): %w", dockerfile, err)
@@ -189,19 +193,37 @@ func ensureCustomImage() error {
 		contextDir = dir
 	}
 
-	rendered := RenderLayerDockerfile(projectDockerfile, config.GetImageConfig())
+	img := config.GetImageConfig()
+	rendered := RenderLayerDockerfile(projectDockerfile, img)
+
+	// A Dockerfile-only layer is the project file byte for byte, so it is built from that file
+	// by path: Docker then honours the project's <name>.dockerignore, which it ignores for a
+	// Dockerfile read from stdin. Only a rendered layer, which exists in no file, goes on stdin.
+	buildFrom := ""
+	if dockerfile != "" && len(layerRunLines(img)) == 0 {
+		buildFrom = dockerfile
+	}
 
 	base, ref := ProjectImageRefs()
+
+	// --rebuild refreshes the base first, so the hash below is computed from the image the
+	// build then uses. Pulling during the build (`docker build --pull`) would label the layer
+	// with the previous base's ID and the next command would find it stale and rebuild again.
+	if forceCustomImageRebuild {
+		if err := layerPullImage(base); err != nil {
+			return fmt.Errorf("could not pull %s to rebuild the project image layer on: %w", base, err)
+		}
+	}
 
 	// The base image ID goes into the hash, so it has to be resolvable. On a first run nothing
 	// has pulled it yet: `docker build` would pull it itself, but then the hash would be
 	// computed from an image the build did not use.
-	baseID, err := imageField(base, "{{.Id}}")
+	baseID, err := layerImageField(base, "{{.Id}}")
 	if err != nil {
-		if pullErr := pullImage(base); pullErr != nil {
+		if pullErr := layerPullImage(base); pullErr != nil {
 			return fmt.Errorf("could not pull %s to build the project image layer on: %w", base, pullErr)
 		}
-		baseID, err = imageField(base, "{{.Id}}")
+		baseID, err = layerImageField(base, "{{.Id}}")
 		if err != nil {
 			return fmt.Errorf("could not inspect %s after pulling it: %w", base, err)
 		}
@@ -213,17 +235,93 @@ func ensureCustomImage() error {
 	}
 
 	if !forceCustomImageRebuild {
-		got, err := imageField(ref, fmt.Sprintf("{{index .Config.Labels %q}}", customImageHashLabel))
+		got, err := layerImageField(ref, fmt.Sprintf("{{index .Config.Labels %q}}", customImageHashLabel))
 		if err == nil && got == want {
 			return nil
 		}
 	}
 
-	return buildCustomImage(ref, base, contextDir, rendered, want)
+	return layerBuildImage(ref, base, contextDir, buildFrom, rendered, want)
 }
 
-// fromInstruction matches a Dockerfile `FROM` line and captures the image it names.
-var fromInstruction = regexp.MustCompile(`(?im)^\s*FROM\s+(\S+)`)
+// The Docker calls ensureCustomImage makes, as variables so tests can follow the order of pull,
+// inspect and build without a Docker daemon.
+var (
+	layerPullImage  = pullImage
+	layerImageField = imageField
+	layerBuildImage = buildCustomImage
+)
+
+// heredocMarker matches a Dockerfile heredoc opener (`<<EOF`, `<<-EOF`, `<<"EOF"`) and captures
+// the dash and the delimiter word.
+var heredocMarker = regexp.MustCompile(`<<(-?)["']?([A-Za-z_][A-Za-z0-9_]*)["']?`)
+
+// heredocOpeners are the instructions that accept heredocs.
+var heredocOpeners = map[string]bool{"RUN": true, "COPY": true, "ADD": true}
+
+// fromImages returns the image of every FROM instruction, in order. It reads the Dockerfile the
+// way Docker splits it into instructions, so a line that merely starts with FROM is not one:
+// continuation lines (after a line ending in `\`), comments, and heredoc bodies are skipped, and
+// FROM's own flags (`--platform=…`) are skipped to reach the image.
+func fromImages(content []byte) []string {
+	type heredoc struct {
+		word      string
+		stripTabs bool
+	}
+	var (
+		images      []string
+		pending     []heredoc // heredocs opened by the current instruction, read in order
+		continued   bool      // the previous line ended in `\`
+		instruction string    // keyword of the instruction being read
+	)
+
+	for _, line := range strings.Split(string(content), "\n") {
+		line = strings.TrimRight(line, "\r")
+
+		if len(pending) > 0 {
+			body := line
+			if pending[0].stripTabs {
+				body = strings.TrimLeft(body, "\t")
+			}
+			if body == pending[0].word {
+				pending = pending[1:]
+			}
+			continue
+		}
+
+		trimmed := strings.TrimSpace(line)
+		// A comment or blank line inside a continuation does not end it.
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+
+		if !continued {
+			fields := strings.Fields(trimmed)
+			instruction = strings.ToUpper(fields[0])
+			if instruction == "FROM" {
+				for _, f := range fields[1:] {
+					if !strings.HasPrefix(f, "--") {
+						images = append(images, f)
+						break
+					}
+				}
+			}
+		}
+
+		if heredocOpeners[instruction] {
+			for _, m := range heredocMarker.FindAllStringSubmatchIndex(line, -1) {
+				// `<<<` is a shell here-string, not a heredoc.
+				if m[0] > 0 && line[m[0]-1] == '<' {
+					continue
+				}
+				pending = append(pending, heredoc{word: line[m[4]:m[5]], stripTabs: m[3] > m[2]})
+			}
+		}
+
+		continued = strings.HasSuffix(trimmed, "\\")
+	}
+	return images
+}
 
 // CheckExtendsBaseImage refuses a Dockerfile whose final stage does not build on the published
 // Orobox image. Earlier stages are free to use anything — compiling a tool against a plain
@@ -231,12 +329,12 @@ var fromInstruction = regexp.MustCompile(`(?im)^\s*FROM\s+(\S+)`)
 // that produces the runtime image has to be the Orobox one, or `oro_version` would decide
 // nothing and the stack would fail in ways that point nowhere near this config key.
 func CheckExtendsBaseImage(configured string, content []byte) error {
-	matches := fromInstruction.FindAllStringSubmatch(string(content), -1)
-	if len(matches) == 0 {
+	images := fromImages(content)
+	if len(images) == 0 {
 		return fmt.Errorf("%s contains no FROM instruction", configured)
 	}
 
-	final := matches[len(matches)-1][1]
+	final := images[len(images)-1]
 	if final == "$"+config.DockerfileBaseImageArg || final == "${"+config.DockerfileBaseImageArg+"}" {
 		return nil
 	}
@@ -297,25 +395,33 @@ func customLayerHash(contextDir, baseID string, dockerfile []byte) (string, erro
 	return hex.EncodeToString(sum.Sum(nil))[:16], nil
 }
 
-// customImageBuildArgs builds the `docker build` argument list. The Dockerfile is read from
-// stdin (`-f -`) because the layer is rendered in memory and may exist in no file at all.
-// Extracted from buildCustomImage so the flags can be asserted without running Docker.
-func customImageBuildArgs(ref, base, contextDir, hash string, noCache bool) []string {
+// customImageBuildArgs builds the `docker build` argument list. dockerfilePath is the project
+// Dockerfile to build from by path, or "" to read the rendered layer from stdin (`-f -`), which
+// may exist in no file at all. Extracted from buildCustomImage so the flags can be asserted
+// without running Docker.
+//
+// noCache adds only --no-cache: a forced rebuild pulls the base before computing the hash (see
+// ensureCustomImage), so --pull here could only build on a base the label does not describe.
+func customImageBuildArgs(ref, base, contextDir, dockerfilePath, hash string, noCache bool) []string {
+	file := dockerfilePath
+	if file == "" {
+		file = "-"
+	}
 	args := []string{
 		"build",
 		"--build-arg", config.DockerfileBaseImageArg + "=" + base,
 		"--label", customImageHashLabel + "=" + hash,
 		"-t", ref,
-		"-f", "-",
+		"-f", file,
 	}
 	if noCache {
-		args = append(args, "--no-cache", "--pull")
+		args = append(args, "--no-cache")
 	}
 	return append(args, contextDir)
 }
 
-func buildCustomImage(ref, base, contextDir string, dockerfile []byte, hash string) error {
-	args := customImageBuildArgs(ref, base, contextDir, hash, forceCustomImageRebuild)
+func buildCustomImage(ref, base, contextDir, dockerfilePath string, dockerfile []byte, hash string) error {
+	args := customImageBuildArgs(ref, base, contextDir, dockerfilePath, hash, forceCustomImageRebuild)
 
 	debug := viper.GetBool("debug")
 	source := layerSource()
@@ -328,7 +434,9 @@ func buildCustomImage(ref, base, contextDir string, dockerfile []byte, hash stri
 	}
 
 	cmd := exec.Command("docker", args...)
-	cmd.Stdin = bytes.NewReader(dockerfile)
+	if dockerfilePath == "" {
+		cmd.Stdin = bytes.NewReader(dockerfile)
+	}
 	PrintDebugCommand("docker", args)
 	if debug {
 		cmd.Stdout = os.Stdout

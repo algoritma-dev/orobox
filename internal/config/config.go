@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/spf13/viper"
 	yamlv3 "gopkg.in/yaml.v3"
@@ -238,6 +239,14 @@ type OroConfig struct {
 	// Keys are listed in DefaultPorts, and Validate rejects any other. Read it through GetPorts,
 	// which fills in the defaults.
 	Ports map[string]int `yaml:"ports,omitempty" mapstructure:"ports"`
+	// NginxHTTPPort and NginxHTTPSPort are the original spellings of ports.http and ports.https.
+	//
+	// Deprecated: use Ports. They are still declared so ParseConfig, which refuses unknown keys,
+	// keeps loading the configs that use them; docker.GetNginxPorts reads them below `ports:`.
+	// Pointers, because an explicit 0 would reach the template as a port and has to be told
+	// apart from an absent key to be refused.
+	NginxHTTPPort  *int `yaml:"nginx_http_port,omitempty" mapstructure:"nginx_http_port"`
+	NginxHTTPSPort *int `yaml:"nginx_https_port,omitempty" mapstructure:"nginx_https_port"`
 	// Deploy is a pointer so a project without deployment keeps a clean config file: a struct
 	// value would always be serialized, empty stages and all.
 	Deploy *DeployConfig `yaml:"deploy,omitempty" mapstructure:"deploy"`
@@ -286,7 +295,7 @@ func (c *OroConfig) Validate() error {
 	}
 	for i, domain := range c.Domains {
 		if domain.Host == "" {
-			return errors.New("config error: 'host' is required for domain at index " + string(rune(i)))
+			return errors.New("config error: 'host' is required for domain at index " + strconv.Itoa(i))
 		}
 	}
 	if err := c.validateImage(); err != nil {
@@ -298,6 +307,9 @@ func (c *OroConfig) Validate() error {
 	if err := validatePorts(c.Ports); err != nil {
 		return err
 	}
+	if err := validateLegacyNginxPorts(c.NginxHTTPPort, c.NginxHTTPSPort); err != nil {
+		return err
+	}
 	return c.ValidateDeploy()
 }
 
@@ -305,7 +317,32 @@ func (c *OroConfig) Validate() error {
 // scoped npm packages (@scope/name), version pins (name=1.2-r0, name@1.2) and tags, with no
 // whitespace or shell metacharacters. These entries are spliced into a generated Dockerfile
 // line, so an entry that is not a plain token could smuggle in a second command.
-var imageEntryPattern = regexp.MustCompile(`^[A-Za-z0-9@._+:/=~-]+$`)
+//
+// The first character is narrower than the rest: the entries are arguments of `apk add`,
+// `docker-php-ext-install` and `npm install -g`, and one starting with "-" would be read as an
+// option of that command (`--allow-untrusted`, `--registry=...`) rather than as a package.
+var imageEntryPattern = regexp.MustCompile(`^[A-Za-z0-9@][A-Za-z0-9@._+:/=~-]*$`)
+
+// heredocPattern finds a shell heredoc (`<<EOF`, `<<-EOF`, `<< 'EOF'`) in an image.run entry.
+// BuildKit expands a heredoc in a RUN line by reading the lines that follow it as the body, so in
+// a generated Dockerfile it would swallow the instructions after it. The leading `[^<]` keeps the
+// single-line here-string (`<<<word`) allowed.
+var heredocPattern = regexp.MustCompile(`(^|[^<])<<-?\s*["']?[A-Za-z_]`)
+
+// trimRunEntries strips the line terminators a YAML block scalar leaves at the end of an
+// image.run entry: a folded `>` scalar always ends in a newline the user never typed. Only the
+// trailing ones go, because a line break inside an entry is still an error (see validateImage).
+// A new slice is returned so the caller's config is never modified.
+func trimRunEntries(run []string) []string {
+	if run == nil {
+		return nil
+	}
+	out := make([]string, len(run))
+	for i, entry := range run {
+		out[i] = strings.TrimRight(entry, "\r\n")
+	}
+	return out
+}
 
 // validateImage checks the image block and the deprecated top-level dockerfile key. Every
 // message names the offending key, because a config with several lists would otherwise leave the
@@ -334,11 +371,13 @@ func (c *OroConfig) validateImage() error {
 	for _, list := range lists {
 		for i, entry := range list.entries {
 			if !imageEntryPattern.MatchString(entry) {
-				return fmt.Errorf("config error: '%s' entry %d (%s) must be non-empty and contain only letters, digits and @ . _ + : / = ~ -", list.key, i, strconv.Quote(entry))
+				return fmt.Errorf("config error: '%s' entry %d (%s) must be a plain package name: non-empty, starting with a letter, digit or @, "+
+					"and containing only letters, digits and @ . _ + : / = ~ -; options and shell syntax belong in 'image.run', so move it to image.run",
+					list.key, i, strconv.Quote(entry))
 			}
 		}
 	}
-	for i, entry := range c.Image.Run {
+	for i, entry := range trimRunEntries(c.Image.Run) {
 		if strings.TrimSpace(entry) == "" {
 			return fmt.Errorf("config error: 'image.run' entry %d must not be empty", i)
 		}
@@ -348,6 +387,9 @@ func (c *OroConfig) validateImage() error {
 		// line into whatever instruction comes next.
 		if strings.ContainsAny(entry, "\r\n") || strings.HasSuffix(strings.TrimRight(entry, " \t"), `\`) {
 			return fmt.Errorf("config error: 'image.run' entry %d (%s) must be a single line without a trailing backslash; join commands with && or move the script into 'image.dockerfile'", i, strconv.Quote(entry))
+		}
+		if heredocPattern.MatchString(entry) {
+			return fmt.Errorf("config error: 'image.run' entry %d (%s) uses a heredoc, which would read the generated Dockerfile lines after it as its body; write the file in a project Dockerfile and set 'image.dockerfile' instead", i, strconv.Quote(entry))
 		}
 	}
 	return nil
@@ -361,6 +403,17 @@ func validateProjectPathKey(key, value string) error {
 	raw := strings.TrimSpace(value)
 	if raw == "" {
 		return nil
+	}
+	// The php_ini file is spliced into a quoted short-syntax compose volume ("src:dst:ro"), where
+	// a colon splits the mapping, `"` ends the string, `\` starts an escape and `$` starts compose
+	// interpolation; control characters would corrupt the generated YAML outright. The Dockerfile
+	// keys follow the same rule so every project path the config names obeys one vocabulary, and
+	// none of these characters belongs in a project file name anyway. Refusing them here is
+	// simpler than escaping them for every consumer.
+	if i := strings.IndexFunc(raw, func(r rune) bool {
+		return r == ':' || r == '"' || r == '\\' || r == '$' || unicode.IsControl(r)
+	}); i >= 0 {
+		return fmt.Errorf("config error: '%s' must not contain %s (got %s): Orobox writes the path into generated compose files, where that character changes its meaning; rename the file", key, strconv.QuoteRune([]rune(raw[i:])[0]), strconv.Quote(raw))
 	}
 	if filepath.IsAbs(raw) {
 		return fmt.Errorf("config error: '%s' must be relative to the directory holding .orobox.yaml, got %s", key, strconv.Quote(raw))
@@ -382,6 +435,7 @@ func (c *OroConfig) ImageSettings() ImageConfig {
 	if strings.TrimSpace(img.Dockerfile) == "" {
 		img.Dockerfile = c.Dockerfile
 	}
+	img.Run = trimRunEntries(img.Run)
 	// Normalized like GetImageConfig does for the dev stack, so the deploy pipeline and the local
 	// build resolve the same file whatever spelling the YAML used.
 	img.Dockerfile = normalizeDockerfilePath(img.Dockerfile)
@@ -398,6 +452,9 @@ func GetImageConfig() ImageConfig {
 		img.Dockerfile = viper.GetString("dockerfile")
 	}
 	img.Dockerfile = normalizeDockerfilePath(img.Dockerfile)
+	// Trimmed like ImageSettings does, so the layer rendered for the dev stack runs the same
+	// commands Validate accepted.
+	img.Run = trimRunEntries(img.Run)
 	return img
 }
 
@@ -452,6 +509,14 @@ func ParseConfig(data []byte) (*OroConfig, error) {
 	decoder := yamlv3.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&c); err != nil {
+		return nil, err
+	}
+	// The struct cannot tell `db: ~` from `db: 0`, so the null check reads the document itself.
+	var doc yamlv3.Node
+	if err := yamlv3.Unmarshal(data, &doc); err != nil {
+		return nil, err
+	}
+	if err := rejectNullPorts(&doc); err != nil {
 		return nil, err
 	}
 	return &c, nil

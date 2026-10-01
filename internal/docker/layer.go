@@ -11,6 +11,21 @@ import (
 	"github.com/algoritma-dev/orobox/internal/config"
 )
 
+// InstallPhpExtensionsVersion is the mlocati/docker-php-extension-installer release the layer
+// falls back to. It must equal the `ARG INSTALL_PHP_EXTENSIONS_VERSION=` default in
+// templates/docker/Dockerfile (a test holds them together), so a layer never builds with a
+// different installer than the base image ships.
+const InstallPhpExtensionsVersion = "2.12.0"
+
+// installPhpExtensionsBootstrap installs the extension installer when the base image lacks it.
+// Base images published before it was shipped in the final stage do not have it, and a cached
+// copy of one can stay on a machine long after newer ones exist; on a current image the
+// `command -v` check makes this a no-op that downloads nothing.
+const installPhpExtensionsBootstrap = "RUN command -v install-php-extensions >/dev/null 2>&1 || " +
+	"(curl -fsSL https://github.com/mlocati/docker-php-extension-installer/releases/download/" +
+	InstallPhpExtensionsVersion + "/install-php-extensions -o /usr/local/bin/install-php-extensions" +
+	" && chmod +x /usr/local/bin/install-php-extensions)"
+
 // RenderLayerDockerfile returns the Dockerfile the custom layer is built from: the project's
 // Dockerfile (nil when none) followed by one RUN per non-empty image.* key. Pure: no I/O.
 //
@@ -67,6 +82,7 @@ func layerRunLines(img config.ImageConfig) []string {
 	}
 
 	if len(img.PhpExtensions) > 0 {
+		runs = append(runs, installPhpExtensionsBootstrap)
 		runs = append(runs, "RUN install-php-extensions "+strings.Join(img.PhpExtensions, " "))
 	}
 
@@ -81,20 +97,32 @@ func layerRunLines(img config.ImageConfig) []string {
 	return runs
 }
 
-// phpIniQuoted lists the characters php.ini treats specially in an unquoted value: comments,
-// assignment, quoting, and the operators of its expression syntax. A value containing any of
-// them is double-quoted.
-const phpIniQuoted = `;="{}|&~![()^`
+// phpIniQuoted lists the characters that make an unquoted php.ini value mean something other
+// than the text itself: `;` starts a comment, `=` an assignment, `"` and `'` open strings (an
+// unclosed `'` swallows every directive after it), and braces and brackets belong to variable
+// and section syntax. A value containing any of them is double-quoted.
+const phpIniQuoted = `;="'{}[]#`
+
+// phpIniOperators are the operators of php.ini's expression syntax. Raw, a value using them is
+// evaluated (`E_ALL & ~E_DEPRECATED` becomes a number); quoted, it is a literal string.
+const phpIniOperators = "|&^~!"
+
+// phpIniKeywords are the words php.ini turns into "1" or "" when they appear unquoted. A YAML
+// string holding one is quoted so it reaches PHP as the word itself: `session.cookie_samesite:
+// None` must not become an empty setting. A YAML boolean is a different value and becomes On/Off.
+var phpIniKeywords = map[string]bool{
+	"none": true, "null": true, "yes": true, "no": true,
+	"on": true, "off": true, "true": true, "false": true,
+}
 
 // RenderPhpIni turns a flat directive map into the text of zz-project.ini: keys sorted, one
 // `key = value` per line, a trailing newline. Pure: no I/O.
 //
 // It lives beside RenderLayerDockerfile because the local stack and the Dagger pipeline must
 // produce the same file. Directive names are written verbatim — php.ini names are
-// case-sensitive and dotted. Booleans become On/Off, numbers are written as-is, and a string is
-// double-quoted when it holds a character php.ini would otherwise interpret (or surrounding
-// whitespace, which an unquoted value loses). Entries are expected to have passed
-// config.Validate; a value that has no php.ini spelling is still refused rather than guessed.
+// case-sensitive and dotted. Booleans become On/Off and numbers are written as-is; strings are
+// spelled by renderPhpIniString. Entries are expected to have passed config.Validate; a value
+// that has no php.ini spelling is still refused rather than guessed.
 func RenderPhpIni(values map[string]any) (string, error) {
 	keys := make([]string, 0, len(values))
 	for key := range values {
@@ -121,17 +149,7 @@ func renderPhpIniValue(value any) (string, error) {
 		}
 		return "Off", nil
 	case string:
-		if strings.ContainsAny(v, "\r\n") {
-			// A quoted value cannot span lines in php.ini, so there is no spelling for it.
-			return "", errors.New("a value cannot contain a line break")
-		}
-		if v == "" || strings.ContainsAny(v, phpIniQuoted) || strings.TrimSpace(v) != v {
-			// Inside double quotes php.ini reads \" and \\ as escapes, so both are escaped
-			// to keep the value byte-for-byte what the project wrote.
-			escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(v)
-			return `"` + escaped + `"`, nil
-		}
-		return v, nil
+		return renderPhpIniString(v)
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 		return fmt.Sprint(v), nil
 	case float32:
@@ -140,4 +158,148 @@ func renderPhpIniValue(value any) (string, error) {
 		return strconv.FormatFloat(v, 'f', -1, 64), nil
 	}
 	return "", fmt.Errorf("unsupported value of type %T; use a string, number or boolean", value)
+}
+
+// renderPhpIniString spells a string value so PHP reads back what the project meant:
+//   - empty → `""`, since a bare `key =` is easy to misread;
+//   - a php.ini keyword (none, on, yes, …) → double-quoted, or PHP would turn it into "1"/"";
+//   - anything with `$` → single-quoted, php.ini's only literal form: raw and double-quoted
+//     values expand ${VAR};
+//   - a well-formed expression of constants and numbers (`E_ALL & ~E_DEPRECATED`) → raw, so PHP
+//     evaluates it;
+//   - special characters, operators outside a valid expression, or surrounding whitespace →
+//     double-quoted, with `\` and `"` escaped;
+//   - anything else → raw.
+func renderPhpIniString(v string) (string, error) {
+	if strings.ContainsAny(v, "\r\n") {
+		// A quoted value cannot span lines in php.ini, so there is no spelling for it.
+		return "", errors.New("a value cannot contain a line break")
+	}
+
+	switch {
+	case v == "":
+		return `""`, nil
+	case phpIniKeywords[strings.ToLower(v)]:
+		return `"` + v + `"`, nil
+	case strings.Contains(v, "$"):
+		if strings.Contains(v, "'") {
+			return "", errors.New("a value cannot contain both '$' and a single quote")
+		}
+		return "'" + v + "'", nil
+	case isPhpIniExpression(v):
+		return v, nil
+	case strings.ContainsAny(v, phpIniQuoted+phpIniOperators+"()") || strings.TrimSpace(v) != v:
+		// Inside double quotes php.ini reads \" and \\ as escapes, so both are escaped to keep
+		// the value byte-for-byte what the project wrote.
+		escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(v)
+		return `"` + escaped + `"`, nil
+	}
+	return v, nil
+}
+
+// isPhpIniExpression reports whether v is a well-formed php.ini expression that uses at least
+// one operator, so that writing it raw makes PHP evaluate it rather than fail. A full parse is
+// needed, not a character check: `Hello!` uses only expression characters, yet raw it is a
+// syntax error that makes PHP drop every directive after it.
+//
+// The grammar is php.ini's, over the operands this renderer allows:
+//
+//	expr    = unary { ("|" | "&" | "^") unary }
+//	unary   = { "~" | "!" } primary
+//	primary = operand | "(" expr ")"
+//	operand = ["-" digit] { letter | digit | "_" | "." }   (at least one character)
+//
+// Surrounding whitespace is not accepted: it would be lost unquoted.
+func isPhpIniExpression(v string) bool {
+	if strings.TrimSpace(v) != v || !strings.ContainsAny(v, phpIniOperators) {
+		return false
+	}
+	p := phpIniExprParser{s: v}
+	if !p.expr() {
+		return false
+	}
+	p.skipSpace()
+	return p.pos == len(p.s)
+}
+
+type phpIniExprParser struct {
+	s   string
+	pos int
+}
+
+func (p *phpIniExprParser) peek() byte {
+	if p.pos < len(p.s) {
+		return p.s[p.pos]
+	}
+	return 0
+}
+
+func (p *phpIniExprParser) skipSpace() {
+	for p.peek() == ' ' || p.peek() == '\t' {
+		p.pos++
+	}
+}
+
+func (p *phpIniExprParser) expr() bool {
+	if !p.unary() {
+		return false
+	}
+	for {
+		p.skipSpace()
+		switch p.peek() {
+		case '|', '&', '^':
+			p.pos++
+			if !p.unary() {
+				return false
+			}
+		default:
+			return true
+		}
+	}
+}
+
+func (p *phpIniExprParser) unary() bool {
+	p.skipSpace()
+	for p.peek() == '~' || p.peek() == '!' {
+		p.pos++
+		p.skipSpace()
+	}
+	return p.primary()
+}
+
+func (p *phpIniExprParser) primary() bool {
+	p.skipSpace()
+	if p.peek() == '(' {
+		p.pos++
+		if !p.expr() {
+			return false
+		}
+		p.skipSpace()
+		if p.peek() != ')' {
+			return false
+		}
+		p.pos++
+		return true
+	}
+	return p.operand()
+}
+
+func (p *phpIniExprParser) operand() bool {
+	start := p.pos
+	// A negative number is one token in php.ini; a lone `-` is not an operator there.
+	if p.peek() == '-' {
+		if p.pos+1 >= len(p.s) || p.s[p.pos+1] < '0' || p.s[p.pos+1] > '9' {
+			return false
+		}
+		p.pos++
+	}
+	for {
+		c := p.peek()
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '.' {
+			p.pos++
+			continue
+		}
+		break
+	}
+	return p.pos > start
 }

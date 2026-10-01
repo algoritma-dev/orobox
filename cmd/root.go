@@ -2,7 +2,9 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -34,12 +36,12 @@ var rootCmd = &cobra.Command{
 		agent, _ := cmd.Flags().GetBool("agent")
 		output.SetAgent(agent && !viper.GetBool("debug"))
 
-		if ConfigError != nil && !isConfigExempt(cmd) {
-			utils.PrintError(ConfigError.Error())
+		if err := configGate(cmd); err != nil {
+			utils.PrintError(err.Error())
 			os.Exit(1)
 		}
 
-		warnDeprecatedConfig()
+		warnDeprecatedConfig(cmd)
 
 		// Started here rather than in Execute because agent mode is only known once the flags are
 		// parsed, and a check that ignored it would print into a machine-readable stream.
@@ -50,13 +52,31 @@ var rootCmd = &cobra.Command{
 // warnDeprecatedConfig tells the user to move the old top-level `dockerfile` key under `image:`.
 //
 // It runs here and not in initConfig for two reasons: only a config that passed Validate should
-// be commented on, and agent mode is only known once PersistentPreRun has set it — utils.PrintWarning
-// drops the message in agent mode, which keeps the machine-readable stdout clean.
-func warnDeprecatedConfig() {
-	if ConfigError != nil || !config.DeprecatedDockerfileKeyUsed() {
+// be commented on, and agent mode is only known once PersistentPreRun has set it — the helper
+// drops the message in agent mode. It goes to stderr because it is printed before every command,
+// whose stdout may be piped or captured, and it is skipped for the commands whose output is
+// consumed verbatim (see printsVerbatimOutput).
+func warnDeprecatedConfig(cmd *cobra.Command) {
+	if ConfigError != nil || !config.DeprecatedDockerfileKeyUsed() || printsVerbatimOutput(cmd) {
 		return
 	}
-	utils.PrintWarning("The top-level 'dockerfile' key is deprecated: move it under 'image:' as 'image.dockerfile'.")
+	utils.PrintWarningStderr("The top-level 'dockerfile' key is deprecated: move it under 'image:' as 'image.dockerfile'.")
+}
+
+// printsVerbatimOutput reports whether cmd, or a command it belongs to, produces output that is
+// read as is rather than by a person scanning it: `completion <shell>` writes a script the shell
+// sources, cobra's hidden `__complete` commands answer the shell's completion requests on every
+// TAB, and `help` / `version` are what a user runs to find out how to fix the config. A notice
+// about the config does not belong in any of them, not even on stderr: during completion stderr
+// is the terminal the user is typing in.
+func printsVerbatimOutput(cmd *cobra.Command) bool {
+	for c := cmd; c != nil; c = c.Parent() {
+		switch c.Name() {
+		case "completion", cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd, "help", "version":
+			return true
+		}
+	}
+	return false
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -88,6 +108,44 @@ func init() {
 
 // ConfigError contains the error if the configuration file is invalid.
 var ConfigError error
+
+// configErrorIsFilesOnly reports that ConfigError comes from ValidateFiles alone: the config
+// itself is valid, and only a file it points at (the php_ini file) is missing. The teardown
+// commands tolerate that case; see configGate.
+var configErrorIsFilesOnly bool
+
+// configGate returns the error that must stop cmd before it runs, or nil.
+//
+// `down` and `clear` are let through a config whose only problem is a missing file, with a
+// warning on stderr: they remove containers and never mount anything, and refusing them would
+// leave a stack running that the user can no longer stop through orobox — at the very moment the
+// file has been moved or deleted. A config that is invalid in itself still stops them, because
+// the compose files they run cannot be rendered from it.
+func configGate(cmd *cobra.Command) error {
+	if ConfigError == nil || isConfigExempt(cmd) {
+		return nil
+	}
+	if configErrorIsFilesOnly && isTeardownCommand(cmd) {
+		utils.PrintWarningStderr(fmt.Sprintf("%v\nContinuing anyway: '%s' only stops the environment and does not need that file.", ConfigError, cmd.Name()))
+		return nil
+	}
+	return ConfigError
+}
+
+// isTeardownCommand reports whether cmd is one of the top-level commands that only stop the
+// environment. Name() is the primary name, so the `clean` alias of `clear` matches too. The
+// parent is checked by shape rather than against rootCmd, which PersistentPreRun is part of and so
+// cannot refer to.
+func isTeardownCommand(cmd *cobra.Command) bool {
+	if cmd.Parent() == nil || cmd.Parent().HasParent() {
+		return false
+	}
+	switch cmd.Name() {
+	case downCmd.Name(), cleanCmd.Name():
+		return true
+	}
+	return false
+}
 
 // isConfigExempt reports whether a command may run without a valid .orobox.yaml.
 // These commands either create the config/source tree or manage the binary itself.
@@ -121,26 +179,53 @@ func initConfig() {
 	viper.SetEnvPrefix("ORO")
 	viper.AutomaticEnv()
 
-	if err := viper.ReadInConfig(); err == nil {
-		configFile := viper.ConfigFileUsed()
-		data, err := os.ReadFile(configFile)
-		if err == nil {
-			c, err := config.ParseConfig(data)
-			if err != nil {
-				ConfigError = fmt.Errorf("invalid config file %s:\n%v", configFile, err)
-			} else if err := c.Validate(); err != nil {
-				ConfigError = fmt.Errorf("invalid config file %s:\n%v", configFile, err)
-			} else if err := c.ValidateFiles(filepath.Dir(configFile)); err != nil {
-				// Validate cannot see the disk, so the files the config points at are
-				// checked here, against the directory holding the config.
-				ConfigError = fmt.Errorf("invalid config file %s:\n%v", configFile, err)
-			}
+	// initConfig can run more than once in a process (the run command's help calls it again), so
+	// a verdict on an earlier config must not outlive it.
+	ConfigError = nil
+	configErrorIsFilesOnly = false
+
+	if err := viper.ReadInConfig(); err != nil {
+		if isMissingConfigFile(err) {
+			return
 		}
+		// A file that exists but cannot be read or parsed — a YAML syntax error, most often — used
+		// to be ignored with the "no config" case, and every command then ran on an empty config.
+		configFile := viper.ConfigFileUsed()
+		if configFile == "" {
+			configFile = ".orobox.yaml"
+		}
+		ConfigError = fmt.Errorf("invalid config file %s:\n%v", configFile, err)
+		return
+	}
 
-		debug := viper.GetBool("debug")
-
-		if ConfigError == nil && debug {
-			utils.PrintInfo("Using config file: " + configFile)
+	configFile := viper.ConfigFileUsed()
+	data, err := os.ReadFile(configFile)
+	if err == nil {
+		c, err := config.ParseConfig(data)
+		if err != nil {
+			ConfigError = fmt.Errorf("invalid config file %s:\n%v", configFile, err)
+		} else if err := c.Validate(); err != nil {
+			ConfigError = fmt.Errorf("invalid config file %s:\n%v", configFile, err)
+		} else if err := c.ValidateFiles(filepath.Dir(configFile)); err != nil {
+			// Validate cannot see the disk, so the files the config points at are
+			// checked here, against the directory holding the config.
+			ConfigError = fmt.Errorf("invalid config file %s:\n%v", configFile, err)
+			configErrorIsFilesOnly = true
 		}
 	}
+
+	debug := viper.GetBool("debug")
+
+	if ConfigError == nil && debug {
+		utils.PrintInfo("Using config file: " + configFile)
+	}
+}
+
+// isMissingConfigFile reports whether a ReadInConfig error only means there is no config to read:
+// no .orobox.yaml in the working directory, or a --config path that does not exist yet (`orobox
+// init --config` is how such a file is created). Commands that need a config refuse to run on
+// their own when there is none.
+func isMissingConfigFile(err error) bool {
+	var notFound viper.ConfigFileNotFoundError
+	return errors.As(err, &notFound) || errors.Is(err, fs.ErrNotExist)
 }

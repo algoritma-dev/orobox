@@ -6,6 +6,8 @@ ARG PNPM_VERSION={{.PnpmVersion}}
 ARG MEMORY_LIMIT={{.MemoryLimit}}
 # Pinned release of mlocati/docker-php-extension-installer: `latest` would let a rebuild of the
 # same template silently change the tool (and the extensions it can build) under existing users.
+# Keep in sync with docker.InstallPhpExtensionsVersion (internal/docker/layer.go), which project
+# layers use to fetch the same release on base images that predate shipping the installer.
 ARG INSTALL_PHP_EXTENSIONS_VERSION=2.12.0
 
 # Get Node from official image

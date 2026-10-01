@@ -1,6 +1,8 @@
 package docker
 
 import (
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -19,6 +21,7 @@ func TestRenderLayerDeclarativeOnly(t *testing.T) {
 		"FROM ${OROBOX_BASE_IMAGE}\n" +
 		"USER root\n" +
 		"RUN apk add --no-cache a b\n" +
+		installPhpExtensionsBootstrap + "\n" +
 		"RUN install-php-extensions redis\n" +
 		"RUN npm install -g x\n" +
 		"RUN echo 1\n" +
@@ -72,9 +75,44 @@ func TestRenderLayerSkipsEmptyKeys(t *testing.T) {
 	}
 }
 
+// A base image published before the installer was shipped in the final stage has no
+// install-php-extensions, so the layer fetches the pinned release when the command is missing.
+func TestRenderLayerBootstrapsExtensionInstaller(t *testing.T) {
+	got := string(RenderLayerDockerfile(nil, config.ImageConfig{PhpExtensions: []string{"redis"}}))
+
+	want := "RUN command -v install-php-extensions >/dev/null 2>&1 || " +
+		"(curl -fsSL https://github.com/mlocati/docker-php-extension-installer/releases/download/" +
+		InstallPhpExtensionsVersion + "/install-php-extensions -o /usr/local/bin/install-php-extensions" +
+		" && chmod +x /usr/local/bin/install-php-extensions)\n" +
+		"RUN install-php-extensions redis\n"
+	if !strings.Contains(got, want) {
+		t.Errorf("layer does not bootstrap the installer before using it:\n%s", got)
+	}
+
+	// Without extensions there is nothing to install, so nothing is downloaded.
+	if got := string(RenderLayerDockerfile(nil, config.ImageConfig{Apk: []string{"a"}})); strings.Contains(got, "install-php-extensions") {
+		t.Errorf("layer without php_extensions mentions the installer:\n%s", got)
+	}
+}
+
+// The base image and the layer bootstrap must fetch the same installer release.
+func TestInstallPhpExtensionsVersionMatchesDockerfile(t *testing.T) {
+	content, err := os.ReadFile("../../templates/docker/Dockerfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`(?m)^ARG INSTALL_PHP_EXTENSIONS_VERSION=(\S+)$`).FindSubmatch(content)
+	if m == nil {
+		t.Fatal("templates/docker/Dockerfile declares no ARG INSTALL_PHP_EXTENSIONS_VERSION default")
+	}
+	if string(m[1]) != InstallPhpExtensionsVersion {
+		t.Errorf("Dockerfile pins %s, InstallPhpExtensionsVersion is %s", m[1], InstallPhpExtensionsVersion)
+	}
+}
+
 func TestRenderPhpIni(t *testing.T) {
 	got, err := RenderPhpIni(map[string]any{
-		"b": true, "a": false, "n": -1, "f": 1.5, "s": "Europe/Rome", "q": "a;b", "w": " x",
+		"b": true, "a": false, "n": -1, "f": 1.5, "s": "Europe/Rome", "q": "a;b", "w": " x", "e": "E_ALL & ~E_DEPRECATED",
 	})
 	if err != nil {
 		t.Fatalf("RenderPhpIni failed: %v", err)
@@ -82,6 +120,7 @@ func TestRenderPhpIni(t *testing.T) {
 
 	want := "a = Off\n" +
 		"b = On\n" +
+		"e = E_ALL & ~E_DEPRECATED\n" +
 		"f = 1.5\n" +
 		"n = -1\n" +
 		"q = \"a;b\"\n" +
@@ -92,8 +131,12 @@ func TestRenderPhpIni(t *testing.T) {
 	}
 }
 
+// These characters mean something to php.ini in an unquoted value (comments, assignment,
+// quoting, sections, variables); a value holding one is double-quoted. `'` is among them because
+// an unquoted `it's` opens a raw string that never closes, and PHP then drops every directive
+// after it (verified against php:8.2-cli).
 func TestRenderPhpIniQuotesSpecialChars(t *testing.T) {
-	for _, char := range []string{";", "=", `"`, "{", "}", "|", "&", "~", "!", "[", "(", ")", "^"} {
+	for _, char := range []string{";", "=", `"`, "{", "}", "[", "]", "#", "'"} {
 		got, err := RenderPhpIni(map[string]any{"k": "a" + char + "b"})
 		if err != nil {
 			t.Fatalf("RenderPhpIni failed for %q: %v", char, err)
@@ -102,6 +145,83 @@ func TestRenderPhpIniQuotesSpecialChars(t *testing.T) {
 		if want := "k = \"a" + escaped + "b\"\n"; got != want {
 			t.Errorf("value with %q: got %q, want %q", char, got, want)
 		}
+	}
+}
+
+// A well-formed php.ini expression of constants and numbers is written raw so PHP evaluates it:
+// quoted, `E_ALL & ~E_DEPRECATED` would be a literal string and error_reporting would read it as 0.
+func TestRenderPhpIniWritesExpressionsRaw(t *testing.T) {
+	for _, value := range []string{
+		"E_ALL & ~E_DEPRECATED",
+		"E_ALL & ~E_DEPRECATED & ~E_STRICT",
+		"E_ALL&~E_NOTICE",
+		"1|2",
+		"a^b",
+		"!(1|0)",
+		"~ ~E_ALL",
+		"-1 & 3",
+		"1 | (2 & 3)",
+	} {
+		got, err := RenderPhpIni(map[string]any{"k": value})
+		if err != nil {
+			t.Fatalf("RenderPhpIni failed for %q: %v", value, err)
+		}
+		if want := "k = " + value + "\n"; got != want {
+			t.Errorf("expression %q: got %q, want %q", value, got, want)
+		}
+	}
+}
+
+// Operator characters outside a well-formed expression are a php.ini syntax error when written
+// raw (`Hello!` stops the parser at the `!` and every later directive is lost), so such a value
+// is quoted and stays the literal string the project wrote.
+func TestRenderPhpIniQuotesMalformedExpressions(t *testing.T) {
+	for _, value := range []string{"Hello!", "a!b", "a~b", "foo(bar)", "a)b", "(", "~", "a |", "| a", "1 & - 3", " E_ALL & ~E_NOTICE"} {
+		got, err := RenderPhpIni(map[string]any{"k": value})
+		if err != nil {
+			t.Fatalf("RenderPhpIni failed for %q: %v", value, err)
+		}
+		if want := "k = \"" + value + "\"\n"; got != want {
+			t.Errorf("value %q: got %q, want %q", value, got, want)
+		}
+	}
+}
+
+// Unquoted, php.ini turns these keywords into "" or "1"; `session.cookie_samesite: None` would
+// silently become an empty setting. Written as a YAML string, the project meant the word.
+func TestRenderPhpIniQuotesKeywordStrings(t *testing.T) {
+	for _, value := range []string{"None", "null", "YES", "no", "On", "off", "true", "False"} {
+		got, err := RenderPhpIni(map[string]any{"k": value})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "k = \"" + value + "\"\n"; got != want {
+			t.Errorf("keyword %q: got %q, want %q", value, got, want)
+		}
+	}
+	got, err := RenderPhpIni(map[string]any{"session.cookie_samesite": "None"})
+	if err != nil || got != "session.cookie_samesite = \"None\"\n" {
+		t.Errorf("got %q, %v", got, err)
+	}
+	// A YAML boolean is still a php.ini boolean.
+	if got, _ := RenderPhpIni(map[string]any{"k": true}); got != "k = On\n" {
+		t.Errorf("bool true: got %q", got)
+	}
+}
+
+// php.ini expands ${VAR} in raw and double-quoted values; single quotes are its only literal
+// form, so a value holding `$` is single-quoted.
+func TestRenderPhpIniSingleQuotesDollarValues(t *testing.T) {
+	got, err := RenderPhpIni(map[string]any{"x": "a${HOME}", "y": "a$b;c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "x = 'a${HOME}'\ny = 'a$b;c'\n"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	// A single-quoted php.ini string has no escapes, so `$` and `'` together have no spelling.
+	if _, err := RenderPhpIni(map[string]any{"x": "a$b'c"}); err == nil {
+		t.Error("expected a value with both $ and ' to be rejected")
 	}
 }
 

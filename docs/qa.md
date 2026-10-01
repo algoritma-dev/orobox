@@ -77,7 +77,7 @@ orobox qa --phpstan --eslint
 #### Agent mode (`--agent`)
 
 `--agent` is the global flag described in
-[Agent mode](configuration.md#agent-mode---agent); on `orobox qa` it changes what the run prints
+[Agent mode](configuration.md#agent-mode); on `orobox qa` it changes what the run prints
 rather than what it does. The tools still run exactly as they would without it — locally they still
 fix what they can — but instead of each tool's own output, the command prints one line per finding:
 

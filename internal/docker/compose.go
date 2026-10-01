@@ -516,7 +516,7 @@ type phpIniState struct {
 	Source string
 	// Hash identifies the content of the mounted ini (see phpIniHash).
 	Hash string
-	// Changed reports whether the generated file was written or removed.
+	// Changed reports whether the generated file was written or emptied.
 	Changed bool
 }
 
@@ -531,17 +531,17 @@ func phpIniHash(content []byte) string {
 }
 
 // syncPhpIni makes the internal directory match the php_ini setting and describes the mount for
-// the compose templates. The generated file is written when the map form is used and removed
-// otherwise, so dropping the key (or switching to the file form) does not leave a stale file
+// the compose templates. The generated file is written when the map form is used and emptied
+// otherwise, so dropping the key (or switching to the file form) leaves no stale settings
 // behind. A problem with the setting is a warning and no mount: Validate rejects bad configs
 // while they load, so this is a last line of defence, not the primary check.
 func syncPhpIni(internalDir, projectDir string, ini config.PhpIni) phpIniState {
 	generated := filepath.Join(internalDir, phpIniFileName)
 
-	// dropped is the "mount nothing" outcome; removing a leftover generated file still counts
+	// dropped is the "mount nothing" outcome; emptying a leftover generated file still counts
 	// as a change, because the compose files lose the mount at the same time.
 	dropped := func() phpIniState {
-		return phpIniState{Changed: os.Remove(generated) == nil}
+		return phpIniState{Changed: emptyGeneratedPhpIni(generated)}
 	}
 
 	source, err := phpIniMountSource(ini, internalDir, projectDir)
@@ -561,7 +561,7 @@ func syncPhpIni(internalDir, projectDir string, ini config.PhpIni) phpIniState {
 			warnOnce(fmt.Sprintf("Ignoring php_ini: %v", err))
 			return dropped()
 		}
-		return phpIniState{Source: source, Hash: phpIniHash(content), Changed: os.Remove(generated) == nil}
+		return phpIniState{Source: source, Hash: phpIniHash(content), Changed: emptyGeneratedPhpIni(generated)}
 	}
 
 	content, err := RenderPhpIni(ini.Values)
@@ -578,6 +578,22 @@ func syncPhpIni(internalDir, projectDir string, ini config.PhpIni) phpIniState {
 	}
 	state.Changed = true
 	return state
+}
+
+// emptyGeneratedPhpIni truncates a leftover generated ini and reports whether it had content.
+// The file is emptied rather than removed: containers created while the map form was in use
+// keep bind-mounting it until they are recreated, and a missing bind source would make Docker
+// refuse to start them again (or create a directory in its place). An absent file is left
+// absent, since nothing mounts it.
+func emptyGeneratedPhpIni(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() || info.Size() == 0 {
+		return false
+	}
+	if err := os.WriteFile(path, nil, 0644); err != nil {
+		panic(err)
+	}
+	return true
 }
 
 func writeComposeFile(internalDir string, filename string, data any) bool {
@@ -1551,9 +1567,9 @@ func writeDockerfile(internalDir string, data any) bool {
 	return true
 }
 
-// writeEnvFile renders the env template and, when a file of the same name sits in the
-// current directory (next to .orobox.yaml), merges it over the rendered result key by key
-// (see MergeEnv). The local file is a sparse override rather than a replacement, so keys
+// writeEnvFile renders the env template and, when a file of the same name sits next to
+// .orobox.yaml (the project directory, which a command run from a subdirectory does not have as
+// its working directory), merges it over the rendered result key by key (see MergeEnv). The local file is a sparse override rather than a replacement, so keys
 // that newer Orobox releases add to the template still reach projects with an older .env.
 // It reports whether the file in internalDir changed.
 func writeEnvFile(path string, internalDir string, data any) bool {
@@ -1578,14 +1594,15 @@ func writeEnvFile(path string, internalDir string, data any) bool {
 
 	content := buf.Bytes()
 
-	projectContent, err := os.ReadFile(filename)
+	projectFile := filepath.Join(config.GetHostBundlePath(), filename)
+	projectContent, err := os.ReadFile(projectFile)
 	switch {
 	case err == nil:
 		content = MergeEnv(content, projectContent, filename)
 	case !errors.Is(err, os.ErrNotExist):
 		// Fall back to the plain template rather than aborting: the warning names the
 		// file, and the stack still starts with Orobox's own defaults.
-		utils.PrintPlainf("Warning: could not read local file %s: %v\n", filename, err)
+		utils.PrintPlainf("Warning: could not read local file %s: %v\n", projectFile, err)
 	}
 
 	dest := filepath.Join(internalDir, filename)

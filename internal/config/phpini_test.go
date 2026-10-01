@@ -127,20 +127,21 @@ func TestValidatePhpIni(t *testing.T) {
 	}
 
 	invalid := map[string]any{
-		"nested map":     map[string]any{"xdebug": map[string]any{"mode": "debug"}},
-		"list value":     map[string]any{"opcache.preload": []any{"a", "b"}},
-		"list":           []any{"memory_limit=1G"},
-		"number":         42,
-		"absolute path":  "/etc/php.ini",
-		"escaping path":  "../x",
-		"dot":            ".",
-		"empty string":   "  ",
-		"key with ;":     map[string]any{"memory_limit;x": "1G"},
-		"key with quote": map[string]any{`a"b`: "1G"},
-		"key with =":     map[string]any{"a=b": "1G"},
-		"empty key":      map[string]any{"": "1G"},
-		"value with LF":  map[string]any{"memory_limit": "1G\nauto_prepend_file=x"},
-		"value with CR":  map[string]any{"memory_limit": "1G\rx"},
+		"nested map":         map[string]any{"xdebug": map[string]any{"mode": "debug"}},
+		"list value":         map[string]any{"opcache.preload": []any{"a", "b"}},
+		"list":               []any{"memory_limit=1G"},
+		"number":             42,
+		"absolute path":      "/etc/php.ini",
+		"escaping path":      "../x",
+		"dot":                ".",
+		"empty string":       "  ",
+		"key with ;":         map[string]any{"memory_limit;x": "1G"},
+		"key with quote":     map[string]any{`a"b`: "1G"},
+		"key with =":         map[string]any{"a=b": "1G"},
+		"empty key":          map[string]any{"": "1G"},
+		"value with LF":      map[string]any{"memory_limit": "1G\nauto_prepend_file=x"},
+		"value with CR":      map[string]any{"memory_limit": "1G\rx"},
+		"value with $ and '": map[string]any{"x": "a$b'c"},
 	}
 	for name, raw := range invalid {
 		err := validatePhpIni(raw)
@@ -160,6 +161,20 @@ func TestValidatePhpIniRejectsLineBreakNamingTheKey(t *testing.T) {
 	err := validatePhpIni(map[string]any{"memory_limit": "1G\nx"})
 	if err == nil || !strings.Contains(err.Error(), "php_ini.memory_limit") {
 		t.Errorf("expected an error naming php_ini.memory_limit, got %v", err)
+	}
+}
+
+// A value holding `$` is single-quoted in php.ini (its only form without ${VAR} expansion), and
+// a single-quoted php.ini string has no escapes, so a `'` next to it has no spelling at all.
+func TestValidatePhpIniRejectsDollarWithSingleQuote(t *testing.T) {
+	err := validatePhpIni(map[string]any{"x": "a$b'c"})
+	if err == nil || !strings.Contains(err.Error(), "php_ini.x") {
+		t.Errorf("expected an error naming php_ini.x, got %v", err)
+	}
+	for _, ok := range []string{"a${HOME}", "it's", "$"} {
+		if err := validatePhpIni(map[string]any{"x": ok}); err != nil {
+			t.Errorf("%q: expected to be accepted, got %v", ok, err)
+		}
 	}
 }
 

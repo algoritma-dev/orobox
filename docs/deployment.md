@@ -140,6 +140,11 @@ of `orobox qa` and `orobox test` too.
 
 With none of these set nothing is built and the steps run on the published image unchanged.
 
+The summary `orobox deploy` prints before it starts says which of them apply: a `Layer:` line when
+the project's image layer is built on top of the published image, and a `php.ini:` line when the
+project's `php_ini` settings are written into the steps. `--no-cache` does not rebuild the layer;
+see [What the pipeline caches](#what-the-pipeline-caches).
+
 **The compose override is development-only.** `.orobox.compose.yaml`, `.orobox.compose.local.yaml`
 and the services added through recipes never reach the pipeline: it has its own service list
 (PostgreSQL, plus Redis and Elasticsearch for the tests when `services` enables them) and is

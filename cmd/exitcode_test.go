@@ -107,6 +107,7 @@ func TestComposeFailuresExitNonZero(t *testing.T) {
 		{"up", []string{"up", "-d"}, []string{"up"}},
 		{"down", []string{"down", "--remove-orphans"}, []string{"down"}},
 		{"clear", []string{"down", "-v"}, []string{"clear"}},
+		{"clean (alias of clear)", []string{"down", "-v"}, []string{"clean"}},
 		{"qa-init", []string{"mkdir -p /var/www/oro/vendor-bin/qa"}, []string{"qa-init"}},
 		{"test-init drop database", []string{"DROP DATABASE IF EXISTS oro_db_test WITH (FORCE);"}, []string{"test-init"}},
 		{"test-init oro:install", []string{"oro:install"}, []string{"test-init"}},
@@ -128,7 +129,7 @@ func TestComposeFailuresExitNonZero(t *testing.T) {
 func TestComposeSuccessExitsZero(t *testing.T) {
 	// These also prove the failure cases above are caused by the injected failure and not by
 	// something unrelated in the command: with nothing injected, every one of them exits 0.
-	for _, argv := range [][]string{{"up"}, {"down"}, {"clear"}, {"qa-init"}, {"test-init"}} {
+	for _, argv := range [][]string{{"up"}, {"down"}, {"clear"}, {"clean"}, {"qa-init"}, {"test-init"}} {
 		t.Run(argv[0], func(t *testing.T) {
 			inTempDir(t)
 			composeFailure(t) // no match: every call succeeds

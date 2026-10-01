@@ -5,8 +5,6 @@ supported version and install type, then exercise the green ("happy") path of
 every user-facing Orobox command against it. This complements the unit tests;
 it does not replace them.
 
-Design spec: [`docs/superpowers/specs/2026-08-24-e2e-test-suite-design.md`](../docs/superpowers/specs/2026-08-24-e2e-test-suite-design.md)
-
 ## What it covers
 
 - **Versions:** all of `config.SupportedOroVersions` (`7.0`, `6.1`, `6.0`, `5.1`).

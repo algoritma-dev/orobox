@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/spf13/viper"
+	yamlv3 "gopkg.in/yaml.v3"
 )
 
 // DefaultPorts maps every host port the generated compose stack publishes to the value it has
@@ -56,6 +57,55 @@ func validatePorts(p map[string]int) error {
 		}
 		if value := p[key]; value < 0 || value > 65535 {
 			return fmt.Errorf("config error: 'ports.%s' is %d, want 0 (not published) or a port between 1 and 65535", key, value)
+		}
+	}
+	return nil
+}
+
+// rejectNullPorts refuses a `ports:` entry with no value (`db: ~`, or `db:` with nothing after
+// it). Decoded into map[string]int the null becomes 0, which validatePorts would accept as "do not
+// publish" while GetPorts reads the key as unset and publishes the default: either way the user
+// gets something they did not write. doc is the parsed document node of .orobox.yaml.
+func rejectNullPorts(doc *yamlv3.Node) error {
+	if doc.Kind != yamlv3.DocumentNode || len(doc.Content) == 0 {
+		return nil
+	}
+	ports := mappingValue(doc.Content[0], "ports")
+	if ports == nil || ports.Kind != yamlv3.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(ports.Content); i += 2 {
+		if value := ports.Content[i+1]; value.Kind == yamlv3.ScalarNode && value.Tag == "!!null" {
+			return fmt.Errorf("config error: 'ports.%s' has no value; set a number, or 0 to not publish the port", ports.Content[i].Value)
+		}
+	}
+	return nil
+}
+
+// mappingValue returns the value node of key in a YAML mapping node, or nil when the node is not
+// a mapping or has no such key.
+func mappingValue(node *yamlv3.Node, key string) *yamlv3.Node {
+	if node.Kind != yamlv3.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return node.Content[i+1]
+		}
+	}
+	return nil
+}
+
+// validateLegacyNginxPorts checks the deprecated nginx_http_port / nginx_https_port keys. Unlike
+// `ports:` they cannot say "do not publish": docker.GetNginxPorts hands their value to the
+// template as is, so only a real TCP port is accepted.
+func validateLegacyNginxPorts(httpPort, httpsPort *int) error {
+	for _, legacy := range []struct {
+		key   string
+		value *int
+	}{{"nginx_http_port", httpPort}, {"nginx_https_port", httpsPort}} {
+		if legacy.value != nil && (*legacy.value < 1 || *legacy.value > 65535) {
+			return fmt.Errorf("config error: '%s' is %d, want a port between 1 and 65535", legacy.key, *legacy.value)
 		}
 	}
 	return nil

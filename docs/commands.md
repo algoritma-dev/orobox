@@ -4,8 +4,10 @@
 
 The main command is `oro` (or `orobox`, depending on how you installed it).
 
-QA (`qa-init`, `qa`) and deployment (`deploy-init`, `ci-init`, `deploy`) commands have their own
-pages: [QA tools](qa.md) and [Deployment](deployment.md).
+QA (`qa-init`, `qa` — sections 9 and 10) and deployment (`deploy-init`, `ci-init`, `deploy` —
+sections 13 to 15) have their own pages: [QA tools](qa.md) and [Deployment](deployment.md).
+`xdebug` is described in [Debugging](debugging.md). How the commands below fit together to
+customize the stack is the subject of [Customizing the environment](customization.md).
 
 ### 1. Scaffolding (`create`)
 Creates a new source tree on disk and stops. It does **not** touch Docker, the
@@ -116,13 +118,21 @@ Starts Docker containers and configures OroCommerce.
 ```bash
 orobox up
 ```
-The command dynamically generates the `docker-compose.yml` file, starts the services, and proceeds with the environment installation or update.
+The command regenerates the compose files, the env files and the nginx configuration from
+`.orobox.yaml`, builds the project's [image layer](configuration.md#image-customization-image)
+when one is configured and stale, and starts the services. Run it again after changing
+`.orobox.yaml`, `.env`, `php_ini` or a [compose override](configuration.md#extending-the-stack-oroboxcomposeyaml):
+Compose recreates only the containers whose definition changed. When an override defines a
+service with a `build:` section, `up` passes `--build` so it is rebuilt.
 
 Flags:
 - `-c`, `--clean`: tear the environment down, volumes included, before starting.
 - `--rebuild`: rebuild the image from the project's [`image` settings](configuration.md#image-customization-image) ignoring the Docker cache. Only useful with a custom layer configured: rebuilds happen automatically when the rendered Dockerfile, its build context or the base image change, so this is for the case Docker cannot see — an unpinned `RUN apk add` that should pick up a newer package.
 
-Once the stack is up, `up` lists the services your [compose override](configuration.md#extending-the-stack-oroboxcomposeyaml) advertises with the `dev.orobox.url` label, after the built-in blocks:
+Once the stack is up, `up` prints the application URLs and, for every enabled optional service
+(Mailpit, Adminer, RedisInsight, RabbitMQ, Kibana), its URL and the DSN to put in your `.env`, all
+with the host ports configured in [`ports`](configuration.md#host-ports-ports). A service whose
+port is `0` is not listed. It then lists the services your [compose override](configuration.md#extending-the-stack-oroboxcomposeyaml) advertises with the `dev.orobox.url` label, after the built-in blocks:
 ```
 Project services:
   - minio: http://localhost:9001
@@ -136,9 +146,11 @@ orobox down
 ```
 
 ### 5. Shell Access (`shell`)
-Accesses a container in interactive mode (default: php).
+Opens an interactive `bash` in a running container, `application` by default. Any service of the
+stack can be named, including the ones added by a compose override.
 ```bash
 orobox shell
+orobox shell consumer
 ```
 
 ### 6. View Logs (`logs`)
@@ -177,10 +189,13 @@ Options:
 - `--report-path`: Where to write it (default `var/orobox/reports/junit.xml`).
 - `--cache-scope`, `--base-cache-scope`: Dagger engine only; same meaning as on `orobox deploy`.
 
-### 11. Total Cleanup (`clean`)
-Removes all associated containers and volumes to start from scratch.
+### 11. Total Cleanup (`clear`)
+Removes all associated containers and volumes to start from scratch. `orobox clean` is accepted as
+an alias. The named volumes declared in
+a compose override are removed too; see [Extending the stack](configuration.md#extending-the-stack-oroboxcomposeyaml)
+for keeping data across a cleanup.
 ```bash
-orobox clean
+orobox clear
 ```
 
 ### 12. Run Custom Commands (`run`)
@@ -198,7 +213,7 @@ Options:
 
 If you run `orobox run --help`, you will see a dynamic list of all commands configured in your `.orobox.yaml`.
 
-### 13. Extending the environment (`extend`)
+### 16. Extending the environment (`extend`)
 Writes the files that customize the stack, with the required headers and commented examples, so you do not have to remember the file names or the syntax.
 ```bash
 orobox extend image             # docker/Dockerfile + image.dockerfile in .orobox.yaml
@@ -245,6 +260,49 @@ A project value always wins over a recipe value. If any part of a recipe is refu
 | `sftp` | `atmoz/sftp` on port 2222 with an `orobox` user and a `docker/sftp/upload` bind mount | Host, port and credentials for an integration's SFTP settings |
 | `blackfire` | A `blackfire` agent service, `image.php_extensions: [blackfire]`, `php_ini.blackfire.agent_socket`, empty `BLACKFIRE_SERVER_ID` / `BLACKFIRE_SERVER_TOKEN` in `.env` | Where to set the credentials |
 
-Recipes publish fixed host ports (varnish 6081, selenium 7900, sftp 2222), so two projects running the same recipe at the same time collide on them. Change the port in `.orobox.compose.local.yaml` with `ports: !override [...]` for the service, for example `ports: !override ["6082:6081"]`.
+Recipes publish fixed host ports (varnish 6081, selenium 7900, sftp 2222), so two projects running the same recipe at the same time collide on them. Change the port in `.orobox.compose.local.yaml` with `ports: !override [...]` for the service; the container side stays as the recipe defines it (varnish `80`, selenium `7900`, sftp `22`), for example `ports: !override ["6082:80"]` for varnish.
+
+Each recipe, what it configures and how to use it is described in [Ready-made services](customization.md#ready-made-services-recipes).
 
 A recipe that sets `php_ini` keys is refused when `php_ini` in `.orobox.yaml` is the path of an ini file: Orobox does not edit that file, so the error lists the lines to add to it by hand.
+
+### 17. Test Environment (`test-init`)
+Creates, or resets, the test database that `orobox test` runs against: starts `db-test` (plus
+Redis, RabbitMQ, Elasticsearch and Mailpit when they are enabled), drops the test database and
+installs OroCommerce in the test environment.
+```bash
+orobox test-init
+orobox test-init --tmpfs --tmpfs-size 2g
+```
+When the test database is already installed, it asks before resetting it. At the end it prints the
+connection details of the test database, with the host port configured as `ports.db_test`
+(default `5433`).
+
+Options:
+- `--tmpfs`: Keep the test database in RAM. This also sets `test.use_tmpfs: true` and
+  `test.tmpfs_size` in the config file in use (`.orobox.yaml`, or the one given with `--config`),
+  so later runs keep using it. Only those two keys are touched: comments and every other key stay
+  as they are (blank lines and indentation are normalized).
+- `--tmpfs-size`: Size of the tmpfs mount (default `1g`).
+
+### 18. Database Backup and Restore (`db`)
+Dumps the development database to a file, or loads one back.
+```bash
+orobox db backup var/backup.sql
+orobox db restore var/backup.sql
+```
+- `backup <file>` runs `pg_dump --clean --if-exists` in the `db` container and writes the SQL to
+  `<file>` on the host. A failed dump removes the partial file.
+- `restore <file>` starts `db` and `application` if needed, empties the database, recreates the
+  `uuid-ossp` extension, loads the file with `psql`, then sets Oro's `application_url`, `url` and
+  `secure_url` to the first configured domain (with its port), so a dump taken from another
+  environment opens on yours.
+
+### 19. Update Orobox (`self-update`)
+Replaces the running binary with the latest release for your platform. When a newer release was
+installed, it then pulls the newer versions of the published Orobox images you have locally.
+```bash
+orobox self-update
+```
+A project's [image layer](configuration.md#image-customization-image) is not rebuilt by
+`self-update`; the next command that starts containers notices the new base image and rebuilds it.

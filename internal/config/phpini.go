@@ -136,6 +136,12 @@ func validatePhpIni(raw any) error {
 			if str, ok := value.(string); ok && strings.ContainsAny(str, "\r\n") {
 				return fmt.Errorf("config error: 'php_ini.%s' must not contain a line break; php.ini values are single-line", key)
 			}
+			// A value with `$` is written single-quoted, the only php.ini form that does not
+			// expand ${VAR}; single quotes have no escape, so a `'` in such a value cannot be
+			// written at all.
+			if str, ok := value.(string); ok && strings.Contains(str, "$") && strings.Contains(str, "'") {
+				return fmt.Errorf("config error: 'php_ini.%s' must not contain both '$' and a single quote; php.ini can only keep a '$' literal inside single quotes, which cannot hold a single quote themselves", key)
+			}
 			if !isPhpIniScalar(value) {
 				return fmt.Errorf("config error: 'php_ini.%s' must be a string, number or boolean; php.ini has no nesting, so write a dotted key such as xdebug.mode instead of a nested map", key)
 			}

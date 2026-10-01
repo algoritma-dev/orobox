@@ -91,6 +91,27 @@ func PrintWarning(message string) {
 	fmt.Fprintf(out, "%s⚠ %s%s\n", colorYellow, message, colorReset)
 }
 
+// errOut is where PrintWarningStderr writes. A variable for the same reason out is.
+var errOut io.Writer = os.Stderr
+
+// SetErrWriter redirects PrintWarningStderr and returns a function restoring the previous writer.
+func SetErrWriter(w io.Writer) func() {
+	prev := errOut
+	errOut = w
+	return func() { errOut = prev }
+}
+
+// PrintWarningStderr is PrintWarning on stderr, for warnings printed around a command's own
+// output rather than as part of it — the config checks the root command runs before every
+// subcommand. There stdout may be a pipe, a file or a completion script being sourced, and a
+// warning in it would corrupt what the caller reads. Dropped in agent mode, like PrintWarning.
+func PrintWarningStderr(message string) {
+	if output.Agent() {
+		return
+	}
+	fmt.Fprintf(errOut, "%s⚠ %s%s\n", colorYellow, message, colorReset)
+}
+
 // PrintInfo prints an informational message in blue. Dropped in agent mode.
 func PrintInfo(message string) {
 	if output.Agent() {

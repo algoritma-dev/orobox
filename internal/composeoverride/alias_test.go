@@ -76,7 +76,7 @@ func TestAnalyzeThroughAliasesAndMergeKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
-	assertStrings(t, a.MissingPaths, []string{
+	assertStrings(t, missingPaths(a), []string{
 		"/proj/fixtures", "/proj/single", "/proj/direct", "/proj/merged", "/proj/inline",
 	})
 	assertStrings(t, a.CoreImageOverrides, []string{"application"})

@@ -971,17 +971,32 @@ func TestEnsureDockerComposeWritesPhpIni(t *testing.T) {
 		t.Error("expected a second run with the same config to report no change")
 	}
 
-	// Removing the key removes the file and counts as a change, so the stack is recreated
-	// without the mount.
+	// Removing the key empties the file and counts as a change, so the stack is recreated
+	// without the mount. The file itself stays: containers created before the change still
+	// bind-mount it, and a missing bind source would stop them from starting again.
 	loadPhpIniConfig(t, projectDir, phpIniProjectBase)
 	if !EnsureDockerCompose() {
 		t.Error("expected removing php_ini to be reported as a change")
 	}
-	if _, err := os.Stat(ini); !os.IsNotExist(err) {
-		t.Errorf("expected zz-project.ini to be removed, stat error: %v", err)
+	if got, err := os.ReadFile(ini); err != nil || len(got) != 0 {
+		t.Errorf("expected zz-project.ini to be kept empty, got %q, %v", got, err)
 	}
 	if EnsureDockerCompose() {
-		t.Error("expected no change once the file is gone")
+		t.Error("expected no change once the file is empty")
+	}
+}
+
+// A project that never used the map form gets no generated file at all.
+func TestSyncPhpIniDoesNotCreateAnUnusedFile(t *testing.T) {
+	projectDir, internalDir := phpIniProject(t, map[string]string{"docker/php.ini": "memory_limit = 1G\n"})
+	for _, yaml := range []string{phpIniProjectBase, phpIniProjectBase + "php_ini: docker/php.ini\n"} {
+		loadPhpIniConfig(t, projectDir, yaml)
+		if got := syncPhpIni(internalDir, projectDir, mustPhpIni(t)); got.Changed {
+			t.Errorf("%q: expected no change, got %#v", yaml, got)
+		}
+		if _, err := os.Stat(filepath.Join(internalDir, "zz-project.ini")); !os.IsNotExist(err) {
+			t.Errorf("%q: expected no generated ini, stat error: %v", yaml, err)
+		}
 	}
 }
 
@@ -997,7 +1012,8 @@ func TestEnsureDockerComposeCountsAWrittenPhpIniAsChanged(t *testing.T) {
 }
 
 // The file form mounts the project's own file, so nothing is generated in the internal
-// directory, and a stale generated file from an earlier map-form config goes away.
+// directory, and a stale generated file from an earlier map-form config is emptied (not removed:
+// containers created from that config still mount it).
 func TestEnsureDockerComposePhpIniFileForm(t *testing.T) {
 	projectDir, internalDir := phpIniProject(t, map[string]string{"docker/php.ini": "memory_limit = 1G\n"})
 	if err := os.WriteFile(filepath.Join(internalDir, "zz-project.ini"), []byte("stale = 1\n"), 0644); err != nil {
@@ -1006,10 +1022,10 @@ func TestEnsureDockerComposePhpIniFileForm(t *testing.T) {
 	loadPhpIniConfig(t, projectDir, phpIniProjectBase+"php_ini: docker/php.ini\n")
 
 	if !EnsureDockerCompose() {
-		t.Error("expected the stale generated file to be reported as removed")
+		t.Error("expected emptying the stale generated file to be reported as a change")
 	}
-	if _, err := os.Stat(filepath.Join(internalDir, "zz-project.ini")); !os.IsNotExist(err) {
-		t.Errorf("expected no generated ini in file form, stat error: %v", err)
+	if got, err := os.ReadFile(filepath.Join(internalDir, "zz-project.ini")); err != nil || len(got) != 0 {
+		t.Errorf("expected the generated ini to be kept empty in file form, got %q, %v", got, err)
 	}
 }
 
