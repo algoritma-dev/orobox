@@ -80,6 +80,10 @@ type runner struct {
 	source    *dagger.Directory
 	sshSocket *dagger.Socket
 	sshKey    *dagger.Secret
+
+	// base is the image every step container starts from: the published tag, or the project
+	// layer built on it. It is resolved once per Run so all steps share one layer definition.
+	base *dagger.Container
 }
 
 // progressWriter is where the pipeline's own progress goes: the step banners, each command's
@@ -131,6 +135,7 @@ func Run(ctx context.Context, plan *Plan, opts Options) (Result, error) {
 		report: newReporter(progressWriter(), opts.Debug, log),
 		runID:  strconv.FormatInt(time.Now().UnixNano(), 10),
 	}
+	r.base = r.baseContainer()
 
 	if opts.SSHAuthSock != "" {
 		r.sshSocket = client.Host().UnixSocket(opts.SSHAuthSock)
@@ -505,13 +510,43 @@ func (r *runner) withCaches(ctr *dagger.Container, step Step) *dagger.Container 
 	return ctr
 }
 
+// baseContainer is the image the steps run on. Without a project layer it is the published tag,
+// as it always was. With one, Dagger builds the same Dockerfile the dev stack builds, on the
+// same published tag, so a project that needs an extension locally has it in the pipeline too.
+//
+// The rendered Dockerfile is written into the context rather than read from the host: with only
+// image.* keys it exists nowhere on disk, and with a project Dockerfile it differs from it.
+// Dagger keys the build on its inputs, so an unchanged layer is rebuilt for free on a warm
+// engine.
+func (r *runner) baseContainer() *dagger.Container {
+	layer := r.plan.Layer
+	if layer == nil {
+		return r.client.Container().From(r.plan.Image)
+	}
+
+	dir := r.client.Directory()
+	if layer.ContextDir != "" {
+		dir = r.client.Host().Directory(layer.ContextDir)
+	}
+	return dir.WithNewFile(layerDockerfileName, string(layer.Dockerfile)).DockerBuild(layer.buildOpts())
+}
+
 // container applies everything that is independent of a step's commands: image, caches,
 // environment, service bindings and the artifact directory.
 func (r *runner) container(step Step) *dagger.Container {
-	ctr := r.client.Container().From(r.plan.Image).
+	ctr := r.base.
 		// The published image may declare a non-root user; the pipeline needs to write into
 		// the application root and install packages, so it runs as root throughout.
-		WithUser("root").
+		WithUser("root")
+
+	// The same zz-project.ini the dev stack mounts, so every step — the install, the QA tools,
+	// PHPUnit, the release — sees the project's PHP settings. conf.d is read in name order, and
+	// the zz- prefix puts it after the image's own files.
+	if r.plan.PhpIni != "" {
+		ctr = ctr.WithNewFile("/usr/local/etc/php/conf.d/zz-project.ini", r.plan.PhpIni)
+	}
+
+	ctr = ctr.
 		WithMountedCache("/cache/composer", r.client.CacheVolume("orobox-composer-"+r.plan.OroVersion)).
 		WithMountedCache("/cache/js", r.client.CacheVolume("orobox-js-"+r.plan.OroVersion)).
 		WithEnvVariable("COMPOSER_CACHE_DIR", "/cache/composer").

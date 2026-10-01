@@ -35,7 +35,13 @@ commands:
     command: "php bin/console oro:test:run"
     description: "Runs the Shippy Pro tests suite"
     service: "application"
-dockerfile: docker/Dockerfile
+image:
+  dockerfile: docker/Dockerfile
+  apk: [imagemagick]
+  php_extensions: [redis]
+php_ini:
+  memory_limit: 4G
+  xdebug.log_level: 0
 composer:
   # Tokens for private repositories. Mirrors Composer's COMPOSER_AUTH schema and is
   # injected only into the containers that run composer (never committed or baked
@@ -97,20 +103,58 @@ domains:
 
 #### Environment files per install type
 
-- **`bundle`**: Orobox bind-mounts its generated `.env` and `.env.test` over the application's `.env-app.local` and `.env-app.test`. Orobox owns those files; edit them through `.orobox.yaml` or by placing a `.env` / `.env.test` next to `.orobox.yaml`.
+- **`bundle`**: Orobox bind-mounts its generated `.env` and `.env.test` over the application's `.env-app.local` and `.env-app.test`. Orobox owns those files; edit them through `.orobox.yaml` or by placing a `.env` / `.env.test` next to `.orobox.yaml` (see [Overriding the generated env files](#overriding-the-generated-env-files)).
 - **`project` and `demo`**: the checkout owns `.env-app`, `.env-app.local` and `.env-app.test`. On the first `orobox init`, Orobox copies its generated `.env` to `.env-app.local` and `.env.test` to `.env-app.test` **only if those files do not already exist**, then never touches them again — subsequent `orobox up` / `run` / `test` invocations leave your edits alone.
 
   > **Upgrading an existing `project` setup:** earlier Orobox versions bind-mounted the internal env files over `.env-app.local` and `.env-app.test`, so your checkout may not contain them. Either re-run `orobox init` to have them seeded, or copy them yourself from the Orobox internal directory. If they are missing, the application starts with no database DSN.
 
   > The `db` and `db-test` containers still read `POSTGRES_*` from Orobox's internal `.env` and `.env.test`. If you change `ORO_DB_*` in your own `.env-app.local`, mirror it there, or the application and the database will disagree on credentials.
 
-### Custom Dockerfile (`dockerfile`)
+#### Overriding the generated env files
 
-Orobox runs a published image, so what it ships is the same for everyone. A project that depends on something more — a system library, `pdftotext`, a PECL extension, a CLI tool it shells out to — points `dockerfile` at a Dockerfile of its own:
+A `.env` (or `.env.test`) next to `.orobox.yaml` is **merged key by key** over the file Orobox generates; it no longer replaces it. List only the keys you change or add:
+
+```dotenv
+ORO_MAILER_DSN=smtp://mail:1025
+MY_API_KEY=xyz
+```
+
+- A key Orobox already defines is replaced **on its own line**, so the generated file keeps its order and comments.
+- A key Orobox does not define is appended at the end, after a `# From .env` comment (`# From .env.test` for the test file).
+- Values are copied verbatim, `${...}` references included. Symfony's Dotenv resolves them when the application loads the file, and a reference to a key Orobox defines resolves against the merged result.
+- Comments and blank lines in your file are dropped; only `KEY=value` lines matter (an optional leading `export ` and Windows line endings are tolerated, and if a key appears twice the last one wins).
+
+A project that already keeps a complete copy of `.env` keeps working: every key it defines still overrides the generated one. The difference is that keys it does not define, for example ones added by a later Orobox release, now come from the generated file instead of being missing.
+
+For `project` and `demo` installs the merged file is what the first `orobox init` copies to `.env-app.local` / `.env-app.test`, as described above.
+
+### Image customization (`image`)
+
+Orobox runs a published image, so what it ships is the same for everyone. A project that depends on something more — a system library, `pdftotext`, a PECL extension, a CLI tool it shells out to — adds it under `image:`. Most needs fit four declarative keys and no Dockerfile at all:
 
 ```yaml
-dockerfile: docker/Dockerfile
+image:
+  apk: [imagemagick, poppler-utils, ghostscript]   # apk add --no-cache
+  php_extensions: [redis, imagick, xsl]            # install-php-extensions
+  npm: ["@playwright/test"]                        # npm install -g
+  run:                                             # extra RUN lines, in order
+    - curl -sSL https://example.com/tool -o /usr/local/bin/tool && chmod +x /usr/local/bin/tool
 ```
+
+Orobox renders these keys into a layer on top of the published image, one `RUN` per key in a fixed order (`apk`, `php_extensions`, `npm`, `run`; each `run` entry is its own `RUN`), so a change to one key reuses the cached layers before it. Empty keys are skipped. `apk`, `php_extensions` and `npm` take plain package names; anything needing shell syntax belongs in `run`. Orobox does not check that a package exists — the build reports that with its own log.
+
+The layer is built locally, tagged `orobox-custom/<project>:<oro_version>-<type>`, and exists only on your machine. See [Custom Dockerfile](#custom-dockerfile-imagedockerfile) below for what it costs and when it rebuilds; the same rules apply whichever keys you use.
+
+### Custom Dockerfile (`image.dockerfile`)
+
+For anything the declarative keys cannot express — multi-stage builds, `COPY`ing files in — point `image.dockerfile` at a Dockerfile of your own (`orobox extend image` creates one with the required header and sets the key for you, see [`extend`](commands.md#13-extending-the-environment-extend)):
+
+```yaml
+image:
+  dockerfile: docker/Dockerfile
+```
+
+> **Deprecated:** the top-level `dockerfile` key is the old spelling of `image.dockerfile`. It still works and is read as `image.dockerfile`, but every command prints a warning asking you to move it. Setting both is an error. `orobox deploy-init` rewrites the file with the new key.
 
 The path is relative to the directory holding `.orobox.yaml`. The file belongs to your repository: commit it, review it, change it like any other source file.
 
@@ -123,6 +167,8 @@ FROM ${OROBOX_BASE_IMAGE}
 RUN apk add --no-cache imagemagick poppler-utils
 RUN install-php-extensions redis
 ```
+
+The published image already ships [`install-php-extensions`](https://github.com/mlocati/docker-php-extension-installer) (at a pinned release), so adding a PHP extension is a single `RUN` line as above — no need to download the tool yourself.
 
 `ARG` before `FROM` is required by Docker itself — that is the only way a `FROM` can read a build argument. Orobox refuses a Dockerfile whose last `FROM` names anything else, because a hardcoded tag would make `oro_version` decide nothing and break the stack somewhere far from this config key. Bumping `oro_version` in `.orobox.yaml` therefore moves your layer with it, and the Dockerfile never needs editing for an Oro upgrade.
 
@@ -140,14 +186,140 @@ COPY --from=tool /go/bin/tool /usr/local/bin/tool
 
 How it works, and what it costs:
 
-- The **build context is the directory containing the Dockerfile**, not the repository root. Put the files you `COPY` next to it (`docker/php.ini`, `docker/entrypoint-extra.sh`) — a context scoped this way keeps builds fast and rebuild detection exact.
-- Rebuilds are automatic. There is **no separate command and no need to re-run `init`**: the next `orobox up` / `run` / `test` notices that the Dockerfile, a file in its build context, or the base image changed, and rebuilds before starting anything. `orobox self-update` therefore only pulls, and the layer follows on the next command.
+- **Combined with the declarative keys:** when `image.dockerfile` and any other `image.*` key are both set, the generated lines are appended to the project's Dockerfile, i.e. to its final stage — one build, one layer chain, no second image. The generated lines start with `USER root`, because your Dockerfile may end on a non-root `USER` and installs need root. The layer therefore ends as root; where compose sets `user:` for a service, that is the user it runs as.
+- The build reads only `<context>/.dockerignore`. A Dockerfile-specific `<name>.dockerignore` (for example `Dockerfile.dockerignore` next to `Dockerfile`) is not used.
+- The **build context is the directory containing the Dockerfile**, not the repository root. With only the declarative keys there is nothing to `COPY`, so the context is an empty directory under Orobox's internal directory. Put the files you `COPY` next to it (`docker/php.ini`, `docker/entrypoint-extra.sh`) — a context scoped this way keeps builds fast and rebuild detection exact.
+- Rebuilds are automatic. There is **no separate command and no need to re-run `init`**: the next `orobox up` / `run` / `test` notices that the rendered Dockerfile (so any change to an `image.*` key), a file in its build context, or the base image changed, and rebuilds before starting anything. `orobox self-update` therefore only pulls, and the layer follows on the next command.
 - When nothing changed, the check costs a directory stat and one image inspect — no build runs.
 - `orobox up --rebuild` forces a build with `--no-cache --pull`, for what Docker's cache cannot see: an unpinned `RUN apk add` that should pick up a newer package.
 - The image is tagged `orobox-custom/<project>:<oro_version>-<type>` and exists only on your machine. It is per checkout, so two projects on the same host never share one.
-- Removing the key puts the project straight back on the published image, with no local build at all.
+- Removing every `image.*` key puts the project straight back on the published image, with no local build at all.
 
 > Build the image, not the code. Your sources are bind-mounted into the container at run time, so `COPY`ing them into the image gains nothing and makes every edit a rebuild. Use this for tools and libraries.
+
+### PHP settings (`php_ini`)
+
+To change a PHP setting — a memory limit, a timezone, Xdebug options — for every PHP service, set `php_ini` to a map of directives. No image build is involved:
+
+```yaml
+php_ini:
+  memory_limit: 4G
+  max_execution_time: 0
+  xdebug.log_level: 0
+```
+
+Orobox renders the map into `zz-project.ini` in its internal directory and bind-mounts it, read-only, at `/usr/local/etc/php/conf.d/zz-project.ini` in every PHP service (`application`, `php-fpm-app`, `ws`, `consumer`, `cron`) and in the `install` service of the setup run, so `orobox init` installs Oro with the same settings the stack runs with. The `zz-` prefix makes PHP read it after the image's own `oro-custom.ini`, so your values win.
+
+A change needs the containers recreated, not rebuilt. The bind-mount path never changes, which Docker Compose does not treat as a reason to recreate anything, so Orobox also stamps every PHP service with a `dev.orobox.php-ini-hash` label holding a short hash of the mounted ini. When the ini changes, the label changes, and the next `orobox up` recreates the containers. In the file form the hash covers the content of your own file, so editing it is picked up the same way.
+
+Rendering rules:
+
+- Directive names are written verbatim, dots and case included (`xdebug.log_level`, not a nested `xdebug:` map). They may contain only letters, digits, `.`, `_` and `-`.
+- Booleans become `On` / `Off`; numbers are written as they are.
+- Strings are double-quoted when they contain a character php.ini treats specially (`;`, `=`, `"`, `{`, `}`, `|`, `&`, `~`, `!`, `[`, `(`, `)`, `^`), when they have leading or trailing whitespace, or when they are empty. A value cannot span several lines.
+- php.ini has no nesting, so a nested map or a list value is rejected: write `xdebug.mode` as a dotted key.
+
+If you already keep an ini file in the repository, give its path instead of a map. It is mounted as-is in place of the generated one:
+
+```yaml
+php_ini: docker/php.ini
+```
+
+The path follows the same rules as [`image.dockerfile`](#custom-dockerfile-imagedockerfile): relative to the directory holding `.orobox.yaml`, inside the project. It must also exist and be a file: a missing file is a configuration error reported when the config loads (and by `orobox init`), rather than a mount Docker would fill with an empty directory.
+
+`php_ini` stays outside `image:` because it is not part of the image.
+
+### Host ports (`ports`)
+
+Every port the stack publishes on your machine can be moved with a `ports` map, for the day `8080` or `5432` is already taken by something else:
+
+```yaml
+ports:
+  http: 8090
+  https: 8453
+  db: 5434
+  redis: 6380
+```
+
+Keys you leave out keep their default. A value of `0` means "do not publish this port on the host" (except for `http` and `https`, see below): the service stays reachable by the other containers on the compose network, it just has no host port. A key that is not in the table, or a number outside 0-65535, is a configuration error, so a typo does not silently keep the default.
+
+| Key | Service | Default | Container port |
+| --- | --- | --- | --- |
+| `http` | web | 8080 | 80 |
+| `https` | web (only with an SSL domain) | 8443 | 443 |
+| `db` | db | 5432 | 5432 |
+| `db_test` | db-test (`orobox test-init`) | 5433 | 5432 |
+| `redis` | redis | 6379 | 6379 |
+| `redisinsight` | redisinsight | 8001 | 5540 |
+| `mail_ui` | mail (Mailpit web UI) | 8025 | 8025 |
+| `mail_smtp` | mail (Mailpit SMTP) | 2025 | 1025 |
+| `rabbitmq` | rabbitmq (AMQP) | 5672 | 5672 |
+| `rabbitmq_ui` | rabbitmq (management UI) | 15672 | 15672 |
+| `elasticsearch` | elasticsearch | 9200 | 9200 |
+| `kibana` | kibana | 5601 | 5601 |
+| `adminer` | adminer | 8081 | 8080 |
+| `gotenberg` | gotenberg | 3000 | 3000 |
+
+Only the host side moves. Containers keep talking to each other on the container ports, so `ORO_DB_PORT`, the Redis and RabbitMQ DSNs and the like need no change. `orobox up` prints the URLs and the database port of the services that are enabled using these values, and leaves out a service whose port is `0`.
+
+`http` and `https` take precedence over the older `nginx_http_port` / `nginx_https_port` keys and the `ORO_NGINX_HTTP_PORT` / `ORO_NGINX_HTTPS_PORT` environment variables, which keep working when `ports` does not set them. `http` and `https` are the exception to the `0` rule: they must be between 1 and 65535, because the web port is the application's entry point (the application URLs and the websocket frontend are built from it) and cannot be left unpublished.
+
+Changing a port needs the containers recreated: run `orobox up` again.
+
+### Extending the stack (`.orobox.compose.yaml`)
+
+To add a service of your own (an object store, a mock API), or to tweak one of Orobox's, write a standard Docker Compose file next to `.orobox.yaml`. There is no configuration key: the files are found by name.
+
+| File | Committed | Purpose |
+| --- | --- | --- |
+| `.orobox.compose.yaml` | yes | The team's additions to the stack |
+| `.orobox.compose.local.yaml` | no (git-ignored) | One developer's tweaks: ports, personal mounts |
+
+Both are optional and are appended in that order after Orobox's own compose files, so the local file wins over the team file, and both win over the generated stack. Docker Compose's usual merge rules apply, so there is nothing new to learn:
+
+```yaml
+# .orobox.compose.yaml
+services:
+  minio:
+    image: minio/minio
+    command: server /data --console-address :9001
+    ports: ["9001:9001"]
+    volumes: [minio_data:/data]
+
+  consumer:
+    environment:
+      ORO_MQ_PREFETCH: "5"
+
+  php-fpm-app:
+    volumes:
+      - ./docker/fixtures:/var/www/oro/fixtures:ro
+
+volumes:
+  minio_data:
+```
+
+`orobox extend compose` writes the team file with commented examples, and `orobox extend compose --local` writes the personal one and adds it to your `.gitignore` (see [`extend`](commands.md#13-extending-the-environment-extend)). `orobox create` also adds `.orobox.compose.local.yaml` to the `.gitignore` of a standalone bundle it generates.
+
+**Relative paths.** Write paths relative to the file, as in any compose project. Orobox runs compose from its own internal directory, so it rewrites the relative host paths of a copy of your file (`./docker/fixtures` becomes an absolute path under the directory that holds `.orobox.yaml`) and passes that copy to compose. Your file is never modified. A leading `~` expands to your home directory. Absolute paths, values starting with `$` and named volumes are left as they are.
+
+**Merge caveats.**
+
+- Compose **appends** to sequences such as `ports`. To replace the list a core service already has, tag it `!override`; to drop it, tag it `!reset` (both need Compose 2.24 or later):
+
+  ```yaml
+  services:
+    web:
+      ports: !override
+        - "9090:80"
+  ```
+
+- `orobox up --clean` and `orobox clean` run `down -v`, which deletes the named volumes your override declares as well. Data that must survive belongs in a volume declared `external: true` (create it once with `docker volume create`).
+- A service with a `build:` section is built by `orobox up` on every run (Orobox passes `--build`), so an edited Dockerfile takes effect.
+- Redefining `image` on one of Orobox's own services (`application`, `web`, `php-fpm-app`, `ws`, `consumer`, `cron`, `volume-init`, `web-init`) detaches it from `oro_version` and from the [custom image layer](#image-customization-image); Orobox prints a warning.
+
+**Errors and warnings.** A file that is not valid YAML, or whose top level is not a mapping, stops every command that runs compose, naming the file; Orobox never runs the stack with the override silently dropped. A bind-mount source that does not exist on the host produces a warning naming the path, because Docker would otherwise create an empty directory there and the problem would show up far from its cause.
+
+**The deploy pipeline does not use these files.** `orobox deploy` and the generated CI build and test the application image, not your development stack; services added here exist only in local `orobox` commands.
 
 ### Configuration Fields
 - `type`: Installation type — `bundle` (default), `project` or `demo`. See [Installation types](#installation-types-type).
@@ -178,7 +350,15 @@ How it works, and what it costs:
     - `command`: (string) The actual command to execute (e.g., `php bin/console oro:test:run`).
     - `description`: (string) Description of the command (displayed in help).
     - `service`: (string, optional) Default service to run the command in (e.g., `application`).
-- `dockerfile`: (string) Path, relative to `.orobox.yaml`, of a project-owned Dockerfile that extends the published image. See [Custom Dockerfile](#custom-dockerfile-dockerfile).
+- `image`: (map, optional) Customizes the image the stack runs. See [Image customization](#image-customization-image).
+    - `dockerfile`: (string) Path, relative to `.orobox.yaml`, of a project-owned Dockerfile that extends the published image. See [Custom Dockerfile](#custom-dockerfile-imagedockerfile).
+    - `apk`: (list of strings) Alpine packages, installed with `apk add --no-cache`.
+    - `php_extensions`: (list of strings) PHP extensions, installed with `install-php-extensions`.
+    - `npm`: (list of strings) Global npm packages, installed with `npm install -g`.
+    - `run`: (list of strings) Extra shell commands, each its own `RUN`, executed last and in order.
+- `dockerfile`: (string, **deprecated**) Old spelling of `image.dockerfile`.
+- `php_ini`: (map or string, optional) PHP settings applied to every PHP service without rebuilding the image. A map of php.ini directives (`memory_limit: 4G`, `xdebug.log_level: 0`) rendered into a mounted `zz-project.ini`, or the path of an ini file of your own. See [PHP settings](#php-settings-php_ini).
+- `ports`: (map of ints, optional) Host port published for each service, `0` to not publish it. See [Host ports](#host-ports-ports).
 - `composer`: (map) Composer-specific settings.
     - `repositories`: (list, `bundle` type only) Additional Composer repositories to register in the OroCommerce project during installation. Accepts the same format as Composer's [`repositories`](https://getcomposer.org/doc/05-repositories.md) field (VCS, Composer, path, package, etc.). These are merged with any existing repositories in the project's `composer.json`. Required when the bundle depends on packages hosted in private repositories. `project` and `demo` installs declare their repositories in the application's own `composer.json` and ignore this key.
     - `auth`: (map) Credentials for private repositories, using Composer's [`COMPOSER_AUTH`](https://getcomposer.org/doc/03-cli.md#composer-auth) schema (`github-oauth`, `gitlab-token`, `http-basic`, `bearer`, ...). Serialized to JSON and injected as the `COMPOSER_AUTH` environment variable only into the containers that run composer, so tokens are never committed or baked into long-running services.

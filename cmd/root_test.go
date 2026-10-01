@@ -2,10 +2,13 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/algoritma-dev/orobox/internal/output"
+	"github.com/algoritma-dev/orobox/internal/utils"
 	"github.com/spf13/viper"
 )
 
@@ -114,5 +117,45 @@ func TestAgentFlagIgnoresTheEnvironment(t *testing.T) {
 	}
 	if output.Agent() {
 		t.Error("ORO_AGENT switched agent mode on; the flag must be the only way in")
+	}
+}
+
+func TestWarnDeprecatedConfig(t *testing.T) {
+	cases := []struct {
+		name      string
+		agent     bool
+		configErr error
+		set       func()
+		want      bool
+	}{
+		{"deprecated key", false, nil, func() { viper.Set("dockerfile", "docker/Dockerfile") }, true},
+		{"image.dockerfile only", false, nil, func() { viper.Set("image.dockerfile", "docker/Dockerfile") }, false},
+		{"no dockerfile", false, nil, func() {}, false},
+		{"agent mode keeps stdout clean", true, nil, func() { viper.Set("dockerfile", "docker/Dockerfile") }, false},
+		{"invalid config is reported on its own", false, errors.New("invalid"), func() { viper.Set("dockerfile", "docker/Dockerfile") }, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			viper.Reset()
+			t.Cleanup(viper.Reset)
+			c.set()
+
+			prevErr := ConfigError
+			ConfigError = c.configErr
+			t.Cleanup(func() { ConfigError = prevErr })
+
+			output.SetAgent(c.agent)
+			t.Cleanup(func() { output.SetAgent(false) })
+
+			var buf bytes.Buffer
+			t.Cleanup(utils.SetWriter(&buf))
+
+			warnDeprecatedConfig()
+
+			got := strings.Contains(buf.String(), "image.dockerfile")
+			if got != c.want {
+				t.Errorf("warning printed = %v, want %v (output %q)", got, c.want, buf.String())
+			}
+		})
 	}
 }

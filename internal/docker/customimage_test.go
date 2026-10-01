@@ -120,7 +120,7 @@ func TestCheckExtendsBaseImage(t *testing.T) {
 	}
 	for name, content := range accepted {
 		t.Run(name, func(t *testing.T) {
-			if err := checkExtendsBaseImage("docker/Dockerfile", []byte(content)); err != nil {
+			if err := CheckExtendsBaseImage("docker/Dockerfile", []byte(content)); err != nil {
 				t.Errorf("expected the Dockerfile to be accepted, got %v", err)
 			}
 		})
@@ -135,7 +135,7 @@ func TestCheckExtendsBaseImage(t *testing.T) {
 	}
 	for name, content := range rejected {
 		t.Run(name, func(t *testing.T) {
-			err := checkExtendsBaseImage("docker/Dockerfile", []byte(content))
+			err := CheckExtendsBaseImage("docker/Dockerfile", []byte(content))
 			if err == nil {
 				t.Fatal("expected the Dockerfile to be rejected")
 			}
@@ -167,7 +167,7 @@ func TestCustomLayerHashCoversTheContextAndTheBaseImage(t *testing.T) {
 	}
 	hash := func() string {
 		t.Helper()
-		h, err := customLayerHash(dir, baseID)
+		h, err := customLayerHash(dir, baseID, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -201,7 +201,7 @@ func TestCustomLayerHashCoversTheContextAndTheBaseImage(t *testing.T) {
 	}
 	reference = hash()
 
-	if changed, err := customLayerHash(dir, "sha256:bbbb"); err != nil {
+	if changed, err := customLayerHash(dir, "sha256:bbbb", nil); err != nil {
 		t.Fatal(err)
 	} else if changed == reference {
 		t.Error("a changed base image must change the hash")
@@ -209,7 +209,127 @@ func TestCustomLayerHashCoversTheContextAndTheBaseImage(t *testing.T) {
 }
 
 func TestCustomLayerHashReportsAMissingContext(t *testing.T) {
-	if _, err := customLayerHash(filepath.Join(t.TempDir(), "absent"), "sha256:aaaa"); err == nil {
+	if _, err := customLayerHash(filepath.Join(t.TempDir(), "absent"), "sha256:aaaa", nil); err == nil {
 		t.Error("expected an error for a build context that does not exist")
+	}
+}
+
+// The declarative image.* keys render a Dockerfile that lives only in memory, so the build
+// context cannot tell two different layers apart: the rendered text itself has to be hashed.
+func TestCustomLayerHashIncludesDockerfile(t *testing.T) {
+	dir := t.TempDir()
+	a := []byte("ARG OROBOX_BASE_IMAGE\nFROM ${OROBOX_BASE_IMAGE}\nRUN apk add --no-cache git\n")
+	b := []byte("ARG OROBOX_BASE_IMAGE\nFROM ${OROBOX_BASE_IMAGE}\nRUN apk add --no-cache imagemagick\n")
+
+	hashA, err := customLayerHash(dir, "sha256:aaaa", a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hashB, err := customLayerHash(dir, "sha256:aaaa", b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hashA == hashB {
+		t.Error("two different rendered Dockerfiles must produce different hashes")
+	}
+
+	again, err := customLayerHash(dir, "sha256:aaaa", append([]byte(nil), a...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again != hashA {
+		t.Errorf("identical Dockerfiles must hash identically: %q vs %q", hashA, again)
+	}
+}
+
+func TestProjectImageRefsDeclarativeOnly(t *testing.T) {
+	viper.Reset()
+	defer viper.Reset()
+	viper.Set("type", "project")
+	viper.Set("oro_version", "6.1")
+	viper.Set("image.apk", []string{"imagemagick"})
+
+	base, app := ProjectImageRefs()
+	if app == base {
+		t.Fatalf("image keys alone must put the local layer in front of the stack, got %q", app)
+	}
+	if want := CustomImageRef("6.1", "project"); app != want {
+		t.Errorf("app = %q, want %q", app, want)
+	}
+}
+
+// Both spellings of the Dockerfile path must resolve to the same tag, or moving the key under
+// `image:` would orphan the layer that was already built.
+func TestEnsureCustomImageDeprecatedAliasSameRef(t *testing.T) {
+	refFor := func(set func()) string {
+		viper.Reset()
+		viper.Set("type", "project")
+		viper.Set("oro_version", "6.1")
+		set()
+		_, app := ProjectImageRefs()
+		return app
+	}
+	defer viper.Reset()
+
+	old := refFor(func() { viper.Set("dockerfile", "docker/Dockerfile") })
+	renamed := refFor(func() { viper.Set("image.dockerfile", "docker/Dockerfile") })
+	if old != renamed {
+		t.Errorf("deprecated key gives %q, image.dockerfile gives %q", old, renamed)
+	}
+	if !IsCustomImageRef(old) {
+		t.Errorf("expected a local layer reference, got %q", old)
+	}
+}
+
+func TestLayerSource(t *testing.T) {
+	defer viper.Reset()
+	cases := map[string]struct {
+		set  func()
+		want string
+	}{
+		"dockerfile only":   {func() { viper.Set("image.dockerfile", "docker/Dockerfile") }, "docker/Dockerfile"},
+		"deprecated key":    {func() { viper.Set("dockerfile", "docker/Dockerfile") }, "docker/Dockerfile"},
+		"keys only":         {func() { viper.Set("image.apk", []string{"git"}) }, "image keys"},
+		"dockerfile + keys": {func() { viper.Set("image.dockerfile", "docker/Dockerfile"); viper.Set("image.run", []string{"true"}) }, "docker/Dockerfile + image keys"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			viper.Reset()
+			c.set()
+			if got := layerSource(); got != c.want {
+				t.Errorf("layerSource() = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestCustomImageBuildArgs(t *testing.T) {
+	args := customImageBuildArgs("orobox-custom/p:6.1-project", "algoritmadev/orobox:6.1-project-latest", "/ctx", "abc123", false)
+
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"-f -",
+		"--build-arg " + config.DockerfileBaseImageArg + "=algoritmadev/orobox:6.1-project-latest",
+		"--label " + customImageHashLabel + "=abc123",
+		"-t orobox-custom/p:6.1-project",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("args %v are missing %q", args, want)
+		}
+	}
+	if args[len(args)-1] != "/ctx" {
+		t.Errorf("the build context must come last, got %v", args)
+	}
+	if strings.Contains(joined, "--no-cache") || strings.Contains(joined, "--pull") {
+		t.Errorf("a normal build must keep the layer cache: %v", args)
+	}
+
+	rebuild := customImageBuildArgs("r", "b", "/ctx", "h", true)
+	rebuildJoined := strings.Join(rebuild, " ")
+	if !strings.Contains(rebuildJoined, "--no-cache") || !strings.Contains(rebuildJoined, "--pull") {
+		t.Errorf("--rebuild must bypass the cache and refresh the base: %v", rebuild)
+	}
+	if rebuild[len(rebuild)-1] != "/ctx" {
+		t.Errorf("the build context must come last, got %v", rebuild)
 	}
 }

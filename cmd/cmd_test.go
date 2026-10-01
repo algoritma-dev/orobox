@@ -10,6 +10,7 @@ import (
 	"testing/fstest"
 
 	"github.com/algoritma-dev/orobox/internal/docker"
+	"github.com/algoritma-dev/orobox/internal/utils"
 	"github.com/spf13/viper"
 )
 
@@ -333,6 +334,21 @@ func TestLogsCommand(t *testing.T) {
 			[]string{"logs", "--ws"},
 			[]string{"logs", "-f", "ws"},
 		},
+		{
+			"project service",
+			[]string{"logs", "minio"},
+			[]string{"logs", "-f", "minio"},
+		},
+		{
+			"flags first, then positional services",
+			[]string{"logs", "--nginx", "web", "minio"},
+			[]string{"logs", "-f", "web", "minio"},
+		},
+		{
+			"duplicates dropped, first-seen order kept",
+			[]string{"logs", "--app", "minio", "application", "minio"},
+			[]string{"logs", "-f", "application", "php-fpm-app", "minio"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -356,6 +372,34 @@ func TestLogsCommand(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Without a flag or a service there is nothing to follow: the help is printed and compose is
+// never invoked.
+func TestLogsWithoutServicesPrintsHelp(t *testing.T) {
+	oldRun := docker.RunComposeCommand
+	defer func() { docker.RunComposeCommand = oldRun }()
+
+	called := false
+	docker.RunComposeCommand = func(string, ...string) error {
+		called = true
+		return nil
+	}
+
+	var printed bytes.Buffer
+	restore := utils.SetWriter(&printed)
+	defer restore()
+
+	rootCmd.SetArgs([]string{"logs"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("rootCmd.Execute() failed: %v", err)
+	}
+	if called {
+		t.Error("logs without services must not call compose")
+	}
+	if !strings.Contains(printed.String(), "Please specify") {
+		t.Errorf("expected the usage warning, got %q", printed.String())
 	}
 }
 

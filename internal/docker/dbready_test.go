@@ -114,3 +114,31 @@ func TestWaitForDatabaseReadyDoesNotSleepWhenReady(t *testing.T) {
 		t.Errorf("expected no sleep for a ready server, slept %d times", slept)
 	}
 }
+
+// A broken compose override leaves no stack to wait for: without the gate every poll would fail
+// with the same override error and `orobox test` would sit through the whole 90s budget before
+// reporting it.
+func TestWaitForDatabaseReadyReturnsOverrideErrorImmediately(t *testing.T) {
+	oldAttempts, oldRun := dbReadyAttempts, RunComposeCommandWithOutput
+	t.Cleanup(func() {
+		dbReadyAttempts, RunComposeCommandWithOutput = oldAttempts, oldRun
+		overrideErr = nil
+	})
+
+	// The real budget and the real clock: only the gate can make this fast.
+	dbReadyAttempts = 180
+	overrideErr = errors.New(".orobox.compose.yaml: invalid")
+	RunComposeCommandWithOutput = func(...string) ([]byte, error) {
+		t.Error("compose must not be polled while the override is broken")
+		return nil, overrideErr
+	}
+
+	start := time.Now()
+	err := WaitForDatabaseReady(false)
+	if !errors.Is(err, overrideErr) {
+		t.Fatalf("expected the override error, got %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("WaitForDatabaseReady took %v, want an immediate return", elapsed)
+	}
+}

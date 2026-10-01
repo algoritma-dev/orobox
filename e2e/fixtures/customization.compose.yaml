@@ -1,0 +1,11 @@
+# Compose override of TestE2ECustomization, copied next to .orobox.yaml as
+# .orobox.compose.yaml. It adds a service of the project's own to the stack.
+services:
+  whoami:
+    # Pinned: this runs on every nightly e2e, and a moving tag would turn an upstream release
+    # into a failure nobody on this repository caused.
+    image: traefik/whoami:v1.12.0
+    ports: ["8099:80"]
+    labels:
+      # What `orobox up` prints under "Project services".
+      dev.orobox.url: http://localhost:8099

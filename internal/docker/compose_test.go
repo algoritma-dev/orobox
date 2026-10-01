@@ -15,6 +15,7 @@ import (
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/output"
+	"github.com/spf13/viper"
 	yamlv3 "gopkg.in/yaml.v3"
 )
 
@@ -166,6 +167,7 @@ func bundleComposeData() map[string]any {
 		"InternalDir":             ".orobox",
 		"NginxHTTPPort":           "8080",
 		"NginxHTTPSPort":          "8443",
+		"Ports":                   config.DefaultPorts,
 		"HasSsl":                  false,
 		"Postgres":                true,
 		"PostgresVersion":         "16.1-alpine",
@@ -872,4 +874,552 @@ func TestSilentRunnerSendsAFailureDumpToStderrInAgentMode(t *testing.T) {
 	if stderr.Len() == 0 {
 		t.Error("the failure dump reached neither stream; the diagnostic is lost")
 	}
+}
+
+// phpIniMount is the bind mount the php_ini template line produces, for a given host source.
+func phpIniMount(source string) string {
+	return source + ":/usr/local/etc/php/conf.d/zz-project.ini:ro"
+}
+
+func TestComposeTemplatesMountPhpIni(t *testing.T) {
+	templates := []string{
+		"../../templates/docker/docker-compose.yml",
+		"../../templates/docker/docker-compose.setup.yml",
+	}
+	for _, path := range templates {
+		withIni := bundleComposeData()
+		withIni["PhpIniPath"] = "/x/zz-project.ini"
+		out := renderRealTemplate(t, path, withIni)
+		assertValidYAML(t, path, out)
+		mustContain(t, out, phpIniMount("/x/zz-project.ini"))
+
+		without := bundleComposeData()
+		without["PhpIniPath"] = ""
+		out = renderRealTemplate(t, path, without)
+		assertValidYAML(t, path, out)
+		mustNotContain(t, out, "zz-project.ini")
+	}
+}
+
+// The mount sits in the shared anchors, so every service that uses them gets it — and the
+// anchors must still parse as one list when the mount is the only optional entry set.
+func TestComposeTemplatesMountPhpIniInProjectType(t *testing.T) {
+	data := projectComposeData()
+	data["PhpIniPath"] = "/x/zz-project.ini"
+	for _, path := range []string{"../../templates/docker/docker-compose.yml", "../../templates/docker/docker-compose.setup.yml"} {
+		out := renderRealTemplate(t, path, data)
+		assertValidYAML(t, path, out)
+		mustContain(t, out, phpIniMount("/x/zz-project.ini"))
+	}
+}
+
+// phpIniProject sets up a project directory with a loaded .orobox.yaml and points the internal
+// directory at <project>/.orobox, so EnsureDockerCompose runs against a sandbox.
+func phpIniProject(t *testing.T, files map[string]string) (projectDir, internalDir string) {
+	t.Helper()
+	projectDir = t.TempDir()
+	for name, content := range files {
+		path := filepath.Join(projectDir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(projectDir)
+	t.Setenv("OROBOX_LOCAL_CONFIG", "1")
+	if err := os.MkdirAll(".orobox", 0755); err != nil {
+		t.Fatal(err)
+	}
+	return projectDir, filepath.Join(projectDir, ".orobox")
+}
+
+func loadPhpIniConfig(t *testing.T, projectDir, yaml string) {
+	t.Helper()
+	path := filepath.Join(projectDir, ".orobox.yaml")
+	if err := os.WriteFile(path, []byte(yaml), 0644); err != nil {
+		t.Fatal(err)
+	}
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	viper.SetConfigFile(path)
+	if err := viper.ReadInConfig(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+const phpIniProjectBase = "type: project\noro_version: \"6.1\"\ndomains:\n  - host: example.com\n"
+
+func TestEnsureDockerComposeWritesPhpIni(t *testing.T) {
+	projectDir, internalDir := phpIniProject(t, nil)
+	loadPhpIniConfig(t, projectDir, phpIniProjectBase+"php_ini:\n  memory_limit: 4G\n  xdebug.log_level: 0\n")
+
+	EnsureDockerCompose()
+
+	ini := filepath.Join(internalDir, "zz-project.ini")
+	got, err := os.ReadFile(ini)
+	if err != nil {
+		t.Fatalf("zz-project.ini was not written: %v", err)
+	}
+	if want := "memory_limit = 4G\nxdebug.log_level = 0\n"; string(got) != want {
+		t.Errorf("unexpected ini %q, want %q", got, want)
+	}
+
+	// An unchanged config is a no-op, so `orobox up` does not report a spurious change.
+	if EnsureDockerCompose() {
+		t.Error("expected a second run with the same config to report no change")
+	}
+
+	// Removing the key removes the file and counts as a change, so the stack is recreated
+	// without the mount.
+	loadPhpIniConfig(t, projectDir, phpIniProjectBase)
+	if !EnsureDockerCompose() {
+		t.Error("expected removing php_ini to be reported as a change")
+	}
+	if _, err := os.Stat(ini); !os.IsNotExist(err) {
+		t.Errorf("expected zz-project.ini to be removed, stat error: %v", err)
+	}
+	if EnsureDockerCompose() {
+		t.Error("expected no change once the file is gone")
+	}
+}
+
+func TestEnsureDockerComposeCountsAWrittenPhpIniAsChanged(t *testing.T) {
+	projectDir, _ := phpIniProject(t, nil)
+	loadPhpIniConfig(t, projectDir, phpIniProjectBase)
+	EnsureDockerCompose()
+
+	loadPhpIniConfig(t, projectDir, phpIniProjectBase+"php_ini:\n  memory_limit: 4G\n")
+	if !EnsureDockerCompose() {
+		t.Error("expected adding php_ini to be reported as a change")
+	}
+}
+
+// The file form mounts the project's own file, so nothing is generated in the internal
+// directory, and a stale generated file from an earlier map-form config goes away.
+func TestEnsureDockerComposePhpIniFileForm(t *testing.T) {
+	projectDir, internalDir := phpIniProject(t, map[string]string{"docker/php.ini": "memory_limit = 1G\n"})
+	if err := os.WriteFile(filepath.Join(internalDir, "zz-project.ini"), []byte("stale = 1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	loadPhpIniConfig(t, projectDir, phpIniProjectBase+"php_ini: docker/php.ini\n")
+
+	if !EnsureDockerCompose() {
+		t.Error("expected the stale generated file to be reported as removed")
+	}
+	if _, err := os.Stat(filepath.Join(internalDir, "zz-project.ini")); !os.IsNotExist(err) {
+		t.Errorf("expected no generated ini in file form, stat error: %v", err)
+	}
+}
+
+const phpIniHashLabel = "dev.orobox.php-ini-hash"
+
+// The hash label is what makes a changed ini recreate the containers: the mount path stays the
+// same, so without it compose sees an identical configuration.
+func TestComposeTemplatesCarryThePhpIniHashLabel(t *testing.T) {
+	for _, path := range []string{"../../templates/docker/docker-compose.yml", "../../templates/docker/docker-compose.setup.yml"} {
+		data := bundleComposeData()
+		data["PhpIniPath"] = "/x/zz-project.ini"
+		data["PhpIniHash"] = "0123456789abcdef"
+		out := renderRealTemplate(t, path, data)
+		assertValidYAML(t, path, out)
+		mustContain(t, out, phpIniHashLabel+`: "0123456789abcdef"`)
+
+		var doc struct {
+			XTemplates map[string]any `yaml:"x-templates"`
+		}
+		if err := yamlv3.Unmarshal([]byte(out), &doc); err != nil {
+			t.Fatal(err)
+		}
+		app, _ := doc.XTemplates["oro-app"].(map[string]any)
+		labels, _ := app["labels"].(map[string]any)
+		if got := labels[phpIniHashLabel]; got != "0123456789abcdef" {
+			t.Errorf("%s: oro-app label = %v, want the hash", path, got)
+		}
+
+		data["PhpIniHash"] = ""
+		out = renderRealTemplate(t, path, data)
+		assertValidYAML(t, path, out)
+		mustNotContain(t, out, phpIniHashLabel)
+	}
+}
+
+// A service that declares its own labels would shadow the anchor's through the YAML merge key
+// and silently lose the hash, so no service built on oro-app may have one.
+func TestOroAppServicesDoNotShadowTheHashLabel(t *testing.T) {
+	for _, path := range []string{"../../templates/docker/docker-compose.yml", "../../templates/docker/docker-compose.setup.yml"} {
+		data := bundleComposeData()
+		data["PhpIniPath"] = "/x/zz-project.ini"
+		data["PhpIniHash"] = "0123456789abcdef"
+		out := renderRealTemplate(t, path, data)
+
+		var doc struct {
+			Services map[string]struct {
+				Labels map[string]string `yaml:"labels"`
+				Image  string            `yaml:"image"`
+			} `yaml:"services"`
+		}
+		if err := yamlv3.Unmarshal([]byte(out), &doc); err != nil {
+			t.Fatal(err)
+		}
+		checked := 0
+		defer func() {
+			if checked == 0 {
+				t.Errorf("%s: no service built on oro-app was found, the check proves nothing", path)
+			}
+		}()
+		for name, svc := range doc.Services {
+			// Services merging oro-app carry the app image; the others (db, redis, ...) do not.
+			if svc.Image != BaseImageRef("6.1", "bundle") {
+				continue
+			}
+			checked++
+			if svc.Labels[phpIniHashLabel] != "0123456789abcdef" {
+				t.Errorf("%s: service %s lost the hash label: %v", path, name, svc.Labels)
+			}
+		}
+	}
+}
+
+func TestPhpIniHashChangesWithTheMountedContent(t *testing.T) {
+	t.Run("map form", func(t *testing.T) {
+		projectDir, _ := phpIniProject(t, nil)
+		loadPhpIniConfig(t, projectDir, phpIniProjectBase+"php_ini:\n  memory_limit: 4G\n")
+		first := syncPhpIni(".orobox", projectDir, mustPhpIni(t))
+		loadPhpIniConfig(t, projectDir, phpIniProjectBase+"php_ini:\n  memory_limit: 8G\n")
+		second := syncPhpIni(".orobox", projectDir, mustPhpIni(t))
+
+		if first.Hash == "" || len(first.Hash) != 16 {
+			t.Errorf("expected a 16 character hash, got %q", first.Hash)
+		}
+		if first.Hash == second.Hash {
+			t.Errorf("a changed value must change the hash, both are %q", first.Hash)
+		}
+		if first.Source != second.Source {
+			t.Errorf("the mount path is expected to stay put (that is the reason for the hash): %q vs %q", first.Source, second.Source)
+		}
+	})
+
+	t.Run("file form", func(t *testing.T) {
+		projectDir, _ := phpIniProject(t, map[string]string{"docker/php.ini": "memory_limit = 1G\n"})
+		loadPhpIniConfig(t, projectDir, phpIniProjectBase+"php_ini: docker/php.ini\n")
+		first := syncPhpIni(".orobox", projectDir, mustPhpIni(t))
+		if err := os.WriteFile(filepath.Join(projectDir, "docker", "php.ini"), []byte("memory_limit = 2G\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		second := syncPhpIni(".orobox", projectDir, mustPhpIni(t))
+
+		if first.Hash == "" || first.Hash == second.Hash {
+			t.Errorf("editing the project ini must change the hash: %q vs %q", first.Hash, second.Hash)
+		}
+	})
+
+	t.Run("unset", func(t *testing.T) {
+		projectDir, _ := phpIniProject(t, nil)
+		loadPhpIniConfig(t, projectDir, phpIniProjectBase)
+		if got := syncPhpIni(".orobox", projectDir, mustPhpIni(t)); got.Hash != "" || got.Source != "" {
+			t.Errorf("expected no mount and no hash, got %#v", got)
+		}
+	})
+}
+
+// End to end through EnsureDockerCompose with the real templates: the rendered compose files
+// must carry a different label after the ini changes, which is what makes `up -d` recreate.
+func TestEnsureDockerComposeRelabelsWhenTheIniChanges(t *testing.T) {
+	// Absolute, because phpIniProject changes into a temp directory.
+	repoRoot, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := Templates
+	Templates = os.DirFS(repoRoot)
+	t.Cleanup(func() { Templates = saved })
+
+	labelIn := func(t *testing.T, internalDir, file string) string {
+		t.Helper()
+		out, err := os.ReadFile(filepath.Join(internalDir, file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(string(out), "\n") {
+			if strings.Contains(line, phpIniHashLabel) {
+				return strings.TrimSpace(line)
+			}
+		}
+		return ""
+	}
+
+	t.Run("map form", func(t *testing.T) {
+		projectDir, internalDir := phpIniProject(t, nil)
+		loadPhpIniConfig(t, projectDir, phpIniProjectBase+"php_ini:\n  memory_limit: 4G\n")
+		EnsureDockerCompose()
+		before := labelIn(t, internalDir, "docker-compose.yml")
+		if before == "" {
+			t.Fatal("expected the runtime compose file to carry the hash label")
+		}
+		if got := labelIn(t, internalDir, "docker-compose.setup.yml"); got != before {
+			t.Errorf("setup label %q differs from runtime label %q", got, before)
+		}
+
+		loadPhpIniConfig(t, projectDir, phpIniProjectBase+"php_ini:\n  memory_limit: 8G\n")
+		if !EnsureDockerCompose() {
+			t.Error("expected the changed value to be reported as a change")
+		}
+		if after := labelIn(t, internalDir, "docker-compose.yml"); after == before || after == "" {
+			t.Errorf("label must change with the value: %q -> %q", before, after)
+		}
+
+		loadPhpIniConfig(t, projectDir, phpIniProjectBase)
+		EnsureDockerCompose()
+		if got := labelIn(t, internalDir, "docker-compose.yml"); got != "" {
+			t.Errorf("expected no label once php_ini is gone, got %q", got)
+		}
+	})
+
+	t.Run("file form", func(t *testing.T) {
+		projectDir, internalDir := phpIniProject(t, map[string]string{"docker/php.ini": "memory_limit = 1G\n"})
+		loadPhpIniConfig(t, projectDir, phpIniProjectBase+"php_ini: docker/php.ini\n")
+		EnsureDockerCompose()
+		before := labelIn(t, internalDir, "docker-compose.yml")
+		if before == "" {
+			t.Fatal("expected the label in file form")
+		}
+
+		if err := os.WriteFile(filepath.Join(projectDir, "docker", "php.ini"), []byte("memory_limit = 2G\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if !EnsureDockerCompose() {
+			t.Error("expected an edit to the project ini to be reported as a change")
+		}
+		if after := labelIn(t, internalDir, "docker-compose.yml"); after == before || after == "" {
+			t.Errorf("label must change when the file is edited: %q -> %q", before, after)
+		}
+	})
+}
+
+func mustPhpIni(t *testing.T) config.PhpIni {
+	t.Helper()
+	ini, err := config.GetPhpIni()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ini
+}
+
+func TestPhpIniMountSource(t *testing.T) {
+	internalDir := t.TempDir()
+
+	got, err := phpIniMountSource(config.PhpIni{Values: map[string]any{"a": 1}}, internalDir, "/proj")
+	if err != nil || got != filepath.Join(internalDir, "zz-project.ini") {
+		t.Errorf("map form: got %q, %v", got, err)
+	}
+
+	got, err = phpIniMountSource(config.PhpIni{File: "docker/php.ini"}, internalDir, "/proj")
+	if err != nil || got != filepath.Join("/proj", "docker", "php.ini") {
+		t.Errorf("file form: got %q, %v", got, err)
+	}
+
+	got, err = phpIniMountSource(config.PhpIni{}, internalDir, "/proj")
+	if err != nil || got != "" {
+		t.Errorf("unset: got %q, %v", got, err)
+	}
+}
+
+// ports returns the default host-port map the way EnsureDockerCompose passes it to the
+// templates, so a test can override single keys.
+func ports(overrides map[string]int) map[string]int {
+	out := map[string]int{}
+	for k, v := range config.DefaultPorts {
+		out[k] = v
+	}
+	for k, v := range overrides {
+		out[k] = v
+	}
+	return out
+}
+
+// allServices turns every optional service on, so every published port is in the output.
+func allServices(d map[string]any) map[string]any {
+	for _, k := range []string{"Redis", "RedisInsight", "Mailpit", "RabbitMQ", "Elasticsearch", "Adminer", "Kibana"} {
+		d[k] = true
+	}
+	d["RedisVersion"] = "7"
+	d["RabbitMQVersion"] = "3"
+	d["ElasticsearchVersion"] = "8.0.0"
+	return d
+}
+
+// publishedPorts parses the rendered compose file and returns service -> ports list. A service
+// whose `ports:` key is present but empty is a compose error in waiting (null is not a list), so
+// that case fails the test here instead of being reported as "publishes nothing".
+func publishedPorts(t *testing.T, rendered string) map[string][]any {
+	t.Helper()
+	var doc struct {
+		Services map[string]map[string]any `yaml:"services"`
+	}
+	if err := yamlv3.Unmarshal([]byte(rendered), &doc); err != nil {
+		t.Fatalf("not valid YAML: %v\n---\n%s", err, rendered)
+	}
+	out := map[string][]any{}
+	for name, svc := range doc.Services {
+		raw, present := svc["ports"]
+		if !present {
+			out[name] = nil
+			continue
+		}
+		list, ok := raw.([]any)
+		if !ok || len(list) == 0 {
+			t.Errorf("service %s has a ports key that is not a non-empty list: %#v", name, raw)
+		}
+		out[name] = list
+	}
+	return out
+}
+
+func TestComposeTemplateDefaultHostPorts(t *testing.T) {
+	d := allServices(bundleComposeData())
+	d["Ports"] = ports(nil)
+	out := renderRealTemplate(t, "../../templates/docker/docker-compose.yml", d)
+	assertValidYAML(t, "docker-compose.yml", out)
+
+	for _, want := range []string{
+		`"5432:5432"`, `"6379:6379"`, `"8001:5540"`, `"8025:8025"`, `"2025:1025"`,
+		`"15672:15672"`, `"5672:5672"`, `"9200:9200"`, `"3000:3000"`, `"8081:8080"`, `"5601:5601"`,
+	} {
+		mustContain(t, out, want)
+	}
+}
+
+func TestComposeTemplateCustomHostPorts(t *testing.T) {
+	d := allServices(bundleComposeData())
+	d["Ports"] = ports(map[string]int{"db": 5434, "mail_smtp": 2526, "rabbitmq_ui": 15673, "gotenberg": 3001})
+	out := renderRealTemplate(t, "../../templates/docker/docker-compose.yml", d)
+	assertValidYAML(t, "docker-compose.yml", out)
+
+	mustContain(t, out, `"5434:5432"`)
+	mustContain(t, out, `"2526:1025"`)
+	mustContain(t, out, `"15673:15672"`)
+	mustContain(t, out, `"3001:3000"`)
+	mustNotContain(t, out, `"5432:5432"`)
+	// The healthcheck probes the container-internal port, which does not move.
+	mustContain(t, out, "http://127.0.0.1:3000/health")
+}
+
+func TestComposeTemplateZeroPortOmitsEntryAndKey(t *testing.T) {
+	d := allServices(bundleComposeData())
+	d["Ports"] = ports(map[string]int{
+		"adminer": 0, "db": 0, "redis": 0, "redisinsight": 0, "elasticsearch": 0, "kibana": 0, "gotenberg": 0,
+		"mail_ui": 0, "mail_smtp": 0, "rabbitmq": 0,
+	})
+	out := renderRealTemplate(t, "../../templates/docker/docker-compose.yml", d)
+	got := publishedPorts(t, out)
+
+	for _, svc := range []string{"adminer", "db", "redis", "redisinsight", "elasticsearch", "kibana", "gotenberg", "mail"} {
+		if _, ok := got[svc]; !ok {
+			t.Errorf("service %s is missing from the render", svc)
+		}
+		if len(got[svc]) != 0 {
+			t.Errorf("service %s should publish nothing, got %v", svc, got[svc])
+		}
+	}
+	// rabbitmq kept its UI port, so the list survives with exactly that entry.
+	if len(got["rabbitmq"]) != 1 || got["rabbitmq"][0] != "15672:15672" {
+		t.Errorf("rabbitmq ports = %v, want only the UI port", got["rabbitmq"])
+	}
+	// publishedPorts reports nil for both an absent key and an empty list, so the render itself
+	// must be checked for the host side of every entry that was switched off.
+	for _, gone := range []string{`"8081:8080"`, `"5432:5432"`, `"8025:8025"`, `"2025:1025"`, `"5672:5672"`} {
+		mustNotContain(t, out, gone)
+	}
+}
+
+func TestComposeTemplateZeroRabbitMQUIKeepsAMQP(t *testing.T) {
+	d := allServices(bundleComposeData())
+	d["Ports"] = ports(map[string]int{"rabbitmq_ui": 0})
+	out := renderRealTemplate(t, "../../templates/docker/docker-compose.yml", d)
+	got := publishedPorts(t, out)
+	if len(got["rabbitmq"]) != 1 || got["rabbitmq"][0] != "5672:5672" {
+		t.Errorf("rabbitmq ports = %v, want only 5672:5672", got["rabbitmq"])
+	}
+}
+
+func TestComposeTemplateWebPortFollowsNginxPorts(t *testing.T) {
+	d := bundleComposeData()
+	d["Ports"] = ports(nil)
+	d["NginxHTTPPort"] = "9000"
+	d["NginxHTTPSPort"] = "9443"
+	d["HasSsl"] = true
+	out := renderRealTemplate(t, "../../templates/docker/docker-compose.yml", d)
+	assertValidYAML(t, "docker-compose.yml", out)
+	mustContain(t, out, `published: "9000"`)
+	mustContain(t, out, `published: "9443"`)
+}
+
+func TestComposeTestTemplateDbTestPort(t *testing.T) {
+	path := "../../templates/docker/docker-compose.test.yml"
+
+	d := bundleComposeData()
+	d["Ports"] = ports(nil)
+	out := renderRealTemplate(t, path, d)
+	assertValidYAML(t, path, out)
+	mustContain(t, out, `"5433:5432"`)
+
+	d["Ports"] = ports(map[string]int{"db_test": 5435})
+	out = renderRealTemplate(t, path, d)
+	assertValidYAML(t, path, out)
+	mustContain(t, out, `"5435:5432"`)
+
+	d["Ports"] = ports(map[string]int{"db_test": 0})
+	out = renderRealTemplate(t, path, d)
+	got := publishedPorts(t, out)
+	if len(got["db-test"]) != 0 {
+		t.Errorf("db-test should publish nothing, got %v", got["db-test"])
+	}
+}
+
+func TestGetNginxPortsPrecedence(t *testing.T) {
+	t.Run("ports.http beats nginx_http_port and env", func(t *testing.T) {
+		viper.Reset()
+		t.Cleanup(viper.Reset)
+		t.Setenv("ORO_NGINX_HTTP_PORT", "6000")
+		viper.Set("nginx_http_port", "7000")
+		viper.Set("nginx_https_port", "7443")
+		viper.Set("ports.http", 9000)
+		viper.Set("ports.https", 9443)
+		httpPort, httpsPort := GetNginxPorts()
+		if httpPort != "9000" || httpsPort != "9443" {
+			t.Errorf("got %s/%s, want 9000/9443", httpPort, httpsPort)
+		}
+	})
+	t.Run("nginx_http_port beats env", func(t *testing.T) {
+		viper.Reset()
+		t.Cleanup(viper.Reset)
+		t.Setenv("ORO_NGINX_HTTP_PORT", "6000")
+		viper.Set("nginx_http_port", "7000")
+		httpPort, httpsPort := GetNginxPorts()
+		if httpPort != "7000" || httpsPort != "8443" {
+			t.Errorf("got %s/%s, want 7000/8443", httpPort, httpsPort)
+		}
+	})
+	t.Run("env beats the default", func(t *testing.T) {
+		viper.Reset()
+		t.Cleanup(viper.Reset)
+		t.Setenv("ORO_NGINX_HTTP_PORT", "6000")
+		t.Setenv("ORO_NGINX_HTTPS_PORT", "6443")
+		httpPort, httpsPort := GetNginxPorts()
+		if httpPort != "6000" || httpsPort != "6443" {
+			t.Errorf("got %s/%s, want 6000/6443", httpPort, httpsPort)
+		}
+	})
+	t.Run("defaults", func(t *testing.T) {
+		viper.Reset()
+		t.Cleanup(viper.Reset)
+		t.Setenv("ORO_NGINX_HTTP_PORT", "")
+		t.Setenv("ORO_NGINX_HTTPS_PORT", "")
+		httpPort, httpsPort := GetNginxPorts()
+		if httpPort != "8080" || httpsPort != "8443" {
+			t.Errorf("got %s/%s, want 8080/8443", httpPort, httpsPort)
+		}
+	})
 }

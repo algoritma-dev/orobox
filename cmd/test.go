@@ -218,6 +218,12 @@ func runTestOnDagger(format qatools.Report) {
 		Report:         effectiveFormat,
 	})
 
+	// Same image and PHP settings as the dev stack and as a deploy of this branch.
+	if err := pipeline.ApplyProjectLayer(plan, &conf, projectDir); err != nil {
+		utils.PrintError(err.Error())
+		os.Exit(1)
+	}
+
 	utils.PrintInfo("Running the tests in the pipeline engine. The first run has no caches and takes a while.")
 
 	result, runErr := pipeline.Run(context.Background(), plan, pipeline.Options{

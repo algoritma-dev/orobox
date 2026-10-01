@@ -28,11 +28,12 @@ var testInitCmd = &cobra.Command{
 		if testInitUseTmpfs {
 			viper.Set("test.use_tmpfs", true)
 			viper.Set("test.tmpfs_size", testInitTmpfsSize)
-			var conf config.OroConfig
-			if err := viper.Unmarshal(&conf); err == nil {
+			// Rewrites .orobox.yaml, so it starts from the file, not from viper: a viper round
+			// trip would mangle php_ini directive names (see config.LoadConfigFile).
+			if conf, err := config.LoadConfigFile(); err == nil {
 				conf.Test.UseTmpfs = true
 				conf.Test.TmpfsSize = testInitTmpfsSize
-				data, err := yamlv3.Marshal(&conf)
+				data, err := yamlv3.Marshal(conf)
 				if err == nil {
 					_ = os.WriteFile(".orobox.yaml", data, 0644)
 				}
@@ -142,12 +143,15 @@ var testInitCmd = &cobra.Command{
 		}
 		utils.PrintSuccess("Test environment initialized successfully!")
 
-		utils.PrintTitle("Test Database Connection (e.g. PhpStorm):")
-		utils.PrintPlain("  - Host: localhost")
-		utils.PrintPlain("  - Port: 5433")
-		utils.PrintPlainf("  - User: %s\n", dbUser)
-		utils.PrintPlainf("  - Password: %s\n", dbPass)
-		utils.PrintPlainf("  - Database: %s\n", dbName)
+		// With the test database port unpublished there is nothing to connect to from the host.
+		if testPort := config.GetPort("db_test"); testPort != 0 {
+			utils.PrintTitle("Test Database Connection (e.g. PhpStorm):")
+			utils.PrintPlain("  - Host: localhost")
+			utils.PrintPlainf("  - Port: %d\n", testPort)
+			utils.PrintPlainf("  - User: %s\n", dbUser)
+			utils.PrintPlainf("  - Password: %s\n", dbPass)
+			utils.PrintPlainf("  - Database: %s\n", dbName)
+		}
 		return nil
 	},
 }

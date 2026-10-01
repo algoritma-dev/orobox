@@ -1,0 +1,22 @@
+description: Blackfire profiler, the agent service plus the PHP probe
+compose:
+  services:
+    blackfire:
+      image: blackfire/blackfire:2026.9.1
+      environment:
+        # Read from the project .env, which `orobox extend add blackfire` seeded with empty values.
+        BLACKFIRE_SERVER_ID: ${BLACKFIRE_SERVER_ID}
+        BLACKFIRE_SERVER_TOKEN: ${BLACKFIRE_SERVER_TOKEN}
+config:
+  image:
+    php_extensions: [blackfire]
+  php_ini:
+    blackfire.agent_socket: tcp://blackfire:8307
+env:
+  BLACKFIRE_SERVER_ID: ""
+  BLACKFIRE_SERVER_TOKEN: ""
+notes: |
+  Set BLACKFIRE_SERVER_ID and BLACKFIRE_SERVER_TOKEN in .env (next to .orobox.yaml) to the
+  server credentials of your Blackfire environment, then run `orobox up`: the image is rebuilt
+  with the probe and the agent starts with the credentials. The values come from
+  https://blackfire.io/my/settings/credentials; keep them out of git if .env is committed.

@@ -1,12 +1,19 @@
 x-templates:
   oro-app: &oro-app
     image: "{{.AppImage}}"
-    {{- if .CustomDockerfile}}
-    # Built locally by orobox from the project's own {{.CustomDockerfile}}, so it exists in no
+    {{- if .HasCustomLayer}}
+    # Built locally by orobox from {{.LayerSource}} (see .orobox.yaml), so it exists in no
     # registry: a pull would go looking for it on Docker Hub and fail with an unrelated error.
     pull_policy: never
     {{- end}}
     env_file: .env
+    {{- if .PhpIniHash}}
+    # Compose recreates a container when its configuration changes, and a bind mount's content
+    # is not part of it: only its path is. This label carries the ini's hash so a changed
+    # php_ini (or an edit to the project's ini file) reaches the running containers.
+    labels:
+      dev.orobox.php-ini-hash: "{{.PhpIniHash}}"
+    {{- end}}
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -23,6 +30,10 @@ x-templates:
     - "private_storage:{{.OroRootDir}}/var/data:delegated"
     {{- end}}
     - "public_storage:{{.OroRootDir}}/public/media:delegated"
+    {{if .PhpIniPath -}}
+    # The install must run with the same PHP settings as the stack (the `php_ini` key).
+    - "{{.PhpIniPath}}:/usr/local/etc/php/conf.d/zz-project.ini:ro"
+    {{- end}}
 
 services:
   volume-setup:

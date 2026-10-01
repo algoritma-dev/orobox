@@ -1,0 +1,19 @@
+# Your personal tweaks to the Orobox stack. This file is git-ignored: nothing here reaches the rest
+# of the team, and it is merged after .orobox.compose.yaml, so it wins over it.
+#
+# This is a standard Docker Compose file; relative paths are relative to this file. Replace
+# `services: {}` with what you need. Ports from `.orobox.yaml` (`ports:`) are the simpler way to
+# move a published port of a service Orobox generates.
+#
+# services:
+#   # Compose appends to lists such as ports. `!override` replaces the list instead
+#   # (needs Docker Compose 2.24 or later).
+#   web:
+#     ports: !override
+#       - "9090:80"
+#
+#   # A personal mount: your own fixtures, a checkout of a library you are debugging.
+#   php-fpm-app:
+#     volumes:
+#       - ~/work/my-library:/var/www/oro/vendor/acme/my-library
+services: {}

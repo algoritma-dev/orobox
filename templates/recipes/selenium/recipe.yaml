@@ -1,0 +1,20 @@
+description: Selenium standalone Chrome with noVNC, to watch a Behat run in the browser
+compose:
+  services:
+    selenium:
+      image: selenium/standalone-chrome:4.49.0-20260909
+      # Chrome crashes on Docker's default 64 MB /dev/shm.
+      shm_size: 2g
+      environment:
+        # Local development only: open noVNC without the default "secret" password.
+        SE_VNC_NO_PASSWORD: "true"
+      ports:
+        - "7900:7900"
+      labels:
+        dev.orobox.url: http://localhost:7900
+notes: |
+  The image's headless Chromium stays the default for Behat; this service is for watching a run.
+  To use it, point the Mink session at the grid and the browser at the web service, both as seen
+  from inside the stack, for instance with BEHAT_PARAMS in the shell that runs Behat:
+    export BEHAT_PARAMS='{"extensions":{"Behat\\MinkExtension":{"base_url":"http://web/","sessions":{"first_session":{"oroSelenium2":{"wd_host":"http://selenium:4444/wd/hub"}}}}}}'
+  or the same base_url / wd_host keys in your behat.yml. Then open http://localhost:7900 to watch.

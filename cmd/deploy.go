@@ -101,6 +101,13 @@ func runDeployCommand(stageName string) {
 	plan.SkipTest = deploySkipTest
 	plan.SkipRelease = deploySkipRelease
 
+	// The pipeline runs on the image and PHP settings the dev stack runs on; a broken layer
+	// configuration is refused here, before any engine starts.
+	if err := pipeline.ApplyProjectLayer(plan, conf, projectDir); err != nil {
+		utils.PrintError(err.Error())
+		os.Exit(1)
+	}
+
 	source, forcedRef, err := deploySource(projectDir)
 	if err != nil {
 		utils.PrintError(err.Error())
@@ -297,6 +304,12 @@ func printDeploySummary(plan *pipeline.Plan) {
 	}
 	utils.PrintPlainf("  Target:     %s@%s:%d%s\n", stage.User, stage.Host, stage.SSHPort(), stage.DeployPath)
 	utils.PrintPlainf("  Image:      %s\n", plan.Image)
+	if plan.Layer != nil {
+		utils.PrintPlain("  Layer:      the project's image layer, built on that image")
+	}
+	if plan.PhpIni != "" {
+		utils.PrintPlain("  php.ini:    the project's php_ini settings (zz-project.ini)")
+	}
 	utils.PrintPlainf("  Suites:     %v\n", stage.Suites())
 	if plan.BuildsAssets() {
 		utils.PrintPlain("  Assets:     built in the pipeline and uploaded")

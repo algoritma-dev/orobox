@@ -2,6 +2,7 @@ package docker
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -141,5 +142,21 @@ func TestEnsureServicesRunningRemembersHealthyServices(t *testing.T) {
 	}
 	if *calls != before {
 		t.Errorf("db was re-checked: %d ps calls, want %d", *calls, before)
+	}
+}
+
+// A broken override means nothing was started: the wait returns that error instead of polling
+// ps until the budget runs out.
+func TestWaitForServicesHealthyReturnsOverrideError(t *testing.T) {
+	stubServiceHealthPolling(t, 10)
+	t.Cleanup(func() { overrideErr = nil })
+	overrideErr = errors.New(".orobox.compose.yaml: invalid")
+	RunComposeCommandWithOutput = func(...string) ([]byte, error) {
+		t.Error("ps must not be polled while the override is broken")
+		return nil, nil
+	}
+
+	if err := waitForServicesHealthy([]string{"db"}); !errors.Is(err, overrideErr) {
+		t.Errorf("expected the override error, got %v", err)
 	}
 }

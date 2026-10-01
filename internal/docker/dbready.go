@@ -37,6 +37,11 @@ var (
 // server is up whether or not the database has been created yet — which is what the callers
 // need, since some of them are about to create or drop it.
 func WaitForDatabaseReady(test bool) error {
+	// Every poll would fail with this same error; return it now instead of after the budget.
+	if err := OverrideError(); err != nil {
+		return err
+	}
+
 	dbUser, _, dbName, container := GetDatabaseCredentialsFor(test)
 	args := []string{"exec", "-T", container, "pg_isready", "-U", dbUser, "-d", dbName}
 

@@ -9,8 +9,10 @@ services:
       - .env.test
     labels:
       com.symfony.server.service-prefix: ORO_DB
+    {{- if index .Ports "db_test"}}
     ports:
-      - "5433:5432"
+      - "{{index .Ports "db_test"}}:5432"
+    {{- end}}
     # Same reasoning as the dev db: EnsureServicesRunning reads this service's health out of
     # `docker compose ps`, so the interval is how long it can report "starting" for a server
     # that is already accepting.

@@ -1,0 +1,43 @@
+# Fixture of TestE2ECustomization: a project that customizes the stack through every
+# customization key at once — a local image layer, PHP settings, a moved host port — plus a
+# compose override (customization.compose.yaml, copied next to this file as
+# .orobox.compose.yaml).
+type: project
+oro_version: "{{.Version}}"
+domains:
+  - host: {{.Host}}
+    root: public
+    ssl: false
+services:
+  redis: false
+  redisinsight: false
+  mailpit: false
+  rabbitmq: false
+  elasticsearch: false
+  kibana: false
+  adminer: false
+image:
+  # Both are packages the published image does not ship, so the assertions below can only pass
+  # if the local layer was really built and is the image the PHP services run.
+  php_extensions: [redis]
+  apk: [poppler-utils]
+php_ini:
+  # 3G is a value no Oro image uses, so reading it back proves zz-project.ini was mounted and
+  # read after the image's own ini rather than matching a default.
+  memory_limit: 3G
+ports:
+  # Away from 5432 so the case does not collide with a Postgres on the developer's machine.
+  db: 5440
+# The suite reads the stack back through `orobox run`, which dispatches commands defined here.
+# Each prints a marker next to the value so the assertion does not depend on how the progress
+# output around a command's output is laid out.
+commands:
+  - name: e2e-php-modules
+    command: "php -m | sed 's/^/php-module: /'"
+    description: List the PHP modules loaded in the application container
+  - name: e2e-php-memory-limit
+    command: "php -r 'echo \"memory_limit=\" . ini_get(\"memory_limit\") . PHP_EOL;'"
+    description: Print the memory_limit PHP runs with
+  - name: e2e-pdftotext
+    command: "p=$(which pdftotext) && echo \"pdftotext-path=$p\""
+    description: Locate pdftotext, installed by the image.apk layer

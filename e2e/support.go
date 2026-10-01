@@ -32,6 +32,26 @@ var defaultTypes = []InstallType{TypeProject, TypeBundle}
 // on 8080 unless the config or ORO_NGINX_HTTP_PORT says otherwise.
 const defaultNginxHTTPPort = "8080"
 
+// Fixtures of the stack-customization case (TestE2ECustomization). The override fixture is
+// copied into the case as customizationOverrideName, the name orobox looks for next to
+// .orobox.yaml.
+const (
+	customizationConfigFixture   = "fixtures/customization.orobox.yaml"
+	customizationOverrideFixture = "fixtures/customization.compose.yaml"
+	customizationOverrideName    = ".orobox.compose.yaml"
+)
+
+// Values the customization fixtures (customization.orobox.yaml, customization.compose.yaml)
+// ask for. They live here as well because the assertions read them back from the running
+// stack, and a number written on only one side is how the fixture and the test drift apart;
+// TestCustomizationFixturesMatchTheAssertions pins them together.
+const (
+	customizationMemoryLimit = "3G"
+	customizationDBPort      = 5440
+	customizationWhoamiURL   = "http://localhost:8099"
+	customizationService     = "whoami"
+)
+
 // e2eRunCommand is the custom command the fixtures define and the suite invokes through
 // `orobox run`. Shared so the fixture and the call site cannot drift apart.
 const e2eRunCommand = "e2e-cache-clear"
@@ -45,6 +65,11 @@ var projectOnlyGenerators = []string{"deploy-init", "ci-init"}
 type Case struct {
 	Version string
 	Type    InstallType
+	// Variant tells apart two scenarios that share a version and an install type. It lands in
+	// the docker compose project name, so the scenarios neither reuse each other's containers
+	// and volumes nor overwrite each other's step logs. It is deliberately absent from Host:
+	// the host names are what CI maps to 127.0.0.1, and a variant needs no entry of its own.
+	Variant string
 }
 
 // sanitizeVersion makes a version string safe for docker names: lowercase, no dots.
@@ -54,7 +79,11 @@ func sanitizeVersion(v string) string {
 
 // ProjectName is the docker compose project name for this case: lowercase, dot-free, unique.
 func (c Case) ProjectName() string {
-	return "oroboxe2e-" + string(c.Type) + "-" + sanitizeVersion(c.Version)
+	name := "oroboxe2e-" + string(c.Type) + "-" + sanitizeVersion(c.Version)
+	if c.Variant != "" {
+		name += "-" + c.Variant
+	}
+	return name
 }
 
 // Host is a unique domain for this case so parallel cases cannot clash.

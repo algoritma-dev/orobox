@@ -623,3 +623,235 @@ func TestQaSharedPackagesIsACopy(t *testing.T) {
 		}
 	}
 }
+
+// imageConfigBase is the smallest config Validate accepts, so each image test only has to vary
+// the block it is about.
+const imageConfigBase = `
+type: project
+oro_version: "6.1"
+domains:
+  - host: example.com
+`
+
+func TestValidateImageEntries(t *testing.T) {
+	tests := []struct {
+		name    string
+		image   string
+		wantErr string // substring of the expected error; "" means the config must be accepted
+	}{
+		{"empty apk entry", "image:\n  apk: [\"\"]\n", "image.apk"},
+		{"shell metacharacters in php_extensions", "image:\n  php_extensions: [\"redis; rm -rf /\"]\n", "image.php_extensions"},
+		{"space inside an npm entry", "image:\n  npm: [\"left pad\"]\n", "image.npm"},
+		{"scoped npm package", "image:\n  npm: [\"@playwright/test\"]\n", ""},
+		{"apk with a pinned version", "image:\n  apk: [\"php84-pecl-redis=6.1.0-r0\"]\n", ""},
+		{"run is free-form", "image:\n  run: [\"a && b | c\"]\n", ""},
+		{"empty run entry", "image:\n  run: [\"\"]\n", "image.run"},
+		{"whitespace-only run entry", "image:\n  run: [\"   \"]\n", "image.run"},
+		// A line break would start a new Dockerfile instruction once spliced after "RUN ".
+		{"run entry with a newline", "image:\n  run: [\"set -e\\nFROM alpine\\n\"]\n", "image.run"},
+		{"run entry with a carriage return", "image:\n  run: [\"a\\rFROM alpine\"]\n", "image.run"},
+		{"run entry ending in a backslash", "image:\n  run: [\"apk add git \\\\\"]\n", "image.run"},
+		{"run entry ending in a backslash and spaces", "image:\n  run: [\"apk add git \\\\  \"]\n", "image.run"},
+		{"run entry joined with &&", "image:\n  run: [\"a && b\"]\n", ""},
+		{"no image block", "", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conf, err := ParseConfig([]byte(imageConfigBase + tt.image))
+			if err != nil {
+				t.Fatalf("ParseConfig failed: %v", err)
+			}
+			err = conf.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("expected the config to be accepted, got %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected an error containing %q, got none", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("expected the error to name %q, got %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestValidateImageDockerfilePath(t *testing.T) {
+	tests := []struct {
+		path    string
+		wantErr string
+	}{
+		{"/abs/Dockerfile", "relative"},
+		{"../out/Dockerfile", "inside the project"},
+		{"..", "inside the project"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			conf, err := ParseConfig([]byte(imageConfigBase + "image:\n  dockerfile: " + tt.path + "\n"))
+			if err != nil {
+				t.Fatalf("ParseConfig failed: %v", err)
+			}
+			err = conf.Validate()
+			if err == nil {
+				t.Fatalf("expected %q to be rejected", tt.path)
+			}
+			if !strings.Contains(err.Error(), "image.dockerfile") || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("expected an image.dockerfile error mentioning %q, got %v", tt.wantErr, err)
+			}
+		})
+	}
+
+	conf, err := ParseConfig([]byte(imageConfigBase + "image:\n  dockerfile: ./docker/Dockerfile\n"))
+	if err != nil {
+		t.Fatalf("ParseConfig failed: %v", err)
+	}
+	if err := conf.Validate(); err != nil {
+		t.Errorf("expected a project-relative path to be accepted, got %v", err)
+	}
+}
+
+func TestValidateBothDockerfileKeys(t *testing.T) {
+	conf, err := ParseConfig([]byte(imageConfigBase + "dockerfile: a/Dockerfile\nimage:\n  dockerfile: b/Dockerfile\n"))
+	if err != nil {
+		t.Fatalf("ParseConfig failed: %v", err)
+	}
+	err = conf.Validate()
+	if err == nil {
+		t.Fatal("expected setting both dockerfile keys to be rejected")
+	}
+	if !strings.Contains(err.Error(), "'dockerfile'") || !strings.Contains(err.Error(), "image.dockerfile") {
+		t.Errorf("expected the error to name both keys, got %v", err)
+	}
+}
+
+func TestImageSettingsFoldsDeprecatedKey(t *testing.T) {
+	t.Run("top-level key only", func(t *testing.T) {
+		conf, err := ParseConfig([]byte(imageConfigBase + "dockerfile: docker/Dockerfile\n"))
+		if err != nil {
+			t.Fatalf("ParseConfig failed: %v", err)
+		}
+		if got := conf.ImageSettings().Dockerfile; got != "docker/Dockerfile" {
+			t.Errorf("ImageSettings().Dockerfile = %q, want docker/Dockerfile", got)
+		}
+	})
+
+	t.Run("image key wins and keeps its siblings", func(t *testing.T) {
+		conf, err := ParseConfig([]byte(imageConfigBase + "image:\n  dockerfile: b/Dockerfile\n  apk: [git]\n"))
+		if err != nil {
+			t.Fatalf("ParseConfig failed: %v", err)
+		}
+		got := conf.ImageSettings()
+		if got.Dockerfile != "b/Dockerfile" || len(got.Apk) != 1 || got.Apk[0] != "git" {
+			t.Errorf("unexpected ImageSettings(): %+v", got)
+		}
+	})
+
+	// GetImageConfig normalizes the path for the dev stack; the pipeline reads this method, so
+	// both must agree on what the path is.
+	t.Run("dockerfile path is normalized", func(t *testing.T) {
+		for _, raw := range []string{"dockerfile", "image"} {
+			yaml := imageConfigBase + "dockerfile: \"  ./docker/Dockerfile  \"\n"
+			if raw == "image" {
+				yaml = imageConfigBase + "image:\n  dockerfile: \"  ./docker/Dockerfile  \"\n"
+			}
+			conf, err := ParseConfig([]byte(yaml))
+			if err != nil {
+				t.Fatalf("ParseConfig failed: %v", err)
+			}
+			if got := conf.ImageSettings().Dockerfile; got != "docker/Dockerfile" {
+				t.Errorf("%s form: ImageSettings().Dockerfile = %q, want docker/Dockerfile", raw, got)
+			}
+		}
+	})
+
+	t.Run("whitespace-only dockerfile becomes empty", func(t *testing.T) {
+		conf := &OroConfig{Image: &ImageConfig{Dockerfile: "   "}}
+		if got := conf.ImageSettings().Dockerfile; got != "" {
+			t.Errorf("ImageSettings().Dockerfile = %q, want empty", got)
+		}
+	})
+
+	t.Run("no image configuration", func(t *testing.T) {
+		conf, err := ParseConfig([]byte(imageConfigBase))
+		if err != nil {
+			t.Fatalf("ParseConfig failed: %v", err)
+		}
+		if !conf.ImageSettings().IsEmpty() {
+			t.Errorf("expected empty settings, got %+v", conf.ImageSettings())
+		}
+	})
+}
+
+// A config written by an older Orobox keeps working, and the next rewrite moves the path under
+// image: so the deprecated key does not outlive the first `orobox deploy-init`.
+func TestSaveConfigMigratesDockerfile(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), ".orobox.yaml")
+	conf := &OroConfig{Type: InstallTypeProject, OroVersion: "6.1", Dockerfile: "docker/Dockerfile"}
+	if err := SaveConfig(configPath, conf); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(data)
+	if !strings.Contains(out, "image:\n    dockerfile: docker/Dockerfile") {
+		t.Errorf("expected the path under image:, got:\n%s", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "dockerfile:") {
+			t.Errorf("expected no top-level dockerfile line, got:\n%s", out)
+		}
+	}
+	if conf.Dockerfile != "docker/Dockerfile" {
+		t.Errorf("SaveConfig must not mutate the caller's config, Dockerfile is now %q", conf.Dockerfile)
+	}
+}
+
+func TestHasCustomLayer(t *testing.T) {
+	tests := []struct {
+		name string
+		set  map[string]any
+		want bool
+	}{
+		{"nothing configured", nil, false},
+		{"apk", map[string]any{"image.apk": []string{"x"}}, true},
+		{"run", map[string]any{"image.run": []string{"echo hi"}}, true},
+		{"image.dockerfile", map[string]any{"image.dockerfile": "docker/Dockerfile"}, true},
+		{"deprecated top-level dockerfile", map[string]any{"dockerfile": "docker/Dockerfile"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			viper.Reset()
+			defer viper.Reset()
+			for k, v := range tt.set {
+				viper.Set(k, v)
+			}
+			if got := HasCustomLayer(); got != tt.want {
+				t.Errorf("HasCustomLayer() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDeprecatedDockerfileKeyUsed(t *testing.T) {
+	viper.Reset()
+	defer viper.Reset()
+	if DeprecatedDockerfileKeyUsed() {
+		t.Error("expected false when nothing is set")
+	}
+	viper.Set("image.dockerfile", "docker/Dockerfile")
+	if DeprecatedDockerfileKeyUsed() {
+		t.Error("image.dockerfile is the new key, not the deprecated one")
+	}
+	viper.Set("dockerfile", "docker/Dockerfile")
+	if !DeprecatedDockerfileKeyUsed() {
+		t.Error("expected true when the top-level key is set")
+	}
+}

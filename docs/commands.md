@@ -120,7 +120,14 @@ The command dynamically generates the `docker-compose.yml` file, starts the serv
 
 Flags:
 - `-c`, `--clean`: tear the environment down, volumes included, before starting.
-- `--rebuild`: rebuild the image from the project's [`dockerfile`](configuration.md#custom-dockerfile-dockerfile) ignoring the Docker cache. Only useful with that key set: rebuilds happen automatically when the Dockerfile, its build context or the base image change, so this is for the case Docker cannot see — an unpinned `RUN apk add` that should pick up a newer package.
+- `--rebuild`: rebuild the image from the project's [`image` settings](configuration.md#image-customization-image) ignoring the Docker cache. Only useful with a custom layer configured: rebuilds happen automatically when the rendered Dockerfile, its build context or the base image change, so this is for the case Docker cannot see — an unpinned `RUN apk add` that should pick up a newer package.
+
+Once the stack is up, `up` lists the services your [compose override](configuration.md#extending-the-stack-orobox-composeyaml) advertises with the `dev.orobox.url` label, after the built-in blocks:
+```
+Project services:
+  - minio: http://localhost:9001
+```
+The block is omitted when no service carries the label.
 
 ### 4. Stop Environment (`down`)
 Shuts down the Docker services associated with the bundle.
@@ -135,10 +142,14 @@ orobox shell
 ```
 
 ### 6. View Logs (`logs`)
-Displays logs from different services in the development environment. At least one flag must be specified.
+Displays logs from different services in the development environment. At least one flag or service name must be specified.
 ```bash
 orobox logs --app
+orobox logs minio
+orobox logs --nginx minio
 ```
+Any compose service can be named directly, including the ones added in `.orobox.compose.yaml`. Services given by flag come first, then the named ones; a service mentioned twice is followed once.
+
 Options:
 - `--nginx`: Nginx logs.
 - `--php`: PHP-FPM logs.
@@ -186,3 +197,54 @@ Options:
 - `--test`, `-t`: Quick flag to run the command in the `application` service with test environment override.
 
 If you run `orobox run --help`, you will see a dynamic list of all commands configured in your `.orobox.yaml`.
+
+### 13. Extending the environment (`extend`)
+Writes the files that customize the stack, with the required headers and commented examples, so you do not have to remember the file names or the syntax.
+```bash
+orobox extend image             # docker/Dockerfile + image.dockerfile in .orobox.yaml
+orobox extend compose           # .orobox.compose.yaml
+orobox extend compose --local   # .orobox.compose.local.yaml, added to .gitignore
+orobox extend add               # list the recipes
+orobox extend add varnish sftp  # add ready-made services
+```
+
+| Command | Effect |
+| --- | --- |
+| `extend image` | Creates `docker/Dockerfile` with the `ARG OROBOX_BASE_IMAGE` / `FROM ${OROBOX_BASE_IMAGE}` header and commented examples, and sets `image.dockerfile` in `.orobox.yaml`. Needs an existing `.orobox.yaml` (run [`orobox init`](#2-initialization-init) first). |
+| `extend compose` | Creates `.orobox.compose.yaml` with commented examples: a new service with the `dev.orobox.url` label, an environment variable on a core service, an extra mount, and `!override` on `ports`. |
+| `extend compose --local` | Creates `.orobox.compose.local.yaml` for one developer's own tweaks, and appends `/.orobox.compose.local.yaml` to `.gitignore` when that file exists and does not list it yet. |
+| `extend add` | Lists the available recipes, one `name — description` line each. |
+| `extend add <recipe>...` | Adds each recipe in order, see [Recipes](#recipes) below. `--force` replaces the recipe's services when `.orobox.compose.yaml` already defines them. |
+
+What the files do is described in [Custom Dockerfile](configuration.md#custom-dockerfile-imagedockerfile) and [Extending the stack](configuration.md#extending-the-stack-orobox-composeyaml).
+
+Rules shared by every `extend` subcommand:
+- **Nothing is overwritten.** A file that already exists is left alone and reported as `skipped`.
+- **`.orobox.yaml` keeps its comments.** The file is rewritten in place, so comments stay, but formatting is normalized: blank lines are dropped and indentation and the spacing before inline comments are tidied. Review the diff before committing. If the config already names a Dockerfile (`image.dockerfile`, or the deprecated top-level `dockerfile`), that path is used instead of `docker/Dockerfile` and the config is left as it is; a missing file is created at the configured path.
+- **One line per file**, `<action> <path>` with the path relative to the project and the action `created`, `updated` or `skipped`:
+  ```
+  created docker/Dockerfile
+  updated .orobox.yaml
+  ```
+  With `--agent` these lines are all that is printed.
+
+#### Recipes
+A recipe is a ready-made service with everything it needs. `orobox extend add <recipe>` merges it into the project:
+
+- its services (and volumes) into `.orobox.compose.yaml`, created when missing. A service the file already defines is refused, naming it; `--force` replaces that service and leaves every other one alone;
+- its settings into `.orobox.yaml`: list items are appended without duplicates, other keys are only set when the project does not have them. The config must be valid first, since `extend` runs without the usual config check;
+- its variables into the `.env` next to `.orobox.yaml` (created when missing), only the keys that file does not define. They reach the stack through the [env merge](configuration.md#overriding-the-generated-env-files);
+- its files into `docker/<recipe>/`, never overwriting one.
+
+A project value always wins over a recipe value. If any part of a recipe is refused, nothing of that recipe is written. With several recipes (`extend add a b`) they are applied in order, and the ones before a refused recipe stay applied; the ones after it are not attempted. Images are pinned, so a recipe added today runs the same image in a year. After the receipts, each recipe prints what is left to do.
+
+| Recipe | What it adds | Notes printed |
+| --- | --- | --- |
+| `varnish` | A `varnish` service in front of `web` on http://localhost:6081 (`dev.orobox.url` label), with its VCL in `docker/varnish/default.vcl` | How to point Oro's HTTP cache invalidation (FOSHttpCacheBundle) at Varnish |
+| `selenium` | `selenium/standalone-chrome` with noVNC on http://localhost:7900 (`dev.orobox.url` label) | The `BEHAT_PARAMS` / Mink settings that point Behat at it. The image's headless Chromium stays the default; this recipe is for watching a run |
+| `sftp` | `atmoz/sftp` on port 2222 with an `orobox` user and a `docker/sftp/upload` bind mount | Host, port and credentials for an integration's SFTP settings |
+| `blackfire` | A `blackfire` agent service, `image.php_extensions: [blackfire]`, `php_ini.blackfire.agent_socket`, empty `BLACKFIRE_SERVER_ID` / `BLACKFIRE_SERVER_TOKEN` in `.env` | Where to set the credentials |
+
+Recipes publish fixed host ports (varnish 6081, selenium 7900, sftp 2222), so two projects running the same recipe at the same time collide on them. Change the port in `.orobox.compose.local.yaml` with `ports: !override [...]` for the service, for example `ports: !override ["6082:6081"]`.
+
+A recipe that sets `php_ini` keys is refused when `php_ini` in `.orobox.yaml` is the path of an ini file: Orobox does not edit that file, so the error lists the lines to add to it by hand.

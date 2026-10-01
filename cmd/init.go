@@ -512,5 +512,9 @@ func validateConfig() bool {
 		utils.PrintError(fmt.Sprintf("Validation error: %v", err))
 		return false
 	}
+	if err := c.ValidateFiles(filepath.Dir(configPath)); err != nil {
+		utils.PrintError(fmt.Sprintf("Validation error: %v", err))
+		return false
+	}
 	return true
 }

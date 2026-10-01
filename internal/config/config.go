@@ -4,9 +4,11 @@ package config
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -80,6 +82,35 @@ type ComposerConfig struct {
 	// "explicitly false" must mean different things, and so an unset value is never written
 	// into a generated config file.
 	SSHAgent *bool `yaml:"ssh_agent,omitempty" mapstructure:"ssh_agent"`
+}
+
+// ImageConfig describes what a project adds on top of the published Orobox image. Orobox runs a
+// published image rather than building one per project; anything set here inserts one locally
+// built layer between that image and the stack, so a project can install what it depends on
+// without owning a Dockerfile. An empty block keeps the stack on the published image with no
+// local build.
+type ImageConfig struct {
+	// Dockerfile is a project-owned Dockerfile, relative to the directory holding
+	// .orobox.yaml, that extends the published image. Its final stage must be
+	// `FROM ${OROBOX_BASE_IMAGE}` — see DockerfileBaseImageArg — so `oro_version` stays the only
+	// thing that decides which Oro image is underneath.
+	Dockerfile string `yaml:"dockerfile,omitempty" mapstructure:"dockerfile"`
+	// Apk lists Alpine packages to install; a `name=version` entry pins one.
+	Apk []string `yaml:"apk,omitempty" mapstructure:"apk"`
+	// PhpExtensions lists PHP extensions to install.
+	PhpExtensions []string `yaml:"php_extensions,omitempty" mapstructure:"php_extensions"`
+	// Npm lists global npm packages to install.
+	Npm []string `yaml:"npm,omitempty" mapstructure:"npm"`
+	// Run lists shell commands executed in order while building the layer. Unlike the lists
+	// above they are free-form: a command is the whole point of the key, so only emptiness is
+	// checked.
+	Run []string `yaml:"run,omitempty" mapstructure:"run"`
+}
+
+// IsEmpty reports whether the block asks for no local layer at all.
+func (i ImageConfig) IsEmpty() bool {
+	return strings.TrimSpace(i.Dockerfile) == "" &&
+		len(i.Apk) == 0 && len(i.PhpExtensions) == 0 && len(i.Npm) == 0 && len(i.Run) == 0
 }
 
 // OroVersions defines the versions of components for a specific OroCommerce version.
@@ -189,14 +220,24 @@ type OroConfig struct {
 	Test       TestConfig      `yaml:"test" mapstructure:"test"`
 	Commands   []CommandConfig `yaml:"commands" mapstructure:"commands"`
 	Composer   ComposerConfig  `yaml:"composer" mapstructure:"composer"`
-	// Dockerfile is a project-owned Dockerfile, relative to the directory holding
-	// .orobox.yaml, that extends the published image. Orobox runs a published image rather
-	// than building one per project; naming a Dockerfile here inserts one locally built layer
-	// between that image and the stack, so a project can install whatever it depends on. Its
-	// final stage must be `FROM ${OROBOX_BASE_IMAGE}` — see DockerfileBaseImageArg — so
-	// `oro_version` stays the only thing that decides which Oro image is underneath. Unset
-	// keeps the stack on the published image with no local build.
+	// Dockerfile is the original, top-level spelling of image.dockerfile.
+	//
+	// Deprecated: use Image.Dockerfile. The key is still read so existing configs keep working
+	// (ImageSettings and GetImageConfig fold it in), and SaveConfig moves it under `image:` on
+	// the next rewrite.
 	Dockerfile string `yaml:"dockerfile,omitempty" mapstructure:"dockerfile"`
+	// Image is a pointer so a project without customization keeps a clean config file: a struct
+	// value would always be serialized, empty lists and all.
+	Image *ImageConfig `yaml:"image,omitempty" mapstructure:"image"`
+	// PhpIni is either a flat map of php.ini directives or the project-relative path of an ini
+	// file, so it is an any. It is not part of Image because it is not baked into the image: it
+	// is bind-mounted, and a change needs a container recreate rather than a build. Read it
+	// through PhpIniSettings or GetPhpIni, never viper.Get — see GetPhpIni for why.
+	PhpIni any `yaml:"php_ini,omitempty" mapstructure:"php_ini"`
+	// Ports overrides the host port the stack publishes for a service; 0 means "do not publish".
+	// Keys are listed in DefaultPorts, and Validate rejects any other. Read it through GetPorts,
+	// which fills in the defaults.
+	Ports map[string]int `yaml:"ports,omitempty" mapstructure:"ports"`
 	// Deploy is a pointer so a project without deployment keeps a clean config file: a struct
 	// value would always be serialized, empty stages and all.
 	Deploy *DeployConfig `yaml:"deploy,omitempty" mapstructure:"deploy"`
@@ -248,15 +289,128 @@ func (c *OroConfig) Validate() error {
 			return errors.New("config error: 'host' is required for domain at index " + string(rune(i)))
 		}
 	}
-	if raw := strings.TrimSpace(c.Dockerfile); raw != "" {
-		if filepath.IsAbs(raw) {
-			return errors.New("config error: 'dockerfile' must be relative to the directory holding .orobox.yaml, got " + strconv.Quote(raw))
-		}
-		if rel := normalizeDockerfilePath(raw); rel == "" || strings.HasPrefix(rel, "..") {
-			return errors.New("config error: 'dockerfile' must point inside the project, got " + strconv.Quote(raw))
-		}
+	if err := c.validateImage(); err != nil {
+		return err
+	}
+	if err := validatePhpIni(c.PhpIni); err != nil {
+		return err
+	}
+	if err := validatePorts(c.Ports); err != nil {
+		return err
 	}
 	return c.ValidateDeploy()
+}
+
+// imageEntryPattern is the alphabet allowed in apk, php_extensions and npm entries: enough for
+// scoped npm packages (@scope/name), version pins (name=1.2-r0, name@1.2) and tags, with no
+// whitespace or shell metacharacters. These entries are spliced into a generated Dockerfile
+// line, so an entry that is not a plain token could smuggle in a second command.
+var imageEntryPattern = regexp.MustCompile(`^[A-Za-z0-9@._+:/=~-]+$`)
+
+// validateImage checks the image block and the deprecated top-level dockerfile key. Every
+// message names the offending key, because a config with several lists would otherwise leave the
+// user hunting for which entry was rejected.
+func (c *OroConfig) validateImage() error {
+	if strings.TrimSpace(c.Dockerfile) != "" && c.Image != nil && strings.TrimSpace(c.Image.Dockerfile) != "" {
+		return errors.New("config error: 'dockerfile' and 'image.dockerfile' are both set; remove the deprecated 'dockerfile' key and keep 'image.dockerfile'")
+	}
+	if err := validateProjectPathKey("dockerfile", c.Dockerfile); err != nil {
+		return err
+	}
+	if c.Image == nil {
+		return nil
+	}
+	if err := validateProjectPathKey("image.dockerfile", c.Image.Dockerfile); err != nil {
+		return err
+	}
+	lists := []struct {
+		key     string
+		entries []string
+	}{
+		{"image.apk", c.Image.Apk},
+		{"image.php_extensions", c.Image.PhpExtensions},
+		{"image.npm", c.Image.Npm},
+	}
+	for _, list := range lists {
+		for i, entry := range list.entries {
+			if !imageEntryPattern.MatchString(entry) {
+				return fmt.Errorf("config error: '%s' entry %d (%s) must be non-empty and contain only letters, digits and @ . _ + : / = ~ -", list.key, i, strconv.Quote(entry))
+			}
+		}
+	}
+	for i, entry := range c.Image.Run {
+		if strings.TrimSpace(entry) == "" {
+			return fmt.Errorf("config error: 'image.run' entry %d must not be empty", i)
+		}
+		// Each entry is spliced after "RUN " on one Dockerfile line. A line break would let the
+		// following text become an instruction of its own (a `FROM` would even start a new final
+		// stage, bypassing the base-image check), and a trailing backslash would continue the
+		// line into whatever instruction comes next.
+		if strings.ContainsAny(entry, "\r\n") || strings.HasSuffix(strings.TrimRight(entry, " \t"), `\`) {
+			return fmt.Errorf("config error: 'image.run' entry %d (%s) must be a single line without a trailing backslash; join commands with && or move the script into 'image.dockerfile'", i, strconv.Quote(entry))
+		}
+	}
+	return nil
+}
+
+// validateProjectPathKey applies the path rules to a config key that names a file of the
+// project: either spelling of the Dockerfile key, or the file form of php_ini. The path is
+// joined onto the project directory (and for a Dockerfile its parent becomes a Docker build
+// context), so one that escapes the project has to be refused while the config is being read.
+func validateProjectPathKey(key, value string) error {
+	raw := strings.TrimSpace(value)
+	if raw == "" {
+		return nil
+	}
+	if filepath.IsAbs(raw) {
+		return fmt.Errorf("config error: '%s' must be relative to the directory holding .orobox.yaml, got %s", key, strconv.Quote(raw))
+	}
+	if rel := normalizeDockerfilePath(raw); rel == "" || strings.HasPrefix(rel, "..") {
+		return fmt.Errorf("config error: '%s' must point inside the project, got %s", key, strconv.Quote(raw))
+	}
+	return nil
+}
+
+// ImageSettings returns the image block with the deprecated top-level dockerfile folded in, so
+// callers read one place whichever spelling the project used. The explicit image.dockerfile wins;
+// Validate rejects a config that sets both, so the precedence only matters for unvalidated input.
+func (c *OroConfig) ImageSettings() ImageConfig {
+	var img ImageConfig
+	if c.Image != nil {
+		img = *c.Image
+	}
+	if strings.TrimSpace(img.Dockerfile) == "" {
+		img.Dockerfile = c.Dockerfile
+	}
+	// Normalized like GetImageConfig does for the dev stack, so the deploy pipeline and the local
+	// build resolve the same file whatever spelling the YAML used.
+	img.Dockerfile = normalizeDockerfilePath(img.Dockerfile)
+	return img
+}
+
+// GetImageConfig is the viper-backed equivalent of ImageSettings, for commands that read the
+// loaded .orobox.yaml rather than holding an OroConfig. The Dockerfile path is returned
+// normalized, as GetDockerfile always did.
+func GetImageConfig() ImageConfig {
+	var img ImageConfig
+	_ = viper.UnmarshalKey("image", &img)
+	if strings.TrimSpace(img.Dockerfile) == "" {
+		img.Dockerfile = viper.GetString("dockerfile")
+	}
+	img.Dockerfile = normalizeDockerfilePath(img.Dockerfile)
+	return img
+}
+
+// DeprecatedDockerfileKeyUsed reports whether the project still uses the top-level `dockerfile`
+// key, so the root command can tell the user to move it under `image:`.
+func DeprecatedDockerfileKeyUsed() bool {
+	return strings.TrimSpace(viper.GetString("dockerfile")) != ""
+}
+
+// HasCustomLayer reports whether the project asks for a locally built image layer, by any of
+// the image keys or the deprecated top-level dockerfile.
+func HasCustomLayer() bool {
+	return !GetImageConfig().IsEmpty()
 }
 
 // DockerfileBaseImageArg is the build argument Orobox sets to the published image a custom
@@ -279,7 +433,7 @@ func normalizeDockerfilePath(raw string) string {
 // GetDockerfile returns the project-relative path of the custom Dockerfile, or "" when the
 // project runs the published image unchanged.
 func GetDockerfile() string {
-	return normalizeDockerfilePath(viper.GetString("dockerfile"))
+	return GetImageConfig().Dockerfile
 }
 
 // GetDockerfilePath returns the absolute path of the custom Dockerfile, or "" when none is
@@ -303,9 +457,51 @@ func ParseConfig(data []byte) (*OroConfig, error) {
 	return &c, nil
 }
 
+// LoadConfigFile parses the .orobox.yaml viper loaded, straight from disk.
+//
+// Commands that rewrite the config file must start from this and not from viper.Unmarshal:
+// viper splits keys on "." and lowercases them, so a round trip through it would turn the
+// php_ini directive `xdebug.log_level` into a nested map and `Memory_Limit` into `memory_limit`,
+// and the file written back would no longer load. Read-only callers can keep using viper.
+func LoadConfigFile() (*OroConfig, error) {
+	configFile := viper.ConfigFileUsed()
+	if configFile == "" {
+		return nil, errors.New("no .orobox.yaml is in use; run this command from a project directory")
+	}
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", configFile, err)
+	}
+	conf, err := ParseConfig(data)
+	if err != nil {
+		return nil, fmt.Errorf("invalid config file %s:\n%w", configFile, err)
+	}
+	return conf, nil
+}
+
 // SaveConfig saves the configuration to the specified path.
+//
+// The deprecated top-level dockerfile is written under `image:` instead, so a rewrite (such as
+// `orobox deploy-init`) migrates the config rather than carrying the old key forward. The
+// migration happens on a copy: the caller's config is left as it was.
 func SaveConfig(path string, c *OroConfig) error {
-	data, err := yamlv3.Marshal(c)
+	out := *c
+	if strings.TrimSpace(out.Dockerfile) != "" {
+		var img ImageConfig
+		if out.Image != nil {
+			img = *out.Image
+		}
+		if strings.TrimSpace(img.Dockerfile) == "" {
+			img.Dockerfile = out.Dockerfile
+		}
+		out.Image = &img
+		out.Dockerfile = ""
+	}
+	// A non-nil but empty block would serialize as `image: {}`; omit it like an absent one.
+	if out.Image != nil && out.Image.IsEmpty() {
+		out.Image = nil
+	}
+	data, err := yamlv3.Marshal(&out)
 	if err != nil {
 		return err
 	}

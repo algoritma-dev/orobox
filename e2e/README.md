@@ -49,6 +49,15 @@ Design spec: [`docs/superpowers/specs/2026-08-24-e2e-test-suite-design.md`](../d
   matches nothing, so the report's counts are what separate a real pass from an
   empty run.
 
+- **Stack customization:** `TestE2ECustomization` provisions one project (latest supported
+  version only) from `fixtures/customization.orobox.yaml`, with
+  `fixtures/customization.compose.yaml` copied next to it as `.orobox.compose.yaml`. After
+  `init` and `up` it reads each customization back from the running stack: `image.php_extensions`
+  (`php -m` lists `redis`), `image.apk` (`pdftotext` exists), `php_ini` (`memory_limit` is `3G`),
+  `ports.db` (TCP 5440 accepts connections) and the override (`whoami` is running, answers on
+  8099 and is listed by `up`). It does not need its own `/etc/hosts` entry: it reuses the
+  project case's host.
+
 ### Grading
 
 - **Hard gate** (failure fails the case): `init`, `up` (must serve HTTP 200 on

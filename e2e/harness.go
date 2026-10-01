@@ -119,6 +119,24 @@ func seedCheckout(t *testing.T, c Case, dir string) {
 // and registers teardown.
 func NewBox(t *testing.T, c Case) *Box {
 	t.Helper()
+	return newBox(t, c, fixtureFor(c), nil)
+}
+
+// NewCustomizationBox is NewBox for the stack-customization case: the configuration and the
+// compose override come from the customization fixtures instead of the install type's own.
+func NewCustomizationBox(t *testing.T, c Case) *Box {
+	t.Helper()
+	return newBox(t, c, customizationConfigFixture, map[string]string{
+		// The override is found by name next to .orobox.yaml (there is no config key for it),
+		// so the fixture is copied under that name rather than referenced.
+		customizationOverrideName: customizationOverrideFixture,
+	})
+}
+
+// newBox builds the case directory. fixture is the .orobox.yaml template; extraFiles maps a
+// file name in the workdir to the fixture copied there verbatim (no template rendering).
+func newBox(t *testing.T, c Case, fixture string, extraFiles map[string]string) *Box {
+	t.Helper()
 	// Orobox derives the docker compose project name from filepath.Base(cwd)
 	// (config.GetProjectName). t.TempDir() basenames are just "001", "002", ... which
 	// collide across cases and never match our ProjectName()-based cleanup. Nest a
@@ -131,7 +149,7 @@ func NewBox(t *testing.T, c Case) *Box {
 
 	seedCheckout(t, c, dir)
 
-	raw, err := os.ReadFile(fixtureFor(c))
+	raw, err := os.ReadFile(fixture)
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
@@ -141,6 +159,16 @@ func NewBox(t *testing.T, c Case) *Box {
 	}
 	if err := os.WriteFile(filepath.Join(dir, ".orobox.yaml"), []byte(rendered), 0o644); err != nil {
 		t.Fatalf("write .orobox.yaml: %v", err)
+	}
+
+	for name, source := range extraFiles {
+		content, err := os.ReadFile(source)
+		if err != nil {
+			t.Fatalf("read fixture %s: %v", source, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), content, 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
 	}
 
 	b := &Box{t: t, c: c, dir: dir, bin: binaryPath(t)}

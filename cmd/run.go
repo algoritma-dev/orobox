@@ -128,6 +128,9 @@ func executeCommand(service, customCommand string, isTest bool, silent bool) err
 		return fmt.Errorf("docker compose not found: %v", err)
 	}
 
+	if err := docker.OverrideError(); err != nil {
+		return err
+	}
 	baseArgs := docker.GetBaseComposeArgs()
 	args := append(composeCmd, baseArgs...)
 

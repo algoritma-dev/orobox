@@ -343,3 +343,15 @@ func TestResolveBundlePlacement(t *testing.T) {
 		}
 	})
 }
+
+// The standalone bundle's .gitignore must keep the personal compose override out of the
+// repository: it holds one developer's ports and mounts, which the team file must not carry.
+func TestBundleGitignoreTemplateIgnoresLocalComposeOverride(t *testing.T) {
+	content, err := os.ReadFile(filepath.FromSlash("../../templates/bundle/gitignore.tmpl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), "/.orobox.compose.local.yaml\n") {
+		t.Errorf("gitignore.tmpl should ignore /.orobox.compose.local.yaml, got:\n%s", content)
+	}
+}

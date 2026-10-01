@@ -1,6 +1,9 @@
 package docker
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // dockerfileData is the minimal data set the Dockerfile template dereferences.
 func dockerfileData(installType string) map[string]any {
@@ -67,6 +70,32 @@ func TestDockerfileSymfonyRecommendedValues(t *testing.T) {
 			// Preloading needs a config/preload.php that the Oro application skeleton does
 			// not ship, so the directive must stay out of the image.
 			mustNotContain(t, out, "opcache.preload")
+		})
+	}
+}
+
+// Later stack-customization layers run `RUN install-php-extensions <ext>` FROM this
+// image, so the installer must be in the final stage (not only the builder, which is
+// discarded) for every PHP line, and fetched from a pinned release rather than
+// `latest` so a rebuilt image never changes behaviour underneath an unchanged template.
+func TestDockerfileShipsExtensionInstaller(t *testing.T) {
+	const path = "../../templates/docker/Dockerfile"
+
+	for _, phpVersion := range []string{"8.2", "8.3", "8.4", "8.5"} {
+		t.Run(phpVersion, func(t *testing.T) {
+			data := dockerfileData("bundle")
+			data["PHPVersion"] = phpVersion
+			out := renderRealTemplate(t, path, data)
+
+			mustContain(t, out, "ARG INSTALL_PHP_EXTENSIONS_VERSION=")
+			mustContain(t, out, "releases/download/${INSTALL_PHP_EXTENSIONS_VERSION}/install-php-extensions")
+			mustNotContain(t, out, "releases/latest/download/install-php-extensions")
+
+			// Present in the final stage, i.e. after the last FROM.
+			final := out[strings.LastIndex(out, "\nFROM "):]
+			mustContain(t, final, "/usr/local/bin/install-php-extensions")
+			// A global ARG is invisible inside a stage until re-declared there.
+			mustContain(t, final, "ARG INSTALL_PHP_EXTENSIONS_VERSION\n")
 		})
 	}
 }

@@ -1,0 +1,29 @@
+description: Varnish HTTP cache in front of the web service
+compose:
+  services:
+    varnish:
+      image: varnish:9.1.0
+      depends_on:
+        - web
+      environment:
+        VARNISH_SIZE: 256M
+      # Where varnishd keeps its compiled VCL; the image's documentation mounts it as tmpfs.
+      tmpfs:
+        - /var/lib/varnish/varnishd:exec
+      ports:
+        - "6081:80"
+      volumes:
+        - ./docker/varnish/default.vcl:/etc/varnish/default.vcl:ro
+      labels:
+        dev.orobox.url: http://localhost:6081
+notes: |
+  Browse through Varnish at http://localhost:6081; the web service on its own port bypasses it.
+  The VCL is docker/varnish/default.vcl. To let Oro invalidate the cache, configure
+  FOSHttpCacheBundle in config/config.yml:
+    fos_http_cache:
+      proxy_client:
+        varnish:
+          http:
+            servers: ['varnish:80']
+            base_url: 'localhost:6081'
+  The VCL accepts PURGE and BAN only from private network addresses, which covers the stack.

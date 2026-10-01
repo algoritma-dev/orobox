@@ -4,6 +4,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/output"
@@ -38,10 +39,24 @@ var rootCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
+		warnDeprecatedConfig()
+
 		// Started here rather than in Execute because agent mode is only known once the flags are
 		// parsed, and a check that ignored it would print into a machine-readable stream.
 		startUpdateCheck(cmd.Name())
 	},
+}
+
+// warnDeprecatedConfig tells the user to move the old top-level `dockerfile` key under `image:`.
+//
+// It runs here and not in initConfig for two reasons: only a config that passed Validate should
+// be commented on, and agent mode is only known once PersistentPreRun has set it — utils.PrintWarning
+// drops the message in agent mode, which keeps the machine-readable stdout clean.
+func warnDeprecatedConfig() {
+	if ConfigError != nil || !config.DeprecatedDockerfileKeyUsed() {
+		return
+	}
+	utils.PrintWarning("The top-level 'dockerfile' key is deprecated: move it under 'image:' as 'image.dockerfile'.")
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -78,11 +93,17 @@ var ConfigError error
 // These commands either create the config/source tree or manage the binary itself.
 func isConfigExempt(cmd *cobra.Command) bool {
 	switch cmd.Name() {
-	case "init", "self-update", "internal-gen-docker", "create":
+	case "init", "self-update", "internal-gen-docker", "create", "extend":
 		return true
 	}
 	// create's subcommands (project, bundle) run before any config exists.
 	if cmd.Parent() != nil && cmd.Parent().Name() == "create" {
+		return true
+	}
+	// extend scaffolds files, and one of the things it fixes is a config that points at a Dockerfile
+	// that does not exist yet: validating the config first would refuse to create the very file
+	// the validation is asking for.
+	if cmd.Parent() != nil && cmd.Parent().Name() == "extend" {
 		return true
 	}
 	return false
@@ -108,6 +129,10 @@ func initConfig() {
 			if err != nil {
 				ConfigError = fmt.Errorf("invalid config file %s:\n%v", configFile, err)
 			} else if err := c.Validate(); err != nil {
+				ConfigError = fmt.Errorf("invalid config file %s:\n%v", configFile, err)
+			} else if err := c.ValidateFiles(filepath.Dir(configFile)); err != nil {
+				// Validate cannot see the disk, so the files the config points at are
+				// checked here, against the directory holding the config.
 				ConfigError = fmt.Errorf("invalid config file %s:\n%v", configFile, err)
 			}
 		}

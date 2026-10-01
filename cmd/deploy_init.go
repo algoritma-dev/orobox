@@ -15,7 +15,6 @@ import (
 	"github.com/algoritma-dev/orobox/internal/utils"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 var deployInitCmd = &cobra.Command{
@@ -27,8 +26,10 @@ deploy stages, writes them into .orobox.yaml and generates deploy.php plus the O
 deploy.php is created only once and is yours afterwards; the recipe in
 vendor-bin/deploy/orobox/oro.php is rewritten on every run so recipe fixes reach the project.`,
 	Run: func(_ *cobra.Command, _ []string) {
-		var conf config.OroConfig
-		if err := viper.Unmarshal(&conf); err != nil {
+		// Read the file itself: this command rewrites .orobox.yaml, and a viper round trip would
+		// mangle php_ini directive names on the way (see config.LoadConfigFile).
+		conf, err := config.LoadConfigFile()
+		if err != nil {
 			utils.PrintError(fmt.Sprintf("Error reading config: %v", err))
 			os.Exit(1)
 		}
@@ -39,7 +40,7 @@ vendor-bin/deploy/orobox/oro.php is rewritten on every run so recipe fixes reach
 			os.Exit(1)
 		}
 
-		runDeployInitCommand(&conf)
+		runDeployInitCommand(conf)
 	},
 }
 

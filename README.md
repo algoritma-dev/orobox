@@ -142,6 +142,7 @@ export ORO_NO_UPDATE_CHECK=1
 | `qa-init` / `qa` | Install and run the QA toolchain | [qa.md](docs/qa.md) |
 | `clean` | Remove all containers and volumes | [commands.md](docs/commands.md#11-total-cleanup-clean) |
 | `run` | Run a custom command from `.orobox.yaml` | [commands.md](docs/commands.md#12-run-custom-commands-run) |
+| `extend` | Scaffold a project Dockerfile or a compose override | [commands.md](docs/commands.md#13-extending-the-environment-extend) |
 | `deploy-init` / `ci-init` / `deploy` | Configure and run the build/check/release pipeline | [deployment.md](docs/deployment.md) |
 | `xdebug` | Hot-patch Xdebug in running containers | [debugging.md](docs/debugging.md) |
 

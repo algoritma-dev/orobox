@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/algoritma-dev/orobox/internal/certificates"
+	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
 	"github.com/algoritma-dev/orobox/internal/utils"
 	"github.com/spf13/viper"
@@ -34,7 +35,13 @@ var upCmd = &cobra.Command{
 			}
 		}
 
-		if err := docker.RunComposeCommandSilently("Starting containers...", "up", "-d"); err != nil {
+		// Compose builds a `build:` service only when its image is missing; --build makes an
+		// edited Dockerfile in the override take effect on the next `orobox up`.
+		upArgs := []string{"up", "-d"}
+		if docker.OverrideAnalysis().HasBuild {
+			upArgs = append(upArgs, "--build")
+		}
+		if err := docker.RunComposeCommandSilently("Starting containers...", upArgs...); err != nil {
 			utils.PrintError(fmt.Sprintf("Startup failed: %v", err))
 			return err
 		}
@@ -67,52 +74,80 @@ var upCmd = &cobra.Command{
 
 		if viper.GetBool("services.mailpit") {
 			utils.PrintTitle("Mailpit is available at:")
-			utils.PrintPlain("  - http://localhost:8025")
+			printLocalURL("", "mail_ui", "")
 			utils.PrintPlainf("  - Set in your .env:\n")
 			utils.PrintPlainf("	- ORO_MAILER_DSN=smtp://mail:1025\n")
 		}
 
 		if viper.GetBool("services.adminer") {
-			utils.PrintTitle("Adminer is available at:")
-			utils.PrintPlain("  - http://localhost:8081")
 			dbUser, dbPass, dbName, _ := docker.GetDatabaseCredentials()
-			utils.PrintPlainf("  - Credentials: %s / %s (Database: %s)\n", dbUser, dbPass, dbName)
 
-			utils.PrintTitle("External Database Connection (e.g. PhpStorm):")
-			utils.PrintPlain("  - Host: localhost")
-			utils.PrintPlain("  - Port: 5432")
-			utils.PrintPlainf("  - User: %s\n", dbUser)
-			utils.PrintPlainf("  - Password: %s\n", dbPass)
-			utils.PrintPlainf("  - Database: %s\n", dbName)
+			// With Adminer unpublished the block would be a header and credentials for a UI
+			// that cannot be opened, so the whole block goes.
+			if adminerPort := config.GetPort("adminer"); adminerPort != 0 {
+				utils.PrintTitle("Adminer is available at:")
+				printLocalURL("", "adminer", "")
+				utils.PrintPlainf("  - Credentials: %s / %s (Database: %s)\n", dbUser, dbPass, dbName)
+			}
+
+			// With the database port unpublished there is nothing to connect to from the host.
+			if dbPort := config.GetPort("db"); dbPort != 0 {
+				utils.PrintTitle("External Database Connection (e.g. PhpStorm):")
+				utils.PrintPlain("  - Host: localhost")
+				utils.PrintPlainf("  - Port: %d\n", dbPort)
+				utils.PrintPlainf("  - User: %s\n", dbUser)
+				utils.PrintPlainf("  - Password: %s\n", dbPass)
+				utils.PrintPlainf("  - Database: %s\n", dbName)
+			}
 		}
 
 		if viper.GetBool("services.redis") {
 			utils.PrintTitle("Redis is available at:")
-			utils.PrintPlainf("  - RedisInsight UI: http://localhost:8001\n")
+			printLocalURL("RedisInsight UI: ", "redisinsight", "")
 			utils.PrintPlainf("  - Set in your .env:\n")
 			utils.PrintPlainf("	- ORO_REDIS_URL=redis://redis:6379\n")
 		}
 
 		if viper.GetBool("services.rabbitmq") {
 			utils.PrintTitle("RabbitMQ is available at:")
-			utils.PrintPlainf("  - Management UI: http://localhost:15672 (guest/guest)\n")
+			printLocalURL("Management UI: ", "rabbitmq_ui", " (guest/guest)")
 			utils.PrintPlainf("  - Set in your .env:\n")
 			utils.PrintPlainf("	- MESSENGER_TRANSPORT_DSN=amqp://guest:guest@rabbitmq:5672/%%2f/messages\n")
 		}
 
 		if viper.GetBool("services.elasticsearch") {
 			utils.PrintTitle("Elasticsearch is available at:")
-			utils.PrintPlainf("  - Kibana UI: http://localhost:5601\n")
+			printLocalURL("Kibana UI: ", "kibana", "")
 			utils.PrintPlainf("  - Set in your .env:\n")
 			utils.PrintPlainf("	- ORO_SEARCH_URL=http://elasticsearch:9200\n")
+		}
+
+		// Last, after the built-in blocks: these are the user's own services, advertised
+		// through the dev.orobox.url label in their compose override.
+		if projectURLs := docker.OverrideAnalysis().URLs; len(projectURLs) > 0 {
+			utils.PrintTitle("Project services:")
+			for _, u := range projectURLs {
+				utils.PrintPlainf("  - %s: %s\n", u.Service, u.URL)
+			}
 		}
 
 		return nil
 	},
 }
 
+// printLocalURL advertises a service published on the host as a "  - <label>http://localhost:<port><suffix>"
+// line. The port comes from the `ports:` config so the line matches what compose really
+// published; a port set to 0 is not published, and a URL that cannot be opened is not printed.
+func printLocalURL(label, portKey, suffix string) {
+	port := config.GetPort(portKey)
+	if port == 0 {
+		return
+	}
+	utils.PrintPlainf("  - %shttp://localhost:%d%s\n", label, port, suffix)
+}
+
 func init() {
 	rootCmd.AddCommand(upCmd)
 	upCmd.Flags().BoolVarP(&cleanBeforeUp, "clean", "c", false, "Clean up environment before starting")
-	upCmd.Flags().BoolVar(&rebuildImage, "rebuild", false, "Rebuild the image from the project's dockerfile ignoring the Docker cache")
+	upCmd.Flags().BoolVar(&rebuildImage, "rebuild", false, "Rebuild the project's image layer (image.* keys and/or image.dockerfile) ignoring the Docker cache")
 }

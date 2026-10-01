@@ -3,8 +3,12 @@
 package e2e
 
 import (
+	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -496,4 +500,124 @@ func assertCreatedBundleIsLoaded(t *testing.T, box *Box) {
 		t.Errorf("Oro did not register the generated bundle (no %q extension alias in debug:config %s):\n%s",
 			e2eCreatedBundleAlias, e2eCreatedBundleClass, out)
 	}
+}
+
+// TestE2ECustomization proves the stack-customization features work against a real stack, not
+// only in the unit tests that look at the generated files: the local image layer is built and
+// is what the PHP services run, php_ini reaches PHP, a moved host port is published, and a
+// compose override adds a service that `up` starts and advertises.
+//
+// It takes the project install type on the latest supported Oro version only. Every feature
+// under test is independent of the Oro version (it is all compose and image plumbing), so
+// running it per version would buy four more OroCommerce installs and no extra signal. That is
+// also why it is not a sub-step of runGreenPath: folding the fixture's image layer, php_ini and
+// port into every matrix case would change what all of those cases test, and the case would
+// still need its own init for the image layer to be built.
+func TestE2ECustomization(t *testing.T) {
+	version := config.SupportedOroVersions[0]
+	if cases, err := ParseMatrix(os.Getenv("E2E_VERSIONS"), string(TypeProject)); err != nil {
+		t.Fatal(err)
+	} else if !slices.Contains(versionsOf(cases), version) {
+		t.Skipf("runs on Oro %s only, which E2E_VERSIONS leaves out", version)
+	}
+	if types := os.Getenv("E2E_TYPES"); types != "" && !slices.Contains(splitCSV(strings.ToLower(types)), string(TypeProject)) {
+		t.Skip("needs the project install type, which E2E_TYPES leaves out")
+	}
+
+	c := Case{Version: version, Type: TypeProject, Variant: "customization"}
+	box := NewCustomizationBox(t, c)
+
+	// init builds the local image layer and installs Oro with it, so a layer that does not
+	// build fails here and not only at the first `up`.
+	box.Run("init", "-t", string(c.Type), "-v", c.Version)
+
+	// up prints the project's own services last, from the dev.orobox.url label.
+	up := box.Run("up")
+	if want := customizationService + ": " + customizationWhoamiURL; !strings.Contains(up.Stdout, want) {
+		t.Errorf("up did not advertise the override service (want %q):\n%s", want, up.Stdout)
+	}
+
+	// image.php_extensions: redis is not in the published image.
+	modules := box.Run("run", "e2e-php-modules")
+	if !strings.Contains(modules.Stdout, "php-module: redis") {
+		t.Errorf("php -m does not list redis, so image.php_extensions was not applied:\n%s", modules.Stdout)
+	}
+
+	// php_ini: the value comes back through ini_get, i.e. from PHP and not from the file.
+	limit := box.Run("run", "e2e-php-memory-limit")
+	if want := "memory_limit=" + customizationMemoryLimit; !strings.Contains(limit.Stdout, want) {
+		t.Errorf("PHP did not pick up php_ini (want %q):\n%s", want, limit.Stdout)
+	}
+
+	// image.apk: the marker only exists when `which` found the binary (the && short-circuits
+	// otherwise, and box.Run fails on the exit code). The command line itself must not be what
+	// satisfies the check: on a non-TTY `orobox run` echoes "Running: <command>" and "Command
+	// '<name>' completed" to stdout, so matching the bare name "pdftotext" would pass regardless.
+	if pdf := box.Run("run", "e2e-pdftotext"); !strings.Contains(pdf.Stdout, "pdftotext-path=/") {
+		t.Errorf("pdftotext was not found, so image.apk was not applied:\n%s", pdf.Stdout)
+	}
+
+	// The compose override: the service is running (not merely created) and answers on the
+	// host port the override published.
+	assertServiceRunning(t, c.ProjectName(), customizationService)
+	box.AssertHTTP200(customizationWhoamiURL)
+
+	// ports.db: the database is reachable from the host on the moved port.
+	assertTCPOpen(t, customizationDBPort)
+}
+
+// versionsOf lists the Oro versions of a set of matrix cases.
+func versionsOf(cases []Case) []string {
+	versions := make([]string, 0, len(cases))
+	for _, c := range cases {
+		versions = append(versions, c.Version)
+	}
+	return versions
+}
+
+// serviceRunning reports whether compose project has a running container for service.
+//
+// It asks Docker by compose labels instead of running `docker compose ps`: the compose files
+// live in orobox's internal directory, and `compose ps` would need them passed with -f.
+func serviceRunning(project, service string) (bool, error) {
+	out, err := exec.Command("docker", "ps", "-q",
+		"--filter", "label=com.docker.compose.project="+project,
+		"--filter", "label=com.docker.compose.service="+service,
+		"--filter", "status=running").Output()
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(out)) != "", nil
+}
+
+// assertServiceRunning fails the test unless service is running in the compose project.
+func assertServiceRunning(t *testing.T, project, service string) {
+	t.Helper()
+	running, err := serviceRunning(project, service)
+	if err != nil {
+		t.Fatalf("docker ps for service %s: %v", service, err)
+	}
+	if !running {
+		t.Errorf("service %s of project %s is not running", service, project)
+	}
+}
+
+// assertTCPOpen fails the test unless a TCP connection to localhost:port succeeds. It retries
+// for a short while: the port is published as soon as the container starts, but the process
+// behind it may still be coming up.
+func assertTCPOpen(t *testing.T, port int) {
+	t.Helper()
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	deadline := time.Now().Add(time.Minute)
+	var last error
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
+		if err == nil {
+			_ = conn.Close()
+			return
+		}
+		last = err
+		time.Sleep(2 * time.Second)
+	}
+	t.Errorf("nothing accepts connections on %s: %v", addr, last)
 }

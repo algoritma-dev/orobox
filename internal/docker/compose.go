@@ -3,7 +3,10 @@ package docker
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/spf13/viper"
 	"io"
@@ -13,6 +16,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"text/template"
@@ -104,23 +108,29 @@ var (
 )
 
 // GetNginxPorts returns the configured HTTP and HTTPS ports for Nginx.
+//
+// Precedence, highest first: `ports.http` / `ports.https`, the older `nginx_http_port` /
+// `nginx_https_port` keys, the ORO_NGINX_HTTP(S)_PORT environment variables, then 8080 / 8443.
+// The old spellings keep working so existing configs do not break, but the `ports:` section wins
+// because it is the documented one and the only one that can say "do not publish" (0).
 func GetNginxPorts() (httpPort string, httpsPort string) {
-	httpPort = viper.GetString("nginx_http_port")
-	if httpPort == "" {
-		httpPort = os.Getenv("ORO_NGINX_HTTP_PORT")
-	}
-	if httpPort == "" {
-		httpPort = "8080"
-	}
+	return resolveNginxPort("http", "nginx_http_port", "ORO_NGINX_HTTP_PORT"),
+		resolveNginxPort("https", "nginx_https_port", "ORO_NGINX_HTTPS_PORT")
+}
 
-	httpsPort = viper.GetString("nginx_https_port")
-	if httpsPort == "" {
-		httpsPort = os.Getenv("ORO_NGINX_HTTPS_PORT")
+// resolveNginxPort applies the GetNginxPorts precedence to one of the two ports.
+func resolveNginxPort(portsKey, legacyKey, envVar string) string {
+	// IsSet rather than GetInt != 0: an explicit 0 must reach the template.
+	if viper.IsSet("ports." + portsKey) {
+		return strconv.Itoa(viper.GetInt("ports." + portsKey))
 	}
-	if httpsPort == "" {
-		httpsPort = "8443"
+	if port := viper.GetString(legacyKey); port != "" {
+		return port
 	}
-	return
+	if port := os.Getenv(envVar); port != "" {
+		return port
+	}
+	return strconv.Itoa(config.DefaultPorts[portsKey])
 }
 
 // websocketFrontendPort returns the port the browser must use to reach the websocket
@@ -255,6 +265,7 @@ func EnsureDockerCompose() bool {
 		NodeHeapMB              int
 		NginxHTTPPort           string
 		NginxHTTPSPort          string
+		Ports                   map[string]int
 		PhpFpmPort              string
 		HasSsl                  bool
 		CertsPath               string
@@ -277,7 +288,10 @@ func EnsureDockerCompose() bool {
 		SSHAgentSocket          string
 		SeedDumpPath            string
 		AppImage                string
-		CustomDockerfile        string
+		HasCustomLayer          bool
+		LayerSource             string
+		PhpIniPath              string
+		PhpIniHash              string
 	}{
 		Type:                    viper.GetString("type"),
 		InternalDir:             internalDir,
@@ -339,6 +353,9 @@ func EnsureDockerCompose() bool {
 	}
 
 	data.NginxHTTPPort, data.NginxHTTPSPort = GetNginxPorts()
+	// Every other published host port. http and https are not read from here by the web service:
+	// it goes through NginxHTTPPort / NginxHTTPSPort, which also honour the older spellings.
+	data.Ports = config.GetPorts()
 
 	data.Domains = config.GetDomains()
 	for _, domain := range data.Domains {
@@ -375,10 +392,13 @@ func EnsureDockerCompose() bool {
 	// dumped by another server simply has no file at this path and the install runs as before.
 	data.SeedDumpPath = config.SeedDumpPath(config.PostgresMajor(versions.Postgres))
 
-	// Which image the services run. A project with its own Dockerfile runs a layer built
-	// locally on top of the published tag instead of the tag itself; everything else keeps
-	// running the published image with no local build at all.
-	data.CustomDockerfile = config.GetDockerfile()
+	// Which image the services run. A project with a custom layer (its own Dockerfile and/or
+	// `image.*` keys) runs an image built locally on top of the published tag instead of the
+	// tag itself; everything else keeps running the published image with no local build at all.
+	data.HasCustomLayer = config.HasCustomLayer()
+	if data.HasCustomLayer {
+		data.LayerSource = layerSource()
+	}
 	_, data.AppImage = ProjectImageRefs()
 
 	data.RabbitMQ = viper.GetBool("services.rabbitmq")
@@ -434,7 +454,20 @@ func EnsureDockerCompose() bool {
 		data.Adminer = viper.GetBool("services.adminer")
 	}
 
+	// php_ini is bind-mounted, not baked into the image, so it is resolved before the compose
+	// files render: the mount line depends on it, and a changed ini must count as a change so
+	// the caller recreates the containers.
 	changed := false
+	phpIni, err := config.GetPhpIni()
+	if err != nil {
+		// Validate rejects a malformed key while the config loads, so what reaches here is
+		// mostly a file that does not exist. Mounting nothing beats mounting a directory.
+		warnOnce(fmt.Sprintf("Ignoring php_ini: %v", err))
+		phpIni = config.PhpIni{}
+	}
+	iniState := syncPhpIni(internalDir, data.BundlePath, phpIni)
+	data.PhpIniPath, data.PhpIniHash = iniState.Source, iniState.Hash
+	changed = iniState.Changed || changed
 	// Only write all templates if we are in project-local mode (like in CI)
 	if internalDir == ".orobox" {
 		changed = writeDockerfile(internalDir, data) || changed
@@ -448,8 +481,103 @@ func EnsureDockerCompose() bool {
 	changed = writeComposeFile(internalDir, "docker-compose.yml", data) || changed
 	changed = writeComposeFile(internalDir, "docker-compose.setup.yml", data) || changed
 	changed = writeComposeFile(internalDir, "docker-compose.test.yml", data) || changed
+	// The error is not handled here: it is held for the runners (see OverrideError), so a
+	// command that never runs compose, `orobox config` for one, still works.
+	overridesChanged, _ := writeComposeOverrides(internalDir, data.BundlePath)
+	changed = overridesChanged || changed
 
 	return changed
+}
+
+// phpIniFileName is both the generated file in the internal directory and its name inside the
+// container. The `zz-` prefix makes PHP scan it after oro-custom.ini, so project values win.
+const phpIniFileName = "zz-project.ini"
+
+// phpIniMountSource returns the host path to bind-mount over conf.d/zz-project.ini, or "" when
+// the project sets no php_ini. The map form mounts the file orobox generates in the internal
+// directory; the file form mounts the project's own file. Both are absolute, because compose
+// resolves a relative bind source against the internal directory, not the project.
+func phpIniMountSource(ini config.PhpIni, internalDir, projectDir string) (string, error) {
+	var source string
+	switch {
+	case ini.File != "":
+		source = filepath.Join(projectDir, filepath.FromSlash(ini.File))
+	case len(ini.Values) > 0:
+		source = filepath.Join(internalDir, phpIniFileName)
+	default:
+		return "", nil
+	}
+	return filepath.Abs(source)
+}
+
+// phpIniState is what syncPhpIni leaves behind for the compose templates.
+type phpIniState struct {
+	// Source is the host path to bind-mount, "" when there is nothing to mount.
+	Source string
+	// Hash identifies the content of the mounted ini (see phpIniHash).
+	Hash string
+	// Changed reports whether the generated file was written or removed.
+	Changed bool
+}
+
+// phpIniHash is the first 16 hex characters of the SHA-256 of the mounted ini. Compose decides
+// whether a container is stale from its configuration, and a bind mount's source path is part
+// of that configuration but its content is not: editing the ini under an unchanged path would
+// make `up -d` recreate nothing and PHP would keep the old values. The hash goes into a label
+// on every PHP service, so a changed ini becomes a changed configuration.
+func phpIniHash(content []byte) string {
+	sum := sha256.Sum256(content)
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+// syncPhpIni makes the internal directory match the php_ini setting and describes the mount for
+// the compose templates. The generated file is written when the map form is used and removed
+// otherwise, so dropping the key (or switching to the file form) does not leave a stale file
+// behind. A problem with the setting is a warning and no mount: Validate rejects bad configs
+// while they load, so this is a last line of defence, not the primary check.
+func syncPhpIni(internalDir, projectDir string, ini config.PhpIni) phpIniState {
+	generated := filepath.Join(internalDir, phpIniFileName)
+
+	// dropped is the "mount nothing" outcome; removing a leftover generated file still counts
+	// as a change, because the compose files lose the mount at the same time.
+	dropped := func() phpIniState {
+		return phpIniState{Changed: os.Remove(generated) == nil}
+	}
+
+	source, err := phpIniMountSource(ini, internalDir, projectDir)
+	if err != nil {
+		warnOnce(fmt.Sprintf("Ignoring php_ini: %v", err))
+		return dropped()
+	}
+	if source == "" {
+		return dropped()
+	}
+
+	if ini.File != "" {
+		// The project's own file is mounted as-is; hashing its bytes means an edit to it is
+		// picked up too. Nothing is generated, so a leftover generated file goes away.
+		content, err := os.ReadFile(source)
+		if err != nil {
+			warnOnce(fmt.Sprintf("Ignoring php_ini: %v", err))
+			return dropped()
+		}
+		return phpIniState{Source: source, Hash: phpIniHash(content), Changed: os.Remove(generated) == nil}
+	}
+
+	content, err := RenderPhpIni(ini.Values)
+	if err != nil {
+		warnOnce(fmt.Sprintf("Ignoring php_ini: %v", err))
+		return dropped()
+	}
+	state := phpIniState{Source: source, Hash: phpIniHash([]byte(content))}
+	if old, err := os.ReadFile(generated); err == nil && string(old) == content {
+		return state
+	}
+	if err := os.WriteFile(generated, []byte(content), 0644); err != nil {
+		panic(err)
+	}
+	state.Changed = true
+	return state
 }
 
 func writeComposeFile(internalDir string, filename string, data any) bool {
@@ -507,13 +635,17 @@ func GetBaseComposeArgs() []string {
 		}
 	}
 
-	return args
+	return appendOverrideArgs(args, internalDir)
 }
 
 // RunComposeCommandSilently runs docker compose with the provided arguments
 // and captures its output, showing it only if an error occurs.
 // It shows a loader while running.
 var RunComposeCommandSilently = func(message string, args ...string) error {
+	if err := OverrideError(); err != nil {
+		return err
+	}
+
 	if composeNeedsAppImage(args) {
 		if err := EnsureCustomImage(); err != nil {
 			return err
@@ -590,6 +722,10 @@ var RunComposeCommandSilently = func(message string, args ...string) error {
 // RunSetupComposeCommandSilently is like RunComposeCommandSilently but enables
 // the "setup" profile so that services marked with profiles: [setup] are accessible.
 var RunSetupComposeCommandSilently = func(message string, args ...string) error {
+	if err := OverrideError(); err != nil {
+		return err
+	}
+
 	if composeNeedsAppImage(args) {
 		if err := EnsureCustomImage(); err != nil {
 			return err
@@ -659,6 +795,10 @@ var RunSetupComposeCommandSilently = func(message string, args ...string) error 
 // RunComposeCommand runs docker compose with the provided arguments
 // and connects to system stdout/stderr.
 var RunComposeCommand = func(message string, args ...string) error {
+	if err := OverrideError(); err != nil {
+		return err
+	}
+
 	if composeNeedsAppImage(args) {
 		if err := EnsureCustomImage(); err != nil {
 			return err
@@ -817,6 +957,9 @@ func PullAllLocalOrobotImages() (bool, error) {
 // PullProjectImages gets all images used by the current project and pulls updates for them.
 // It returns true if any image was updated.
 func PullProjectImages() (bool, error) {
+	if err := OverrideError(); err != nil {
+		return false, err
+	}
 	// Get all images from compose config
 	composeCmd := GetComposeCommand()
 	args := append(composeCmd[1:], GetBaseComposeArgs()...)
@@ -1054,6 +1197,10 @@ func ReloadWebServer() error {
 // RunComposeCommandWithOutput runs docker compose and returns its combined output.
 // It is a variable to allow overriding in tests.
 var RunComposeCommandWithOutput = func(args ...string) ([]byte, error) {
+	if err := OverrideError(); err != nil {
+		return nil, err
+	}
+
 	debug := viper.GetBool("debug")
 	composeCmd := GetComposeCommand()
 
@@ -1243,6 +1390,11 @@ var (
 // would hang forever. An explicit "unhealthy" is a failure and not something to keep polling —
 // the probe ran and answered.
 func waitForServicesHealthy(names []string) error {
+	// A broken override means no stack was started, so waiting would only run out the budget.
+	if err := OverrideError(); err != nil {
+		return err
+	}
+
 	pending := make([]string, 0, len(names))
 	for _, name := range names {
 		ensuredServicesMu.Lock()
@@ -1399,29 +1551,13 @@ func writeDockerfile(internalDir string, data any) bool {
 	return true
 }
 
+// writeEnvFile renders the env template and, when a file of the same name sits in the
+// current directory (next to .orobox.yaml), merges it over the rendered result key by key
+// (see MergeEnv). The local file is a sparse override rather than a replacement, so keys
+// that newer Orobox releases add to the template still reach projects with an older .env.
+// It reports whether the file in internalDir changed.
 func writeEnvFile(path string, internalDir string, data any) bool {
 	filename := filepath.Base(path)
-
-	// If file exists in current directory, use it instead of template
-	if _, err := os.Stat(filename); err == nil {
-		content, err := os.ReadFile(filename)
-		if err != nil {
-			utils.PrintPlainf("Warning: could not read local file %s: %v\n", filename, err)
-			return false
-		}
-
-		dest := filepath.Join(internalDir, filename)
-		oldContent, err := os.ReadFile(dest)
-		if err == nil && bytes.Equal(oldContent, content) {
-			return false
-		}
-
-		err = os.WriteFile(dest, content, 0644)
-		if err != nil {
-			panic(err)
-		}
-		return true
-	}
 
 	envContent, err := fs.ReadFile(Templates, path)
 	if err != nil {
@@ -1440,13 +1576,25 @@ func writeEnvFile(path string, internalDir string, data any) bool {
 		panic(err)
 	}
 
-	dest := filepath.Join(internalDir, filepath.Base(path))
+	content := buf.Bytes()
+
+	projectContent, err := os.ReadFile(filename)
+	switch {
+	case err == nil:
+		content = MergeEnv(content, projectContent, filename)
+	case !errors.Is(err, os.ErrNotExist):
+		// Fall back to the plain template rather than aborting: the warning names the
+		// file, and the stack still starts with Orobox's own defaults.
+		utils.PrintPlainf("Warning: could not read local file %s: %v\n", filename, err)
+	}
+
+	dest := filepath.Join(internalDir, filename)
 	oldContent, err := os.ReadFile(dest)
-	if err == nil && bytes.Equal(oldContent, buf.Bytes()) {
+	if err == nil && bytes.Equal(oldContent, content) {
 		return false
 	}
 
-	err = os.WriteFile(dest, buf.Bytes(), 0644)
+	err = os.WriteFile(dest, content, 0644)
 	if err != nil {
 		panic(err)
 	}

@@ -4,6 +4,9 @@ ARG NODE_VERSION={{.NodeVersion}}
 ARG NPM_VERSION={{.NpmVersion}}
 ARG PNPM_VERSION={{.PnpmVersion}}
 ARG MEMORY_LIMIT={{.MemoryLimit}}
+# Pinned release of mlocati/docker-php-extension-installer: `latest` would let a rebuild of the
+# same template silently change the tool (and the extensions it can build) under existing users.
+ARG INSTALL_PHP_EXTENSIONS_VERSION=2.12.0
 
 # Get Node from official image
 FROM node:${NODE_VERSION}-alpine AS node_image
@@ -12,6 +15,7 @@ FROM node:${NODE_VERSION}-alpine AS node_image
 FROM php:${PHP_VERSION}-fpm-alpine AS builder
 
 ARG PHP_VERSION
+ARG INSTALL_PHP_EXTENSIONS_VERSION
 
 # Build-time dependencies
 RUN apk add --no-cache \
@@ -34,7 +38,7 @@ RUN apk add --no-cache \
 
 # Install PHP extensions
 {{ if or (eq .PHPVersion "8.4") (eq .PHPVersion "8.5") -}}
-ADD https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions /usr/local/bin/
+ADD https://github.com/mlocati/docker-php-extension-installer/releases/download/${INSTALL_PHP_EXTENSIONS_VERSION}/install-php-extensions /usr/local/bin/
 RUN chmod +x /usr/local/bin/install-php-extensions && install-php-extensions imap opcache \
     && docker-php-source extract \
     && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
@@ -61,6 +65,7 @@ ARG NODE_VERSION
 ARG NPM_VERSION
 ARG PNPM_VERSION
 ARG MEMORY_LIMIT
+ARG INSTALL_PHP_EXTENSIONS_VERSION
 
 # Runtime system dependencies
 RUN apk add --no-cache \
@@ -123,6 +128,11 @@ ENV npm_config_update_notifier=false
 # Copy PHP extensions from builder
 COPY --from=builder /usr/local/lib/php/extensions /usr/local/lib/php/extensions
 COPY --from=builder /usr/local/etc/php/conf.d /usr/local/etc/php/conf.d
+
+# Ship install-php-extensions in the final image (not only in the discarded builder stage) so a
+# project Dockerfile built FROM this image can add extensions with `RUN install-php-extensions <ext>`.
+ADD https://github.com/mlocati/docker-php-extension-installer/releases/download/${INSTALL_PHP_EXTENSIONS_VERSION}/install-php-extensions /usr/local/bin/
+RUN chmod +x /usr/local/bin/install-php-extensions
 
 # Configure PHP, Xdebug and FPM
 RUN { \

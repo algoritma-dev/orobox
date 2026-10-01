@@ -1,0 +1,29 @@
+ARG OROBOX_BASE_IMAGE
+FROM ${OROBOX_BASE_IMAGE}
+
+# Project image layer, built on top of the Orobox image for the `oro_version` in .orobox.yaml.
+#
+# Keep the two lines above as they are: the final stage has to build on ${OROBOX_BASE_IMAGE}, which
+# Orobox sets to the published image for your Oro version, so upgrading `oro_version` moves this
+# layer with it and this file never needs editing for an Oro upgrade.
+
+# Simple cases do not need this file: system packages and PHP extensions belong in `image.apk` and
+# `image.php_extensions` in .orobox.yaml. Use the instructions below for what those keys cannot say.
+
+# System packages (Alpine):
+# RUN apk add --no-cache git-lfs
+
+# PHP extensions, through the installer the base image already ships:
+# RUN install-php-extensions gmp
+
+# A tool compiled in an earlier stage and copied over. Earlier stages may use any image; only the
+# final stage has to be FROM ${OROBOX_BASE_IMAGE}. The ARG stays first in the file so every
+# FROM can see it, and the whole file then reads:
+#
+#   ARG OROBOX_BASE_IMAGE
+#
+#   FROM golang:1.23-alpine AS builder
+#   RUN go install github.com/example/tool@latest
+#
+#   FROM ${OROBOX_BASE_IMAGE}
+#   COPY --from=builder /go/bin/tool /usr/local/bin/tool

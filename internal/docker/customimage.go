@@ -110,8 +110,9 @@ func composeNeedsAppImage(args []string) bool {
 }
 
 // ProjectImageRefs returns the published image this project's stack is based on and the image
-// its services actually run. They are the same reference unless a custom `dockerfile` puts a
-// locally built layer in between.
+// its services actually run. They are the same reference unless the project asks for a custom
+// layer — an `image.dockerfile` or any other `image.*` key — which puts a locally built image
+// in between.
 func ProjectImageRefs() (base, app string) {
 	oroVersion := viper.GetString("oro_version")
 	installType, err := config.InstallTypeFor(viper.GetString("type"))
@@ -121,33 +122,74 @@ func ProjectImageRefs() (base, app string) {
 	}
 
 	base = BaseImageRef(oroVersion, installType.ImageSuffix())
-	if config.GetDockerfile() == "" {
+	if !config.HasCustomLayer() {
 		return base, base
 	}
 	return base, CustomImageRef(oroVersion, installType.ImageSuffix())
 }
 
-// EnsureCustomImage builds the project's image layer if `dockerfile` asks for one and the
+// layerSource names what the layer is built from, for messages and the compose comment: the
+// project Dockerfile, the declarative `image.*` keys, or both.
+func layerSource() string {
+	img := config.GetImageConfig()
+	declarative := len(img.Apk)+len(img.PhpExtensions)+len(img.Npm)+len(img.Run) > 0
+
+	switch {
+	case img.Dockerfile != "" && declarative:
+		return img.Dockerfile + " + image keys"
+	case img.Dockerfile != "":
+		return img.Dockerfile
+	default:
+		return "image keys"
+	}
+}
+
+// layerContextDir is the build context of a layer that has no project Dockerfile. Such a layer
+// has nothing to COPY, so the context only has to exist; it is an empty directory of our own
+// rather than the project root so Docker never tars up the whole checkout for nothing.
+func layerContextDir() (string, error) {
+	dir := filepath.Join(config.GetInternalDir(), "layer-context")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("could not create the image layer build context %s: %w", dir, err)
+	}
+	return dir, nil
+}
+
+// EnsureCustomImage builds the project's image layer if the project asks for one and the
 // existing layer is not current. It is a no-op — and costs nothing beyond stat'ing the build
-// context and one image inspect — when no Dockerfile is configured or the layer is up to date.
+// context and one image inspect — when no layer is configured or the layer is up to date.
 func EnsureCustomImage() error {
 	customImageOnce.Do(func() { customImageErr = ensureCustomImage() })
 	return customImageErr
 }
 
 func ensureCustomImage() error {
-	dockerfile := config.GetDockerfilePath()
-	if dockerfile == "" {
+	if !config.HasCustomLayer() {
 		return nil
 	}
 
-	content, err := os.ReadFile(dockerfile)
-	if err != nil {
-		return fmt.Errorf("could not read the 'dockerfile' configured in .orobox.yaml (%s): %w", dockerfile, err)
+	// The project Dockerfile is optional: `image.*` keys alone render a complete one.
+	var projectDockerfile []byte
+	contextDir := ""
+	if dockerfile := config.GetDockerfilePath(); dockerfile != "" {
+		content, err := os.ReadFile(dockerfile)
+		if err != nil {
+			return fmt.Errorf("could not read the 'image.dockerfile' configured in .orobox.yaml (%s): %w", dockerfile, err)
+		}
+		if err := CheckExtendsBaseImage(config.GetDockerfile(), content); err != nil {
+			return err
+		}
+		projectDockerfile = content
+		contextDir = filepath.Dir(dockerfile)
+	} else {
+		dir, err := layerContextDir()
+		if err != nil {
+			return err
+		}
+		contextDir = dir
 	}
-	if err := checkExtendsBaseImage(config.GetDockerfile(), content); err != nil {
-		return err
-	}
+
+	rendered := RenderLayerDockerfile(projectDockerfile, config.GetImageConfig())
 
 	base, ref := ProjectImageRefs()
 
@@ -165,8 +207,7 @@ func ensureCustomImage() error {
 		}
 	}
 
-	contextDir := filepath.Dir(dockerfile)
-	want, err := customLayerHash(contextDir, baseID)
+	want, err := customLayerHash(contextDir, baseID, rendered)
 	if err != nil {
 		return err
 	}
@@ -178,18 +219,18 @@ func ensureCustomImage() error {
 		}
 	}
 
-	return buildCustomImage(ref, base, contextDir, dockerfile, want)
+	return buildCustomImage(ref, base, contextDir, rendered, want)
 }
 
 // fromInstruction matches a Dockerfile `FROM` line and captures the image it names.
 var fromInstruction = regexp.MustCompile(`(?im)^\s*FROM\s+(\S+)`)
 
-// checkExtendsBaseImage refuses a Dockerfile whose final stage does not build on the published
+// CheckExtendsBaseImage refuses a Dockerfile whose final stage does not build on the published
 // Orobox image. Earlier stages are free to use anything — compiling a tool against a plain
 // Alpine and copying the result over is exactly what multi-stage builds are for — but the stage
 // that produces the runtime image has to be the Orobox one, or `oro_version` would decide
 // nothing and the stack would fail in ways that point nowhere near this config key.
-func checkExtendsBaseImage(configured string, content []byte) error {
+func CheckExtendsBaseImage(configured string, content []byte) error {
 	matches := fromInstruction.FindAllStringSubmatch(string(content), -1)
 	if len(matches) == 0 {
 		return fmt.Errorf("%s contains no FROM instruction", configured)
@@ -207,11 +248,13 @@ func checkExtendsBaseImage(configured string, content []byte) error {
 		configured, config.DockerfileBaseImageArg, final, config.DockerfileBaseImageArg, config.DockerfileBaseImageArg)
 }
 
-// customLayerHash digests everything the layer's content depends on: the base image it sits on
-// and every file in the build context, by path, size and modification time. Contents are not
-// read — a touched file that Docker's own cache then finds unchanged costs one cached build,
-// while reading a large context on every command would cost far more.
-func customLayerHash(contextDir, baseID string) (string, error) {
+// customLayerHash digests everything the layer's content depends on: the base image it sits on,
+// the rendered Dockerfile, and every file in the build context, by path, size and modification
+// time. Contents of context files are not read — a touched file that Docker's own cache then
+// finds unchanged costs one cached build, while reading a large context on every command would
+// cost far more. The Dockerfile text, by contrast, is hashed in full: with only `image.*` keys
+// it exists nowhere on disk, so the context alone could not tell two layers apart.
+func customLayerHash(contextDir, baseID string, dockerfile []byte) (string, error) {
 	type entry struct {
 		path string
 		size int64
@@ -249,24 +292,34 @@ func customLayerHash(contextDir, baseID string) (string, error) {
 	for _, e := range entries {
 		sum.Write([]byte("\n" + e.path + "\x00" + strconv.FormatInt(e.size, 10) + "\x00" + strconv.FormatInt(e.mod, 10)))
 	}
+	sum.Write([]byte("\nDockerfile\x00"))
+	sum.Write(dockerfile)
 	return hex.EncodeToString(sum.Sum(nil))[:16], nil
 }
 
-func buildCustomImage(ref, base, contextDir, dockerfile, hash string) error {
+// customImageBuildArgs builds the `docker build` argument list. The Dockerfile is read from
+// stdin (`-f -`) because the layer is rendered in memory and may exist in no file at all.
+// Extracted from buildCustomImage so the flags can be asserted without running Docker.
+func customImageBuildArgs(ref, base, contextDir, hash string, noCache bool) []string {
 	args := []string{
 		"build",
 		"--build-arg", config.DockerfileBaseImageArg + "=" + base,
 		"--label", customImageHashLabel + "=" + hash,
 		"-t", ref,
-		"-f", dockerfile,
+		"-f", "-",
 	}
-	if forceCustomImageRebuild {
+	if noCache {
 		args = append(args, "--no-cache", "--pull")
 	}
-	args = append(args, contextDir)
+	return append(args, contextDir)
+}
+
+func buildCustomImage(ref, base, contextDir string, dockerfile []byte, hash string) error {
+	args := customImageBuildArgs(ref, base, contextDir, hash, forceCustomImageRebuild)
 
 	debug := viper.GetBool("debug")
-	message := fmt.Sprintf("Building the project image from %s...", config.GetDockerfile())
+	source := layerSource()
+	message := fmt.Sprintf("Building the project image from %s...", source)
 	if !debug {
 		utils.StartLoader(message)
 		defer utils.StopLoader()
@@ -275,12 +328,13 @@ func buildCustomImage(ref, base, contextDir, dockerfile, hash string) error {
 	}
 
 	cmd := exec.Command("docker", args...)
+	cmd.Stdin = bytes.NewReader(dockerfile)
 	PrintDebugCommand("docker", args)
 	if debug {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("could not build %s from %s: %w", ref, config.GetDockerfile(), err)
+			return fmt.Errorf("could not build %s from %s: %w", ref, source, err)
 		}
 		return nil
 	}
@@ -297,7 +351,7 @@ func buildCustomImage(ref, base, contextDir, dockerfile, hash string) error {
 		} else {
 			fmt.Print(buildLog.String())
 		}
-		return fmt.Errorf("could not build %s from %s: %w", ref, config.GetDockerfile(), err)
+		return fmt.Errorf("could not build %s from %s: %w", ref, source, err)
 	}
 	return nil
 }

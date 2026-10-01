@@ -13,6 +13,10 @@ func TestIsConfigExempt(t *testing.T) {
 		{"create parent exempt", "create", true},
 		{"create project exempt", "create project", true},
 		{"create bundle exempt", "create bundle", true},
+		{"extend parent exempt", "extend", true},
+		{"extend image exempt", "extend image", true},
+		{"extend compose exempt", "extend compose", true},
+		{"extend add exempt", "extend add", true},
 		{"up not exempt", "up", false},
 	}
 

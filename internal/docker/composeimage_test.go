@@ -20,7 +20,8 @@ func TestComposeImageFollowsTheCustomDockerfile(t *testing.T) {
 		t.Run("local layer with a custom dockerfile", func(t *testing.T) {
 			data := projectComposeData()
 			data["AppImage"] = CustomImageRef("6.1", "project")
-			data["CustomDockerfile"] = "docker/Dockerfile"
+			data["HasCustomLayer"] = true
+			data["LayerSource"] = "docker/Dockerfile"
 
 			out := renderRealTemplate(t, path, data)
 			assertValidYAML(t, path, out)
@@ -29,5 +30,27 @@ func TestComposeImageFollowsTheCustomDockerfile(t *testing.T) {
 			mustContain(t, out, "docker/Dockerfile")
 			mustNotContain(t, out, "algoritmadev/orobox:6.1-project-latest")
 		})
+	}
+}
+
+func TestComposeTemplatePullPolicyNever(t *testing.T) {
+	for _, path := range []string{
+		"../../templates/docker/docker-compose.yml",
+		"../../templates/docker/docker-compose.setup.yml",
+	} {
+		for _, has := range []bool{true, false} {
+			data := projectComposeData()
+			data["HasCustomLayer"] = has
+			data["LayerSource"] = "image keys"
+
+			out := renderRealTemplate(t, path, data)
+			assertValidYAML(t, path, out)
+			if has {
+				mustContain(t, out, "pull_policy: never")
+				mustContain(t, out, "image keys")
+			} else {
+				mustNotContain(t, out, "pull_policy")
+			}
+		}
 	}
 }

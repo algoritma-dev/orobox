@@ -1,0 +1,37 @@
+# Your additions to the Orobox stack, shared with the team and committed to the repository.
+#
+# This is a standard Docker Compose file, merged after the generated stack with the usual Compose
+# rules. Relative paths are relative to this file. Replace `services: {}` with the services you
+# need; the examples below show the common cases.
+#
+# services:
+#   # A new service. The dev.orobox.url label makes `orobox up` print its URL.
+#   minio:
+#     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+#     command: server /data --console-address :9001
+#     ports:
+#       - "9001:9001"
+#     volumes:
+#       - minio_data:/data
+#     labels:
+#       dev.orobox.url: http://localhost:9001
+#
+#   # Extra environment on a service Orobox already defines.
+#   consumer:
+#     environment:
+#       ORO_MQ_PREFETCH: "5"
+#
+#   # An extra mount, with a path relative to this file.
+#   php-fpm-app:
+#     volumes:
+#       - ./docker/fixtures:/var/www/oro/fixtures:ro
+#
+#   # Compose appends to lists such as ports. `!override` replaces the list instead
+#   # (needs Docker Compose 2.24 or later); `!reset` would drop it.
+#   web:
+#     ports: !override
+#       - "9090:80"
+#
+# volumes:
+#   minio_data:
+services: {}

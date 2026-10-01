@@ -15,6 +15,9 @@ import (
 )
 
 var dbExec = func(stdin io.Reader, stdout io.Writer, args ...string) error {
+	if err := docker.OverrideError(); err != nil {
+		return err
+	}
 	_, dbPass, _, _ := docker.GetDatabaseCredentials()
 	composeCmd := docker.GetComposeCommand()
 	baseArgs := docker.GetBaseComposeArgs()

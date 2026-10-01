@@ -94,8 +94,14 @@ type Plan struct {
 	CacheScope     string
 	BaseCacheScope string
 	Image          string
-	OroVersion     string
-	ArtifactDir    string // host directory the tarballs are exported to
+	// Layer is the project's custom image layer, built on top of Image before any step runs; nil
+	// when the project runs the published image unchanged. PhpIni is the content of
+	// zz-project.ini every step gets, "" when php_ini is not set. Both are filled by
+	// ApplyProjectLayer, so the steps run on what the dev stack runs on.
+	Layer       *LayerSpec
+	PhpIni      string
+	OroVersion  string
+	ArtifactDir string // host directory the tarballs are exported to
 	// SourceDir is the repository-relative directory holding the application, empty when the
 	// repository root is the application. Every step's sources are taken from it, so a monorepo
 	// builds only its Oro project.

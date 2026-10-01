@@ -105,7 +105,7 @@ report an installation that did not happen.
 
 What happens, in order:
 
-1. **Build** — Dagger clones the stage's `ref` and installs the dependencies in the published `algoritmadev/orobox:<oro_version>-project-latest` image, then dumps the production autoloader and packs `vendor.tar.gz`. The install itself sees only `composer.json` and `composer.lock`, which is what makes it reusable between runs (see [What the pipeline caches](#what-the-pipeline-caches)). With `source_dir` set, only that subdirectory of the clone becomes the application root, so a monorepo builds just its Oro project.
+1. **Build** — Dagger clones the stage's `ref` and installs the dependencies in the published `algoritmadev/orobox:<oro_version>-project-latest` image (with the project's image layer on top, when one is configured — see [The image the pipeline runs on](#the-image-the-pipeline-runs-on)), then dumps the production autoloader and packs `vendor.tar.gz`. The install itself sees only `composer.json` and `composer.lock`, which is what makes it reusable between runs (see [What the pipeline caches](#what-the-pipeline-caches)). With `source_dir` set, only that subdirectory of the clone becomes the application root, so a monorepo builds just its Oro project.
 2. **Assets** — only when `pre_built_assets_enabled: false`: runs `oro:assets:install --env=prod` and packs `public/build`, `public/js` and `public/media/js` into `assets.tar.gz`.
 3. **QA and tests** — run concurrently off a shared tree that also carries the dev dependencies, PHPUnit among them, so the `--no-dev` artifact from step 1 stays dev-free. QA runs every tool enabled under `test.qa` in check-only mode (`--dry-run`, no `--fix`), because a fix inside the pipeline container would be discarded. Tests run the suites listed in the stage's `test_suites` against a Dagger-managed PostgreSQL service; `functional` first restores the cached Oro test install, or performs one when the cache no longer matches.
 4. **Release** — only if everything passed. Deployer clones the same `ref` on the remote host (only `source_dir` when set, through its `sub_directory` option), uploads and extracts the tarballs, updates the application, installs the served assets, warms the cache, swaps the `current` symlink and runs the stage's `restart_command`.
@@ -115,6 +115,35 @@ The tarballs are also exported to `var/orobox/deploy/<stage>/` on the host, so a
 **Migrations.** `oro:platform:update` cannot skip migrations selectively, so the recipe compares the migration files of the new release (`src/` plus `vendor/oro/`) with the previous one. When they differ — or on a first deploy — it runs `oro:platform:update --force`. When they do not, it runs the same chain without the two migration commands, so changed cron, workflow, process, permission and translation definitions still get applied.
 
 **Assets on the remote.** No supported Oro version accepts `--skip-assets` on `oro:platform:update`, and that command never runs webpack. The remote therefore only ever runs Symfony's `assets:install`; the built assets come either from the repository (`pre_built_assets_enabled: true`) or from `assets.tar.gz`.
+
+#### The image the pipeline runs on
+
+Every step runs on the image and PHP settings the development stack runs on, so a project that
+needs an extension locally has it in `orobox deploy`, in the generated CI and in the Dagger engine
+of `orobox qa` and `orobox test` too.
+
+- **`image`** ([Image customization](configuration.md#image-customization-image)). When `image.dockerfile`,
+  `image.apk`, `image.php_extensions`, `image.npm` or `image.run` is set, Dagger builds the same
+  Dockerfile `orobox up` builds, with `OROBOX_BASE_IMAGE` set to the published
+  `algoritmadev/orobox:<oro_version>-project-latest` tag, and runs every step on the result. The
+  layer is always rendered for `type: project`, the only type the pipeline supports. The engine
+  caches its layers like any other build, so an unchanged layer costs nothing on a warm runner; a
+  cold CI runner builds it once per pipeline. A project Dockerfile whose final stage is not
+  `FROM ${OROBOX_BASE_IMAGE}` is refused before the engine starts, as it is locally.
+- **`php_ini`** ([PHP settings](configuration.md#php-settings-php_ini)). The same `zz-project.ini`
+  the development stack mounts is written into every step container: rendered from the map form,
+  or the project's own file copied unchanged.
+- **Where they are read from.** The project Dockerfile, its build context and a `php_ini` file
+  are taken from the host working tree, the same place `.orobox.yaml` is read from, even when the
+  steps build a clone — so configuration and image never come from two different revisions. Paths
+  stay relative to `.orobox.yaml`, with or without `source_dir`.
+
+With none of these set nothing is built and the steps run on the published image unchanged.
+
+**The compose override is development-only.** `.orobox.compose.yaml`, `.orobox.compose.local.yaml`
+and the services added through recipes never reach the pipeline: it has its own service list
+(PostgreSQL, plus Redis and Elasticsearch for the tests when `services` enables them) and is
+not a compose stack.
 
 #### Keeping development files out of a release
 
@@ -183,7 +212,7 @@ identical database.
 The QA and test caches are scoped to the Oro version and the stage's git ref, so two stages on
 different refs do not invalidate each other.
 
-`orobox deploy <stage> --no-cache` rebuilds all of it.
+`orobox deploy <stage> --no-cache` rebuilds all of it, except the project image layer (`image.*` keys and `image.dockerfile`): Dagger caches that layer by content, so it is rebuilt when its Dockerfile, build context or base image change, not by `--no-cache`.
 
 #### Cache warmth in CI
 

@@ -4,12 +4,14 @@ import (
 	"encoding/xml"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/docker"
 	"github.com/algoritma-dev/orobox/internal/qatools"
+	"gopkg.in/yaml.v3"
 )
 
 func TestProjectNameIsDockerSafe(t *testing.T) {
@@ -446,5 +448,91 @@ func TestReadQaOutcomesSeparatesFindingsFromToolsThatCouldNotRun(t *testing.T) {
 func TestReadQaOutcomesFailsWhenTheStepWroteNothing(t *testing.T) {
 	if _, err := ReadQaOutcomes(filepath.Join(t.TempDir(), "missing")); err == nil {
 		t.Error("a missing raw report directory must be an error: the step never ran")
+	}
+}
+
+func TestProjectNameCarriesTheVariant(t *testing.T) {
+	plain := Case{Version: "7.0", Type: TypeProject}
+	variant := Case{Version: "7.0", Type: TypeProject, Variant: "customization"}
+
+	if got, want := variant.ProjectName(), "oroboxe2e-project-70-customization"; got != want {
+		t.Fatalf("ProjectName() = %q, want %q", got, want)
+	}
+	if variant.ProjectName() == plain.ProjectName() {
+		t.Fatal("a variant must not share the compose project of the plain case")
+	}
+	// The host names are what CI maps to 127.0.0.1; a variant must keep resolving through them.
+	if variant.Host() != plain.Host() {
+		t.Fatalf("Host() = %q, want the plain case's %q", variant.Host(), plain.Host())
+	}
+}
+
+// TestCustomizationFixturesMatchTheAssertions keeps TestE2ECustomization and its fixtures in
+// step. The test reads values back from a running stack an hour into a run, so a fixture edited
+// without the matching assertion would surface only there.
+func TestCustomizationFixturesMatchTheAssertions(t *testing.T) {
+	raw, err := os.ReadFile(customizationConfigFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := Case{Version: "7.0", Type: TypeProject, Variant: "customization"}
+	out, err := RenderConfig(string(raw), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conf, err := config.ParseConfig([]byte(out))
+	if err != nil {
+		t.Fatalf("%s does not parse: %v", customizationConfigFixture, err)
+	}
+
+	if conf.Image == nil || !slices.Contains(conf.Image.PhpExtensions, "redis") || !slices.Contains(conf.Image.Apk, "poppler-utils") {
+		t.Errorf("image must install the redis extension and poppler-utils, got %+v", conf.Image)
+	}
+	ini, err := conf.PhpIniSettings()
+	if err != nil {
+		t.Fatalf("php_ini: %v", err)
+	}
+	if got := ini.Values["memory_limit"]; got != customizationMemoryLimit {
+		t.Errorf("php_ini memory_limit = %v, want %q", got, customizationMemoryLimit)
+	}
+	if got := conf.Ports["db"]; got != customizationDBPort {
+		t.Errorf("ports.db = %d, want %d", got, customizationDBPort)
+	}
+
+	// The test dispatches these by name through `orobox run`.
+	for _, name := range []string{"e2e-php-modules", "e2e-php-memory-limit", "e2e-pdftotext"} {
+		if !slices.ContainsFunc(conf.Commands, func(cmd config.CommandConfig) bool {
+			return cmd.Name == name && cmd.Command != ""
+		}) {
+			t.Errorf("%s must define the %q command the suite runs", customizationConfigFixture, name)
+		}
+	}
+
+	override, err := os.ReadFile(customizationOverrideFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Services map[string]struct {
+			Image  string            `yaml:"image"`
+			Ports  []string          `yaml:"ports"`
+			Labels map[string]string `yaml:"labels"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(override, &doc); err != nil {
+		t.Fatalf("%s is not valid YAML: %v", customizationOverrideFixture, err)
+	}
+	svc, ok := doc.Services[customizationService]
+	if !ok {
+		t.Fatalf("%s must define the %q service", customizationOverrideFixture, customizationService)
+	}
+	if tag := strings.TrimPrefix(svc.Image, "traefik/whoami:"); tag == svc.Image || tag == "" || tag == "latest" {
+		t.Errorf("image = %q, want traefik/whoami pinned to a version tag", svc.Image)
+	}
+	if !slices.Contains(svc.Ports, "8099:80") {
+		t.Errorf("ports = %v, want 8099:80", svc.Ports)
+	}
+	if got := svc.Labels["dev.orobox.url"]; got != customizationWhoamiURL {
+		t.Errorf("dev.orobox.url = %q, want %q", got, customizationWhoamiURL)
 	}
 }

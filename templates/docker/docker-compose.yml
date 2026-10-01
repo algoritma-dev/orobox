@@ -2,12 +2,19 @@
 x-templates:
   oro-app: &oro-app
     image: "{{.AppImage}}"
-    {{- if .CustomDockerfile}}
-    # Built locally by orobox from the project's own {{.CustomDockerfile}}, so it exists in no
+    {{- if .HasCustomLayer}}
+    # Built locally by orobox from {{.LayerSource}} (see .orobox.yaml), so it exists in no
     # registry: a pull would go looking for it on Docker Hub and fail with an unrelated error.
     pull_policy: never
     {{- end}}
     mem_limit: ${ORO_APP_MEM_LIMIT:-2g}
+    {{- if .PhpIniHash}}
+    # Compose recreates a container when its configuration changes, and a bind mount's content
+    # is not part of it: only its path is. This label carries the ini's hash so a changed
+    # php_ini (or an edit to the project's ini file) reaches the running containers.
+    labels:
+      dev.orobox.php-ini-hash: "{{.PhpIniHash}}"
+    {{- end}}
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -47,6 +54,12 @@ x-templates:
     # A YAML merge key cannot extend a sequence, so the mount goes in the shared anchor:
     # the services that never run git simply carry an unused socket.
     - "{{.SSHAgentSocket}}:/ssh-agent"
+    {{- end}}
+    {{if .PhpIniPath -}}
+    # Project php.ini settings (the `php_ini` key). Read-only, and named zz- so PHP loads it
+    # after oro-custom.ini and the project's values win. No rebuild: a changed file only
+    # needs the containers recreated.
+    - "{{.PhpIniPath}}:/usr/local/etc/php/conf.d/zz-project.ini:ro"
     {{- end}}
 
 services:
@@ -299,8 +312,10 @@ services:
     command: ["postgres", "-c", "max_locks_per_transaction=1024"]
     labels:
       com.symfony.server.service-prefix: ORO_DB
+    {{- if index .Ports "db"}}
     ports:
-      - "5432:5432"
+      - "{{index .Ports "db"}}:5432"
+    {{- end}}
     environment:
       POSTGRES_DB: ${ORO_DB_NAME:-oro_db}
       POSTGRES_USER: ${ORO_DB_USER:-oro_db_user}
@@ -326,8 +341,10 @@ services:
   redis:
     image: "redis:{{.RedisVersion}}"
     hostname: redis
+    {{- if index .Ports "redis"}}
     ports:
-      - "6379:6379"
+      - "{{index .Ports "redis"}}:6379"
+    {{- end}}
     # php-fpm-app waits on this with condition: service_healthy. See db for why the interval
     # is short and retries are sized to the startup a loaded runner can need.
     healthcheck:
@@ -341,8 +358,10 @@ services:
   {{if .RedisInsight}}
   redisinsight:
     image: redis/redisinsight:latest
+    {{- if index .Ports "redisinsight"}}
     ports:
-      - "8001:5540"
+      - "{{index .Ports "redisinsight"}}:5540"
+    {{- end}}
     restart: unless-stopped
     depends_on:
       - redis
@@ -351,9 +370,15 @@ services:
   mail:
     image: axllent/mailpit:latest
     hostname: mail
+    {{- if or (index .Ports "mail_ui") (index .Ports "mail_smtp")}}
     ports:
-      - "8025:8025"
-      - "2025:1025"
+      {{- if index .Ports "mail_ui"}}
+      - "{{index .Ports "mail_ui"}}:8025"
+      {{- end}}
+      {{- if index .Ports "mail_smtp"}}
+      - "{{index .Ports "mail_smtp"}}:1025"
+      {{- end}}
+    {{- end}}
     restart: unless-stopped
   {{end}}
   {{if .RabbitMQ}}
@@ -370,11 +395,15 @@ services:
       timeout: 5s
       retries: 45
       start_period: 60s
+    {{- if or (index .Ports "rabbitmq_ui") (index .Ports "rabbitmq")}}
     ports:
-      {{if true -}}
-      - "15672:15672"
+      {{- if index .Ports "rabbitmq_ui"}}
+      - "{{index .Ports "rabbitmq_ui"}}:15672"
       {{- end}}
-      - "5672:5672"
+      {{- if index .Ports "rabbitmq"}}
+      - "{{index .Ports "rabbitmq"}}:5672"
+      {{- end}}
+    {{- end}}
     environment:
       RABBITMQ_DEFAULT_USER: ${ORO_RABBITMQ_USER:-guest}
       RABBITMQ_DEFAULT_PASS: ${ORO_RABBITMQ_PASS:-guest}
@@ -393,8 +422,10 @@ services:
       timeout: 5s
       retries: 45
       start_period: 60s
+    {{- if index .Ports "elasticsearch"}}
     ports:
-      - "9200:9200"
+      - "{{index .Ports "elasticsearch"}}:9200"
+    {{- end}}
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
@@ -409,8 +440,10 @@ services:
   {{end}}
   gotenberg:
     image: gotenberg/gotenberg:8.23.2
+    {{- if index .Ports "gotenberg"}}
     ports:
-      - "3000:3000"
+      - "{{index .Ports "gotenberg"}}:3000"
+    {{- end}}
     # See db: the install waits on this one with condition: service_healthy, so leaving the
     # interval unset put Docker's 30s default in front of every `orobox init`.
     healthcheck:
@@ -423,8 +456,10 @@ services:
   {{if .Adminer}}
   adminer:
     image: adminer:latest
+    {{- if index .Ports "adminer"}}
     ports:
-      - "8081:8080"
+      - "{{index .Ports "adminer"}}:8080"
+    {{- end}}
     restart: unless-stopped
     depends_on:
       - db
@@ -432,8 +467,10 @@ services:
   {{if .Kibana}}
   kibana:
     image: "kibana:{{.ElasticsearchVersion}}"
+    {{- if index .Ports "kibana"}}
     ports:
-      - "5601:5601"
+      - "{{index .Ports "kibana"}}:5601"
+    {{- end}}
     restart: unless-stopped
     depends_on:
       "elasticsearch":

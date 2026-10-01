@@ -1,0 +1,18 @@
+description: SFTP server with a dev user and an upload directory, for integrations that exchange files
+compose:
+  services:
+    sftp:
+      # The image publishes no versioned tags, so the build is pinned by digest.
+      image: atmoz/sftp:alpine@sha256:6d41b9200f8115ce925bbd295376cb3c6b72634a267f41946e5aee4efe482186
+      # user:password:uid:gid. 1000 is the usual first user on a Linux host, so files uploaded
+      # into the bind mount stay writable on both sides.
+      command: orobox:orobox:1000:1000
+      ports:
+        - "2222:22"
+      volumes:
+        - ./docker/sftp/upload:/home/orobox/upload
+notes: |
+  SFTP settings for an integration running in the stack: host sftp, port 22, user orobox,
+  password orobox, remote directory /upload.
+  From the host: sftp -P 2222 orobox@localhost (same password). Uploaded files land in
+  docker/sftp/upload.
