@@ -72,12 +72,12 @@ func TestWriteComposeOverridesResolves(t *testing.T) {
 }
 
 func TestWriteComposeOverridesSkipsEmpty(t *testing.T) {
-	projectDir, internalDir := overrideProject(t, map[string]string{
+	projectDir, _ := overrideProject(t, map[string]string{
 		".orobox.compose.yaml": "# nothing here yet\n",
 	})
 	t.Chdir(projectDir)
 	t.Setenv("OROBOX_LOCAL_CONFIG", "1")
-	internalDir = filepath.Join(projectDir, ".orobox")
+	internalDir := filepath.Join(projectDir, ".orobox")
 	if err := os.MkdirAll(internalDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestWriteComposeOverridesRemovesStale(t *testing.T) {
 }
 
 func TestGetBaseComposeArgsOverrideOrder(t *testing.T) {
-	projectDir, internalDir := overrideProject(t, map[string]string{
+	projectDir, _ := overrideProject(t, map[string]string{
 		".orobox.compose.yaml":       "services:\n  application:\n    environment:\n      A: \"1\"\n",
 		".orobox.compose.local.yaml": "services:\n  application:\n    environment:\n      A: \"2\"\n",
 	})
@@ -125,7 +125,7 @@ func TestGetBaseComposeArgsOverrideOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	// GetBaseComposeArgs reads the internal dir from the environment, so write there.
-	internalDir = filepath.Join(projectDir, ".orobox")
+	internalDir := filepath.Join(projectDir, ".orobox")
 
 	if _, err := writeComposeOverrides(internalDir, projectDir); err != nil {
 		t.Fatalf("writeComposeOverrides: %v", err)

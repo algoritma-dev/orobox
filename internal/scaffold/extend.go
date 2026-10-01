@@ -36,10 +36,12 @@ const (
 	// one already.
 	defaultDockerfile = "docker/Dockerfile"
 
-	// ComposeOverrideFile and ComposeLocalOverrideFile are the override files Orobox discovers by
-	// name. They repeat docker.OverrideFiles on purpose — scaffold writes files and must not depend
-	// on how the docker package finds them — and a test keeps the two in step.
-	ComposeOverrideFile      = ".orobox.compose.yaml"
+	// ComposeOverrideFile is the shared override file Orobox discovers by name. It and
+	// ComposeLocalOverrideFile repeat docker.OverrideFiles on purpose — scaffold writes files and
+	// must not depend on how the docker package finds them — and a test keeps the two in step.
+	ComposeOverrideFile = ".orobox.compose.yaml"
+	// ComposeLocalOverrideFile is the uncommitted, per-developer override file Orobox discovers by
+	// name.
 	ComposeLocalOverrideFile = ".orobox.compose.local.yaml"
 
 	// gitignoreEntry is what `extend compose --local` adds to .gitignore. Anchored to the project

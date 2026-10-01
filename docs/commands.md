@@ -122,7 +122,7 @@ Flags:
 - `-c`, `--clean`: tear the environment down, volumes included, before starting.
 - `--rebuild`: rebuild the image from the project's [`image` settings](configuration.md#image-customization-image) ignoring the Docker cache. Only useful with a custom layer configured: rebuilds happen automatically when the rendered Dockerfile, its build context or the base image change, so this is for the case Docker cannot see — an unpinned `RUN apk add` that should pick up a newer package.
 
-Once the stack is up, `up` lists the services your [compose override](configuration.md#extending-the-stack-orobox-composeyaml) advertises with the `dev.orobox.url` label, after the built-in blocks:
+Once the stack is up, `up` lists the services your [compose override](configuration.md#extending-the-stack-oroboxcomposeyaml) advertises with the `dev.orobox.url` label, after the built-in blocks:
 ```
 Project services:
   - minio: http://localhost:9001
@@ -216,7 +216,7 @@ orobox extend add varnish sftp  # add ready-made services
 | `extend add` | Lists the available recipes, one `name — description` line each. |
 | `extend add <recipe>...` | Adds each recipe in order, see [Recipes](#recipes) below. `--force` replaces the recipe's services when `.orobox.compose.yaml` already defines them. |
 
-What the files do is described in [Custom Dockerfile](configuration.md#custom-dockerfile-imagedockerfile) and [Extending the stack](configuration.md#extending-the-stack-orobox-composeyaml).
+What the files do is described in [Custom Dockerfile](configuration.md#custom-dockerfile-imagedockerfile) and [Extending the stack](configuration.md#extending-the-stack-oroboxcomposeyaml).
 
 Rules shared by every `extend` subcommand:
 - **Nothing is overwritten.** A file that already exists is left alone and reported as `skipped`.
