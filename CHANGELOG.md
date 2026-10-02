@@ -10,6 +10,8 @@ group commits by theme rather than listing every commit.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-02
+
 - Added stack customization, so a project no longer has to fork Orobox's templates to change its
   environment. Everything below is opt-in, documented in the new guide `docs/customization.md` and
   in the `docs/configuration.md` reference.
