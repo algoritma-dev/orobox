@@ -418,7 +418,7 @@ func installFakeLayerDocker(t *testing.T) *fakeLayerDocker {
 		}
 		return "sha256:old", nil
 	}
-	layerBuildImage = func(_, base, contextDir, dockerfilePath string, dockerfile []byte, hash string) error {
+	layerBuildImage = func(_, _, _, dockerfilePath string, dockerfile []byte, hash string) error {
 		f.calls = append(f.calls, "build")
 		f.built = true
 		f.buildDF = dockerfilePath
