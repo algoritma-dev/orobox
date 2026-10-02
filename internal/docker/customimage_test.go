@@ -407,7 +407,7 @@ func installFakeLayerDocker(t *testing.T) *fakeLayerDocker {
 		f.pulled = true
 		return nil
 	}
-	layerImageField = func(image, format string) (string, error) {
+	layerImageField = func(image, _ string) (string, error) {
 		f.calls = append(f.calls, "inspect "+image)
 		if IsCustomImageRef(image) {
 			return "", errors.New("no such image")
@@ -418,7 +418,7 @@ func installFakeLayerDocker(t *testing.T) *fakeLayerDocker {
 		}
 		return "sha256:old", nil
 	}
-	layerBuildImage = func(ref, base, contextDir, dockerfilePath string, dockerfile []byte, hash string) error {
+	layerBuildImage = func(_, base, contextDir, dockerfilePath string, dockerfile []byte, hash string) error {
 		f.calls = append(f.calls, "build")
 		f.built = true
 		f.buildDF = dockerfilePath

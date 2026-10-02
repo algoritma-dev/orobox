@@ -185,11 +185,11 @@ func resolveComposeOverride(source, projectDir, home string, builtBefore map[str
 }
 
 // serviceNamesOf lists the services of a resolved copy; nil for no copy.
-func serviceNamesOf(copy []byte) []string {
-	if copy == nil {
+func serviceNamesOf(resolved []byte) []string {
+	if resolved == nil {
 		return nil
 	}
-	names, _ := composeoverride.ServiceNames(copy)
+	names, _ := composeoverride.ServiceNames(resolved)
 	return names
 }
 
