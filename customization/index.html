@@ -1,0 +1,1854 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Docker-based local development environment for OroCommerce.">
+      
+      
+      
+        <link rel="canonical" href="https://algoritma-dev.github.io/orobox/customization/">
+      
+      
+        <link rel="prev" href="../configuration/">
+      
+      
+        <link rel="next" href="../commands/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Customizing the environment - Orobox</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#customizing-the-environment" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Orobox" class="md-header__button md-logo" aria-label="Orobox" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Orobox
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Customizing the environment
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/algoritma-dev/orobox" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    algoritma-dev/orobox
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Orobox" class="md-nav__button md-logo" aria-label="Orobox" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Orobox
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/algoritma-dev/orobox" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    algoritma-dev/orobox
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Customizing the environment
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Customizing the environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#pick-the-right-tool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pick the right tool
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#level-1-the-image" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Level 1 — the image
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Level 1 — the image">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#add-system-packages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Add system packages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#add-a-php-extension" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Add a PHP extension
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#install-a-global-npm-tool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Install a global npm tool
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-an-install-command" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run an install command
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-the-layer-is-built" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the layer is built
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#write-your-own-dockerfile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Write your own Dockerfile
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#level-1-php-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Level 1 — PHP settings
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Level 1 — PHP settings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#change-php-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Change PHP settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#level-1-ports-and-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Level 1 — ports and environment
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Level 1 — ports and environment">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#move-a-host-port" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Move a host port
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#change-environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Change environment variables
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#level-2-the-compose-stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Level 2 — the compose stack
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Level 2 — the compose stack">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#add-a-service" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Add a service
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mount-files-or-set-variables-on-an-existing-service" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mount files or set variables on an existing service
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#personal-tweaks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Personal tweaks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#things-to-know-about-the-override" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Things to know about the override
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ready-made-services-recipes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ready-made services (recipes)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Ready-made services (recipes)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#varnish" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        varnish
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#selenium" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        selenium
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sftp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sftp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackfire" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        blackfire
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recipe-ports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recipe ports
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-changes-take-effect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When changes take effect
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-reaches-the-deploy-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What reaches the deploy pipeline
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../qa/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    QA tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../debugging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Debugging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../domains-and-ssl/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Domains and SSL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Internal structure & development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../comparison/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Comparison with alternatives
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#pick-the-right-tool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pick the right tool
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#level-1-the-image" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Level 1 — the image
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Level 1 — the image">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#add-system-packages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Add system packages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#add-a-php-extension" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Add a PHP extension
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#install-a-global-npm-tool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Install a global npm tool
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-an-install-command" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run an install command
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-the-layer-is-built" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the layer is built
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#write-your-own-dockerfile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Write your own Dockerfile
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#level-1-php-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Level 1 — PHP settings
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Level 1 — PHP settings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#change-php-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Change PHP settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#level-1-ports-and-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Level 1 — ports and environment
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Level 1 — ports and environment">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#move-a-host-port" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Move a host port
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#change-environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Change environment variables
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#level-2-the-compose-stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Level 2 — the compose stack
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Level 2 — the compose stack">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#add-a-service" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Add a service
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mount-files-or-set-variables-on-an-existing-service" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mount files or set variables on an existing service
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#personal-tweaks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Personal tweaks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#things-to-know-about-the-override" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Things to know about the override
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ready-made-services-recipes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ready-made services (recipes)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Ready-made services (recipes)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#varnish" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        varnish
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#selenium" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        selenium
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sftp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sftp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackfire" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        blackfire
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recipe-ports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recipe ports
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-changes-take-effect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When changes take effect
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-reaches-the-deploy-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What reaches the deploy pipeline
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<p><a href="../README.md">← Back to README</a> · <a href="../">Documentation index</a></p>
+<h1 id="customizing-the-environment">Customizing the environment<a class="headerlink" href="#customizing-the-environment" title="Permanent link">&para;</a></h1>
+<p>Orobox runs the same published image and the same generated Docker Compose stack for every
+project, and that is what makes <code>orobox init</code> and <code>orobox up</code> work in one command. Real projects
+always need something more: a system library, a PHP extension, a different <code>memory_limit</code>, an
+object store, a fixtures directory mounted into the application, a port that does not clash with
+another project.</p>
+<p>This page is the task-oriented guide to adding all of that. The exact rules for every key live in
+the reference: <a href="../configuration/">Configuration</a> and <a href="../commands/#16-extending-the-environment-extend">Commands</a>.</p>
+<h2 id="pick-the-right-tool">Pick the right tool<a class="headerlink" href="#pick-the-right-tool" title="Permanent link">&para;</a></h2>
+<p>There are three levels. Use the lowest one that covers your need: each level is the escape hatch
+of the one before it, and you never have to learn the next one until you need it.</p>
+<table>
+<thead>
+<tr>
+<th>I want to…</th>
+<th>Use</th>
+<th>Rebuilds the image?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Install an Alpine package (<code>imagemagick</code>, <code>poppler-utils</code>, …)</td>
+<td><a href="#add-system-packages"><code>image.apk</code></a></td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Add a PHP extension (<code>redis</code>, <code>imagick</code>, <code>xsl</code>, <code>blackfire</code>, …)</td>
+<td><a href="#add-a-php-extension"><code>image.php_extensions</code></a></td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Install a global npm tool</td>
+<td><a href="#install-a-global-npm-tool"><code>image.npm</code></a></td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Run an arbitrary install command</td>
+<td><a href="#run-an-install-command"><code>image.run</code></a></td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Compile a tool, use a multi-stage build, <code>COPY</code> files into the image</td>
+<td><a href="#write-your-own-dockerfile"><code>image.dockerfile</code></a></td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Change a PHP setting (<code>memory_limit</code>, <code>max_execution_time</code>, Xdebug options)</td>
+<td><a href="#change-php-settings"><code>php_ini</code></a></td>
+<td>no</td>
+</tr>
+<tr>
+<td>Move a host port that is already taken</td>
+<td><a href="#move-a-host-port"><code>ports</code></a></td>
+<td>no</td>
+</tr>
+<tr>
+<td>Change or add an environment variable</td>
+<td><a href="#change-environment-variables"><code>.env</code> next to <code>.orobox.yaml</code></a></td>
+<td>no</td>
+</tr>
+<tr>
+<td>Add a service, a volume, a mount, env on one service</td>
+<td><a href="#add-a-service"><code>.orobox.compose.yaml</code></a></td>
+<td>no</td>
+</tr>
+<tr>
+<td>Keep personal tweaks out of git</td>
+<td><a href="#personal-tweaks"><code>.orobox.compose.local.yaml</code></a></td>
+<td>no</td>
+</tr>
+<tr>
+<td>Add Varnish, Selenium, an SFTP server or Blackfire</td>
+<td><a href="#ready-made-services-recipes"><code>orobox extend add</code></a></td>
+<td>depends on the recipe</td>
+</tr>
+</tbody>
+</table>
+<p><code>orobox extend</code> writes the files for you with the right header and commented examples:</p>
+<div class="highlight"><pre><span></span><code>orobox<span class="w"> </span>extend<span class="w"> </span>image<span class="w">             </span><span class="c1"># docker/image/Dockerfile, and image.dockerfile in .orobox.yaml</span>
+orobox<span class="w"> </span>extend<span class="w"> </span>compose<span class="w">           </span><span class="c1"># .orobox.compose.yaml</span>
+orobox<span class="w"> </span>extend<span class="w"> </span>compose<span class="w"> </span>--local<span class="w">   </span><span class="c1"># .orobox.compose.local.yaml (+ .gitignore entry if one exists)</span>
+orobox<span class="w"> </span>extend<span class="w"> </span>add<span class="w">               </span><span class="c1"># list the ready-made services</span>
+orobox<span class="w"> </span>extend<span class="w"> </span>add<span class="w"> </span>varnish<span class="w">       </span><span class="c1"># add one</span>
+</code></pre></div>
+<h2 id="level-1-the-image">Level 1 — the image<a class="headerlink" href="#level-1-the-image" title="Permanent link">&para;</a></h2>
+<p>The published image is Alpine Linux with PHP-FPM, nginx, Node.js and Composer. Everything you add
+under <code>image:</code> is built into one local layer on top of it, tagged
+<code>orobox-custom/&lt;project&gt;:&lt;oro_version&gt;-&lt;type&gt;</code>. It exists only on your machine; no registry is
+involved and nothing has to be pushed.</p>
+<h3 id="add-system-packages">Add system packages<a class="headerlink" href="#add-system-packages" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># .orobox.yaml</span>
+<span class="nt">image</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">apk</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">imagemagick</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">poppler-utils</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ghostscript</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p>The names are <a href="https://pkgs.alpinelinux.org/packages">Alpine package names</a>, installed with
+<code>apk add --no-cache</code>. A version constraint in apk's own syntax (<code>ghostscript=10.05.1-r0</code>) is
+accepted. Orobox does not check that a package exists: a typo fails the build, and the build log
+says why.</p>
+<h3 id="add-a-php-extension">Add a PHP extension<a class="headerlink" href="#add-a-php-extension" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">image</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">php_extensions</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">redis</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">imagick</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">xsl</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p>Extensions are installed with <a href="https://github.com/mlocati/docker-php-extension-installer"><code>install-php-extensions</code></a>,
+which the published image ships at a pinned release. It fetches and removes the build
+dependencies on its own, so there is no <code>$PHPIZE_DEPS</code>, <code>pecl</code> or <code>docker-php-ext-configure</code> to
+deal with. Its README lists every supported extension; a specific version is written
+<code>redis-6.1.0</code>. If your local copy of the base image is older than the tool, the layer downloads the
+same pinned release first, so the key works either way.</p>
+<h3 id="install-a-global-npm-tool">Install a global npm tool<a class="headerlink" href="#install-a-global-npm-tool" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">image</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">npm</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"@playwright/test"</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p>Installed with <code>npm install -g</code>. Quote scoped names: YAML reads a leading <code>@</code> as reserved.</p>
+<h3 id="run-an-install-command">Run an install command<a class="headerlink" href="#run-an-install-command" title="Permanent link">&para;</a></h3>
+<p>Anything that needs shell syntax goes in <code>run</code>. Each entry becomes its own <code>RUN</code>, executed after
+the other keys, in order:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">image</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">run</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">curl -sSL https://example.com/tool -o /usr/local/bin/tool &amp;&amp; chmod +x /usr/local/bin/tool</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mkdir -p /opt/reports &amp;&amp; chmod 777 /opt/reports</span>
+</code></pre></div>
+<p>An entry is a single line. Join commands with <code>&amp;&amp;</code>; a line break inside the entry, a trailing <code>\</code>
+or a heredoc (<code>&lt;&lt;EOF</code>) is refused, because the following text would become Dockerfile
+instructions of its own. A YAML folded scalar is fine for a long line:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">image</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">run</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">&gt;</span>
+<span class="w">      </span><span class="no">curl -sSL https://example.com/tool -o /usr/local/bin/tool &amp;&amp;</span>
+<span class="w">      </span><span class="no">chmod +x /usr/local/bin/tool</span>
+</code></pre></div>
+<p>A script that does not fit on one line belongs in <a href="#write-your-own-dockerfile">your own Dockerfile</a>.</p>
+<p>The <code>apk</code>, <code>php_extensions</code> and <code>npm</code> lists take plain names only: letters, digits and
+<code>@ . _ + : / = ~ -</code>, starting with a letter, a digit or <code>@</code> (so an entry cannot sneak in an option
+like <code>--allow-untrusted</code>). Anything else is refused with a hint to move it to <code>run</code>.</p>
+<h3 id="how-the-layer-is-built">How the layer is built<a class="headerlink" href="#how-the-layer-is-built" title="Permanent link">&para;</a></h3>
+<p>The keys render into a Dockerfile, one <code>RUN</code> per key in a fixed order (plus one that fetches
+<code>install-php-extensions</code> when the base image lacks it), so changing one key reuses the cached
+layers before it:</p>
+<div class="highlight"><pre><span></span><code><span class="k">ARG</span><span class="w"> </span>OROBOX_BASE_IMAGE
+<span class="k">FROM</span><span class="w"> </span><span class="s">${OROBOX_BASE_IMAGE}</span>
+<span class="k">USER</span><span class="w"> </span><span class="s">root</span>
+<span class="k">RUN</span><span class="w"> </span>apk<span class="w"> </span>add<span class="w"> </span>--no-cache<span class="w"> </span>imagemagick<span class="w"> </span>poppler-utils<span class="w"> </span>ghostscript
+<span class="k">RUN</span><span class="w"> </span><span class="nb">command</span><span class="w"> </span>-v<span class="w"> </span>install-php-extensions<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">(</span>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://github.com/mlocati/docker-php-extension-installer/releases/download/2.12.0/install-php-extensions<span class="w"> </span>-o<span class="w"> </span>/usr/local/bin/install-php-extensions<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>chmod<span class="w"> </span>+x<span class="w"> </span>/usr/local/bin/install-php-extensions<span class="o">)</span>
+<span class="k">RUN</span><span class="w"> </span>install-php-extensions<span class="w"> </span>redis<span class="w"> </span>imagick<span class="w"> </span>xsl
+<span class="k">RUN</span><span class="w"> </span>npm<span class="w"> </span>install<span class="w"> </span>-g<span class="w"> </span>@playwright/test
+<span class="k">RUN</span><span class="w"> </span>curl<span class="w"> </span>-sSL<span class="w"> </span>https://example.com/tool<span class="w"> </span>-o<span class="w"> </span>/usr/local/bin/tool<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>chmod<span class="w"> </span>+x<span class="w"> </span>/usr/local/bin/tool
+</code></pre></div>
+<p>You never run a build yourself. Whenever Orobox creates containers from the image — <code>orobox up</code>,
+and <code>init</code>, <code>test-init</code>, <code>db restore</code> or <code>test</code> when they have to start a service that is not
+running — it first compares a hash of the rendered Dockerfile, of the files in the build context
+(path, size and modification time) and of the base image with the label on the existing layer,
+and rebuilds only when something differs. When nothing changed, the check is a walk of the build
+context and one or two <code>docker image inspect</code>.</p>
+<p>Commands that work inside containers already running — <code>test</code> and <code>qa</code> on a running stack,
+<code>shell</code>, <code>console</code>, <code>run</code>, <code>xdebug</code> — neither rebuild nor switch: <strong>run <code>orobox up</code> to move the
+running containers to a new layer.</strong></p>
+<p><code>orobox up --rebuild</code> pulls the base image, then builds with <code>--no-cache</code>. You only need it for what
+Docker's cache cannot see, such as an unpinned <code>apk add</code> that should pick up a newer package.</p>
+<p>Removing every <code>image.*</code> key puts the project straight back on the published image.</p>
+<h3 id="write-your-own-dockerfile">Write your own Dockerfile<a class="headerlink" href="#write-your-own-dockerfile" title="Permanent link">&para;</a></h3>
+<p>For a multi-stage build, a compiled tool, or files <code>COPY</code>ed into the image, use a Dockerfile:</p>
+<div class="highlight"><pre><span></span><code>orobox<span class="w"> </span>extend<span class="w"> </span>image
+</code></pre></div>
+<p>This creates <code>docker/image/Dockerfile</code> and sets <code>image.dockerfile: docker/image/Dockerfile</code> in
+<code>.orobox.yaml</code>. A file already at that path is adopted only if it is an Orobox layer (final
+<code>FROM ${OROBOX_BASE_IMAGE}</code>); a different Dockerfile there (a production image, say) makes the
+command refuse rather than build the wrong thing.
+The final stage must build on the image Orobox passes in the <code>OROBOX_BASE_IMAGE</code> build argument;
+earlier stages can use anything:</p>
+<div class="highlight"><pre><span></span><code><span class="k">ARG</span><span class="w"> </span>OROBOX_BASE_IMAGE
+
+<span class="k">FROM</span><span class="w"> </span><span class="s">golang:1.24-alpine</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="s">tool</span>
+<span class="k">RUN</span><span class="w"> </span>go<span class="w"> </span>install<span class="w"> </span>example.com/some/tool@latest
+
+<span class="k">FROM</span><span class="w"> </span><span class="s">${OROBOX_BASE_IMAGE}</span>
+<span class="k">COPY</span><span class="w"> </span>--from<span class="o">=</span>tool<span class="w"> </span>/go/bin/tool<span class="w"> </span>/usr/local/bin/tool
+<span class="k">COPY</span><span class="w"> </span>php-fpm-pool.conf<span class="w"> </span>/usr/local/etc/php-fpm.d/zz-pool.conf
+</code></pre></div>
+<ul>
+<li>The <strong>build context is the Dockerfile's directory</strong> (<code>docker/image/</code> here), not the repository
+  root. Put the files you <code>COPY</code> next to the Dockerfile — and nothing else: every file in the
+  context is part of the rebuild check, so runtime data there (recipe directories, fixtures,
+  uploads) would rebuild the image and recreate the PHP containers whenever it changes. That is
+  why the Dockerfile gets a directory of its own.</li>
+<li><code>.dockerignore</code>: with only a Dockerfile (no other <code>image.*</code> key) a <code>Dockerfile.dockerignore</code>
+  works — Docker uses it instead of <code>&lt;context&gt;/.dockerignore</code>; with other <code>image.*</code> keys the
+  rendered Dockerfile goes in on stdin and only <code>&lt;context&gt;/.dockerignore</code> applies.</li>
+<li>A final <code>FROM</code> naming anything other than <code>${OROBOX_BASE_IMAGE}</code> is refused: with a hardcoded tag,
+  <code>oro_version</code> would no longer decide which Oro image runs. Because the base arrives as a
+  build argument, bumping <code>oro_version</code> moves your layer with it and the Dockerfile never needs
+  editing for an Oro upgrade.</li>
+<li>The declarative keys still work next to it. Their lines are appended to the end of your
+  Dockerfile (its final stage), so there is one build and one image.</li>
+<li>Changing a file in the build context triggers a rebuild, just like changing the Dockerfile.</li>
+</ul>
+<blockquote>
+<p>Build the image, not the code. Your sources are bind-mounted into the containers at run time, so
+copying them into the image gains nothing and makes every edit a rebuild. Use the image for tools
+and libraries.</p>
+</blockquote>
+<h2 id="level-1-php-settings">Level 1 — PHP settings<a class="headerlink" href="#level-1-php-settings" title="Permanent link">&para;</a></h2>
+<h3 id="change-php-settings">Change PHP settings<a class="headerlink" href="#change-php-settings" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># .orobox.yaml</span>
+<span class="nt">php_ini</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">memory_limit</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4G</span>
+<span class="w">  </span><span class="nt">max_execution_time</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span>
+<span class="w">  </span><span class="nt">date.timezone</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Europe/Rome</span>
+<span class="w">  </span><span class="nt">xdebug.log_level</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span>
+</code></pre></div>
+<p>No image build is involved. Orobox renders the map into <code>zz-project.ini</code> and mounts it read-only
+at <code>/usr/local/etc/php/conf.d/zz-project.ini</code> in every PHP container, including the one that runs
+the Oro install during <code>orobox init</code>. PHP reads it after the image's own settings, so your values
+win.</p>
+<ul>
+<li>Write directives as dotted keys, exactly as php.ini names them (<code>xdebug.mode</code>, not a nested
+  <code>xdebug:</code> map). Case is preserved.</li>
+<li><code>true</code> / <code>false</code> become <code>On</code> / <code>Off</code>.</li>
+<li>Constant expressions stay unquoted, so PHP evaluates them:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="nt">php_ini</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">error_reporting</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">E_ALL &amp; ~E_DEPRECATED</span>
+</code></pre></div>
+<ul>
+<li>Words php.ini would turn into <code>1</code> or nothing (<code>None</code>, <code>yes</code>, <code>no</code>, <code>on</code>, <code>off</code>, …) are quoted
+  when you write them as strings, so <code>session.cookie_samesite: None</code> really sends <code>None</code>.</li>
+<li>A value with <code>$</code> is written literally, in single quotes: php.ini would otherwise replace
+  <code>${VAR}</code> with an environment variable.</li>
+<li>Multi-word values, and values with characters php.ini treats specially, are quoted for you
+  (<code>sendmail_path: msmtp -a default</code> keeps working).</li>
+<li>Values are single-line; nested maps and lists are refused.</li>
+</ul>
+<p>Already have an ini file in the repository? Point at it instead, and it is mounted as it is:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">php_ini</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker/php.ini</span>
+</code></pre></div>
+<p>The file must exist; a wrong path is reported as a configuration error, not as a silently empty
+mount.</p>
+<p>After a change, run <code>orobox up</code>: the PHP containers are recreated with the new settings. (Orobox
+stamps them with a label holding a hash of the ini, which is what tells Compose they changed.)</p>
+<h2 id="level-1-ports-and-environment">Level 1 — ports and environment<a class="headerlink" href="#level-1-ports-and-environment" title="Permanent link">&para;</a></h2>
+<h3 id="move-a-host-port">Move a host port<a class="headerlink" href="#move-a-host-port" title="Permanent link">&para;</a></h3>
+<p>Two Orobox projects running at the same time both want 8080, 5432, 6379… Move the ones that clash:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># .orobox.yaml</span>
+<span class="nt">ports</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">http</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8090</span>
+<span class="w">  </span><span class="nt">https</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8453</span>
+<span class="w">  </span><span class="nt">db</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5434</span>
+<span class="w">  </span><span class="nt">redis</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">6380</span>
+<span class="w">  </span><span class="nt">adminer</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span><span class="w">      </span><span class="c1"># do not publish Adminer on the host at all</span>
+</code></pre></div>
+<p>Only the host side moves; containers keep talking to each other on the usual ports, so no DSN
+changes. <code>0</code> keeps a service off the host entirely, except for <code>http</code> and <code>https</code>, which the
+application URLs and the websocket depend on. <code>orobox up</code> prints the URLs with the ports you set.
+The full list of keys and defaults is in <a href="../configuration/#host-ports-ports">Host ports</a>.</p>
+<p><code>ports</code> is shared with everyone who uses the repository's <code>.orobox.yaml</code>. A port that only clashes
+on your machine belongs in your <a href="#personal-tweaks">personal compose file</a>, with <code>ports: !override</code>
+on the service.</p>
+<h3 id="change-environment-variables">Change environment variables<a class="headerlink" href="#change-environment-variables" title="Permanent link">&para;</a></h3>
+<p>Put a <code>.env</code> (and <code>.env.test</code> for the test environment) next to <code>.orobox.yaml</code> (or the file given
+with <code>--config</code>) holding only the variables you change or add:</p>
+<div class="highlight"><pre><span></span><code>ORO_MAILER_DSN=smtp://mail:1025
+MY_API_KEY=xyz
+</code></pre></div>
+<p>They are layered over the file Orobox generates: your file is appended after it, in its own
+order, so your values win and your <code>${...}</code> references resolve. <code>OPTS="${OPTS} --more"</code> extends
+the generated value: the merged file holds the generated value in place of <code>${OPTS}</code>, so compose
+and the application read the same thing. The generated values that use a key you changed are
+then read again after your file, until nothing more depends on it, so they follow your value.
+Multi-line quoted values (a PEM key) are copied as they are. Run <code>orobox up</code> to apply.</p>
+<blockquote>
+<p><strong><code>project</code> and <code>demo</code> installs:</strong> the application (<code>application</code>, <code>php-fpm-app</code>) reads your
+checkout's own <code>.env-app.local</code>, which <code>orobox init</code> seeds once from the merged file. A later
+change to <code>.env</code> reaches only <code>ws</code>, <code>consumer</code> and <code>cron</code>; change <code>.env-app.local</code> for the
+application itself. See <a href="../configuration/#overriding-the-generated-env-files">Overriding the generated env files</a>.</p>
+</blockquote>
+<p>To set a variable on <strong>one</strong> service only, use the compose override instead (next section).</p>
+<h2 id="level-2-the-compose-stack">Level 2 — the compose stack<a class="headerlink" href="#level-2-the-compose-stack" title="Permanent link">&para;</a></h2>
+<h3 id="add-a-service">Add a service<a class="headerlink" href="#add-a-service" title="Permanent link">&para;</a></h3>
+<p>Write a standard Docker Compose file next to <code>.orobox.yaml</code>. Orobox appends it after its own files,
+with Compose's normal merge rules:</p>
+<div class="highlight"><pre><span></span><code>orobox<span class="w"> </span>extend<span class="w"> </span>compose
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="c1"># .orobox.compose.yaml</span>
+<span class="nt">services</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">minio</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">minio/minio</span><span class="w">   </span><span class="c1"># pin a RELEASE.* tag in a real project</span>
+<span class="w">    </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">server /data --console-address :9001</span>
+<span class="w">    </span><span class="nt">environment</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">MINIO_ROOT_USER</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">minio</span>
+<span class="w">      </span><span class="nt">MINIO_ROOT_PASSWORD</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">minio123</span>
+<span class="w">    </span><span class="nt">ports</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"9001:9001"</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">volumes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">minio_data</span><span class="p p-Indicator">:</span><span class="nv">/data</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">dev.orobox.url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http://localhost:9001</span>
+
+<span class="nt">volumes</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">minio_data</span><span class="p">:</span>
+</code></pre></div>
+<ul>
+<li>The service is reachable from the application as <code>minio</code> on the compose network.</li>
+<li>The <code>dev.orobox.url</code> label makes <code>orobox up</code> list it under "Project services".</li>
+<li><code>orobox logs minio</code> and <code>orobox shell minio</code> work like for the built-in services, and a custom
+  command in <code>.orobox.yaml</code> can target it with <code>service: minio</code>.</li>
+<li>A service with a <code>build:</code> section is rebuilt on every <code>orobox up</code>.</li>
+</ul>
+<h3 id="mount-files-or-set-variables-on-an-existing-service">Mount files or set variables on an existing service<a class="headerlink" href="#mount-files-or-set-variables-on-an-existing-service" title="Permanent link">&para;</a></h3>
+<p>The same file tweaks Orobox's own services:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># .orobox.compose.yaml</span>
+<span class="nt">services</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">php-fpm-app</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">volumes</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./docker/fixtures:/var/www/oro/fixtures:ro</span>
+
+<span class="w">  </span><span class="nt">consumer</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">environment</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">ORO_MQ_PREFETCH</span><span class="p">:</span><span class="w"> </span><span class="s">"5"</span>
+</code></pre></div>
+<p>Write host paths relative to the file, as in any compose project. Orobox runs compose from its own
+internal directory, so it passes compose a copy of your file with every relative host path made
+absolute against the project directory. That includes paths reached through YAML anchors and
+<code>&lt;&lt;</code> merge keys. Your file is never modified.</p>
+<p>Compose <strong>appends</strong> to lists. To replace the ports of a core service, tag the list <code>!override</code>;
+to remove it, <code>!reset []</code> (Docker Compose 2.24.4 or later):</p>
+<div class="highlight"><pre><span></span><code><span class="nt">services</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">web</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">ports</span><span class="p">:</span><span class="w"> </span><span class="kt">!override</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"9090:80"</span>
+</code></pre></div>
+<h3 id="personal-tweaks">Personal tweaks<a class="headerlink" href="#personal-tweaks" title="Permanent link">&para;</a></h3>
+<p><code>.orobox.compose.local.yaml</code> works exactly like the team file, is applied after it, and is meant to
+stay out of git:</p>
+<div class="highlight"><pre><span></span><code>orobox<span class="w"> </span>extend<span class="w"> </span>compose<span class="w"> </span>--local<span class="w">   </span><span class="c1"># creates it, and adds it to .gitignore if the project has one</span>
+</code></pre></div>
+<p>Use it for what only your machine needs: a port that clashes with another project of yours, a
+mount of a local checkout of a dependency, Xdebug environment on a service.</p>
+<h3 id="things-to-know-about-the-override">Things to know about the override<a class="headerlink" href="#things-to-know-about-the-override" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Data in named volumes is deleted by <code>orobox up --clean</code> and <code>orobox clear</code></strong>, which run
+  <code>docker compose down -v</code>. For data that must survive, declare the volume <code>external: true</code> and
+  create it once with <code>docker volume create</code>.</li>
+<li><strong>A broken file stops every command that runs compose</strong>, naming the file. Orobox never runs the
+  stack with your override silently dropped. An empty or comments-only file counts as absent; a
+  file with several YAML documents (<code>---</code>) works as compose reads it.</li>
+<li><strong>The personal file may tweak what the team file adds</strong> (a recipe's ports, say), and a <code>build:</code>
+  in a later file that only adds <code>args</code> keeps the context an earlier file gave it.</li>
+<li><strong>Tweaking a service that is not always there is fine.</strong> An entry for <code>db-test</code> (which exists
+  only for <code>orobox test</code> / <code>test-init</code>) or for an optional service you disabled is used where that
+  service exists and left out elsewhere, instead of breaking every command. A tweak to a service
+  the stack never defines gets a warning; a new service needs an <code>image</code> or a <code>build</code>.</li>
+<li><strong>Warnings</strong>, printed once per command: a bind-mount source that does not exist on the host
+  (in short syntax Docker creates an empty directory there; in long syntax it refuses to start the
+  container), and an <code>image:</code> set on one of Orobox's own services (<code>application</code>, <code>web</code>,
+  <code>php-fpm-app</code>, <code>ws</code>, <code>consumer</code>, <code>cron</code>, <code>volume-init</code>, <code>web-init</code>), which detaches it from
+  <code>oro_version</code> and from your image layer.</li>
+<li><strong><code>dev.orobox.url</code></strong> is printed as written (no <code>${VAR}</code> interpolation), and a service with
+  <code>profiles:</code> is not listed, since <code>orobox up</code> does not start it.</li>
+<li><strong>The deploy pipeline does not read these files</strong> (see <a href="#what-reaches-the-deploy-pipeline">below</a>).</li>
+</ul>
+<h2 id="ready-made-services-recipes">Ready-made services (recipes)<a class="headerlink" href="#ready-made-services-recipes" title="Permanent link">&para;</a></h2>
+<p>A recipe is a complete service, with everything it needs, that <code>orobox extend add</code> merges into the
+project:</p>
+<div class="highlight"><pre><span></span><code>orobox<span class="w"> </span>extend<span class="w"> </span>add<span class="w">            </span><span class="c1"># list them</span>
+orobox<span class="w"> </span>extend<span class="w"> </span>add<span class="w"> </span>varnish<span class="w">    </span><span class="c1"># add one</span>
+orobox<span class="w"> </span>extend<span class="w"> </span>add<span class="w"> </span>sftp<span class="w"> </span>selenium
+</code></pre></div>
+<p>Adding a recipe never overwrites your work: a service that already exists in
+<code>.orobox.compose.yaml</code> is refused (<code>--force</code> replaces only the recipe's services), settings are
+only added where <code>.orobox.yaml</code> does not have them, variables only where <code>.env</code> does not define
+them, and files only where none exists. If any part of a recipe is refused, nothing of it is
+written. The project needs its <code>.orobox.yaml</code> first (<code>orobox init</code>). Every recipe pins its image,
+and each prints what is left to do once it is added (on stderr with <code>--agent</code>).</p>
+<p>A recipe's files go to <code>docker/&lt;recipe&gt;/</code>. If your <code>image.dockerfile</code> sits in <code>docker/</code> itself,
+that directory is inside the image build context and every change there would rebuild the image;
+<code>extend add</code> warns about it. Keep the Dockerfile in a directory of its own (<code>docker/image/</code>, the
+<code>extend image</code> default).</p>
+<h3 id="varnish"><code>varnish</code><a class="headerlink" href="#varnish" title="Permanent link">&para;</a></h3>
+<p>A <a href="https://varnish-cache.org/">Varnish</a> HTTP cache in front of <code>web</code>.</p>
+<ul>
+<li>Adds the <code>varnish</code> service (<code>varnish:9.1.0</code>), published on http://localhost:6081 (container port
+  80), and its VCL in <code>docker/varnish/default.vcl</code>, which you are free to edit.</li>
+<li>Browse through http://localhost:6081 to go through the cache; the usual web port bypasses it.</li>
+<li>To let Oro invalidate the cache, configure FOSHttpCacheBundle in <code>config/config.yml</code>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="nt">fos_http_cache</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">proxy_client</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">varnish</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">http</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">servers</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">'varnish:80'</span><span class="p p-Indicator">]</span>
+<span class="w">        </span><span class="nt">base_url</span><span class="p">:</span><span class="w"> </span><span class="s">'localhost:6081'</span>
+</code></pre></div>
+<p>The VCL accepts <code>PURGE</code> and <code>BAN</code> only from private network addresses, which covers the stack.</p>
+<h3 id="selenium"><code>selenium</code><a class="headerlink" href="#selenium" title="Permanent link">&para;</a></h3>
+<p><a href="https://github.com/SeleniumHQ/docker-selenium">Selenium standalone Chrome</a> with noVNC, to watch a
+Behat run in a real browser.</p>
+<ul>
+<li>Adds the <code>selenium</code> service (<code>selenium/standalone-chrome:4.49.0-20260909</code>) with noVNC on
+  http://localhost:7900, no VNC password, and a 2 GB <code>/dev/shm</code> (Chrome crashes on Docker's 64 MB
+  default).</li>
+<li>The image's headless Chromium stays the default for Behat. To run against this browser instead,
+  point Mink at the grid and the application, both as seen from inside the stack:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">BEHAT_PARAMS</span><span class="o">=</span><span class="s1">'{"extensions":{"Behat\\MinkExtension":{"base_url":"http://web/","sessions":{"first_session":{"oroSelenium2":{"wd_host":"http://selenium:4444/wd/hub"}}}}}}'</span>
+</code></pre></div>
+<p>or set the same <code>base_url</code> / <code>wd_host</code> keys in your <code>behat.yml</code>. Then open http://localhost:7900.
+- The pinned tag is published for both amd64 and arm64.</p>
+<h3 id="sftp"><code>sftp</code><a class="headerlink" href="#sftp" title="Permanent link">&para;</a></h3>
+<p>An SFTP server for integrations that exchange files.</p>
+<ul>
+<li>Adds the <code>sftp</code> service (<a href="https://github.com/atmoz/sftp"><code>atmoz/sftp</code></a>, pinned by digest because
+  the image publishes no versioned tags) on host port 2222, with user <code>orobox</code> / password <code>orobox</code>
+  (uid/gid 1000, so files stay writable on a typical Linux host), and the upload directory
+  <code>docker/sftp/upload</code> bind-mounted.</li>
+<li>From an integration running in the stack: host <code>sftp</code>, port <code>22</code>, user <code>orobox</code>, password
+  <code>orobox</code>, remote directory <code>/upload</code>.</li>
+<li>From the host: <code>sftp -P 2222 orobox@localhost</code>. Uploaded files land in <code>docker/sftp/upload</code>.</li>
+<li>The image is built for amd64 only; on arm64 it runs under emulation, if at all.</li>
+</ul>
+<h3 id="blackfire"><code>blackfire</code><a class="headerlink" href="#blackfire" title="Permanent link">&para;</a></h3>
+<p>The <a href="https://www.blackfire.io/">Blackfire</a> profiler: agent service plus PHP probe.</p>
+<ul>
+<li>Adds the <code>blackfire</code> agent service (<code>blackfire/blackfire:2026.9.1</code>), <code>blackfire</code> to
+  <code>image.php_extensions</code> (so the image is rebuilt with the probe), <code>blackfire.agent_socket:
+  tcp://blackfire:8307</code> to <code>php_ini</code>, and empty <code>BLACKFIRE_SERVER_ID</code> / <code>BLACKFIRE_SERVER_TOKEN</code>
+  to the <code>.env</code> next to <code>.orobox.yaml</code>.</li>
+<li>Fill in the two variables with the server credentials from
+  https://blackfire.io/my/settings/credentials, then run <code>orobox up</code>. Keep them out of git if your
+  <code>.env</code> is committed.</li>
+<li>When <code>php_ini</code> is the path of an ini file of your own, Orobox does not edit that file: the rest
+  of the recipe is applied and it prints the line to add yourself
+  (<code>blackfire.agent_socket = tcp://blackfire:8307</code>). The check runs when the recipe is added: to
+  confirm the line is there, add the recipe again with <code>orobox extend add --force blackfire</code>
+  (which also puts the recipe's service back as the recipe defines it); it then reports nothing
+  for the ini file.</li>
+</ul>
+<h3 id="recipe-ports">Recipe ports<a class="headerlink" href="#recipe-ports" title="Permanent link">&para;</a></h3>
+<p>Recipes publish fixed host ports (6081, 7900, 2222), so two projects running the same recipe at
+the same time collide. Move yours in <code>.orobox.compose.local.yaml</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">services</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">varnish</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">ports</span><span class="p">:</span><span class="w"> </span><span class="kt">!override</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"6082:80"</span>
+</code></pre></div>
+<h2 id="when-changes-take-effect">When changes take effect<a class="headerlink" href="#when-changes-take-effect" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>You change…</th>
+<th>What happens</th>
+<th>What to run</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>an <code>image.*</code> key, a file in the Dockerfile's directory, or <code>oro_version</code></td>
+<td>the layer is rebuilt the next time Orobox creates containers; running containers stay on the old one until <code>up</code> recreates them</td>
+<td><code>orobox up</code></td>
+</tr>
+<tr>
+<td><code>php_ini</code> (map or the file it points to)</td>
+<td>the PHP containers are recreated</td>
+<td><code>orobox up</code></td>
+</tr>
+<tr>
+<td><code>ports</code></td>
+<td>the affected containers are recreated with the new ports</td>
+<td><code>orobox up</code></td>
+</tr>
+<tr>
+<td><code>.env</code> / <code>.env.test</code> next to <code>.orobox.yaml</code></td>
+<td>the generated env files are regenerated (for <code>project</code> / <code>demo</code>, the application itself reads <code>.env-app.local</code>)</td>
+<td><code>orobox up</code></td>
+</tr>
+<tr>
+<td><code>.orobox.compose.yaml</code> / <code>.orobox.compose.local.yaml</code></td>
+<td>Compose recreates the services whose definition changed</td>
+<td><code>orobox up</code></td>
+</tr>
+<tr>
+<td>an upstream package you install unpinned</td>
+<td>nothing (Docker's cache hides it)</td>
+<td><code>orobox up --rebuild</code></td>
+</tr>
+</tbody>
+</table>
+<p>Nothing here needs <code>orobox init</code> again.</p>
+<h2 id="what-reaches-the-deploy-pipeline">What reaches the deploy pipeline<a class="headerlink" href="#what-reaches-the-deploy-pipeline" title="Permanent link">&para;</a></h2>
+<p><code>orobox deploy</code>, the generated GitLab CI and the Dagger engine of <code>orobox qa</code> / <code>orobox test</code> run on
+the <strong>same image layer and the same PHP settings</strong> as your development stack: Dagger builds the
+Dockerfile Orobox renders from <code>image.*</code> and writes the same <code>zz-project.ini</code> into every step. A
+project that needs <code>redis</code> locally therefore has it in CI too. The layer is built as a step of its
+own, before the dependencies, so a broken entry is reported as such. <code>--no-cache</code> rebuilds it. The
+deploy summary shows a <code>Layer:</code> and a <code>php.ini:</code> line when they apply; both come from your working
+tree, so with <code>orobox deploy</code> building another ref, the summary says the code and the image
+settings come from different places.</p>
+<p>The compose override, the recipes' services, <code>ports</code> and the <code>.env</code> merge describe the development
+stack only and do not reach the pipeline, which has its own services. See
+<a href="../deployment/#the-image-the-pipeline-runs-on">The image the pipeline runs on</a>.</p>
+<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
+<p><strong>The build fails.</strong> The build log is printed in full (on stderr with <code>--agent</code>). The usual causes
+are a package name that does not exist in the Alpine release of the image, or an extension
+<code>install-php-extensions</code> does not support for that PHP version. Run with <code>--debug</code> to stream the
+build as it happens.</p>
+<p><strong>My change to the image is not picked up.</strong> The layer is rebuilt when Orobox creates containers,
+and running containers keep the old one: <code>orobox test</code>, <code>qa</code>, <code>shell</code>, <code>console</code> and <code>run</code> work in
+the containers that are already up. Run <code>orobox up</code>. If the change is an unpinned upstream
+package, use <code>orobox up --rebuild</code>.</p>
+<p><strong><code>install-php-extensions: not found</code>.</strong> With <code>image.php_extensions</code> the layer downloads the tool
+when the base image lacks it, so there it means the download failed — check network access from
+the build. In a Dockerfile of your own (<code>RUN install-php-extensions …</code>) nothing is downloaded for
+you: your local copy of the base image predates the tool, and <code>orobox up --rebuild</code> refreshes it.</p>
+<p><strong>The image rebuilds and the PHP containers restart every time.</strong> Something in the build context
+keeps changing — a recipe directory, fixtures or uploads next to the Dockerfile. Move the
+Dockerfile to a directory of its own (<code>docker/image/</code>) and update <code>image.dockerfile</code>.</p>
+<p><strong>A mounted directory is empty inside the container.</strong> The host path does not exist where Orobox
+resolved it — Orobox prints a warning naming the absolute path. Remember that relative paths are
+relative to the override file, which sits next to <code>.orobox.yaml</code>.</p>
+<p><strong>"port is already allocated".</strong> Another project or program uses that host port. Move it with
+<a href="#move-a-host-port"><code>ports</code></a>, or with <code>!override</code> in <code>.orobox.compose.local.yaml</code> for a service of
+your override.</p>
+<p><strong>Every command fails naming <code>.orobox.compose.yaml</code>.</strong> The file is not valid YAML, or its top level
+is not a mapping. Fix the file; nothing runs with a broken override.</p>
+<p><strong>"the top-level <code>dockerfile</code> key is deprecated".</strong> Move it under <code>image:</code> as
+<code>image.dockerfile</code>. Setting both is an error.</p>
+<p><strong><code>orobox extend</code> reformatted my <code>.orobox.yaml</code>.</strong> Editing the file keeps its comments, but blank
+lines are dropped and indentation is normalized. Review the diff before committing.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
