@@ -40,24 +40,44 @@ func TestHelpAndCompletionIgnoreABrokenConfig(t *testing.T) {
 	if err := os.WriteFile(".orobox.yaml", []byte("namespace: [unclosed\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	exited := false
+	// The stub stops the command the way os.Exit would — by never letting it run — so a test
+	// that gets this wrong cannot end up running `docker compose logs -f` for real.
+	type stopped struct{}
 	oldExit := exitOnConfigError
-	exitOnConfigError = func(int) { exited = true }
-	t.Cleanup(func() { ConfigError = nil; rootCmd.SetArgs(nil); exitOnConfigError = oldExit })
+	exitOnConfigError = func(int) { panic(stopped{}) }
+	oldRun := docker.RunComposeCommand
+	docker.RunComposeCommand = func(string, ...string) error {
+		t.Error("a command ran compose despite the broken config")
+		return nil
+	}
+	t.Cleanup(func() {
+		ConfigError = nil
+		rootCmd.SetArgs(nil)
+		exitOnConfigError = oldExit
+		docker.RunComposeCommand = oldRun
+	})
+	refused := func(argv ...string) (gotStopped bool) {
+		defer func() {
+			if r := recover(); r != nil {
+				if _, ok := r.(stopped); !ok {
+					panic(r)
+				}
+				gotStopped = true
+			}
+		}()
+		_ = runCommand(t, argv...)
+		return false
+	}
 
 	// completion writes straight to os.Stdout, which other tests in this package may have
 	// swapped for a closed pipe; what matters here is that the config gate lets it through.
 	for _, argv := range [][]string{{"help"}, {"completion", "bash"}} {
-		exited = false
-		_ = runCommand(t, argv...)
-		if exited {
+		if refused(argv...) {
 			t.Errorf("orobox %v with a broken config was stopped by the config check", argv)
 		}
 	}
 	// The same broken config must still stop an ordinary command, or the test proves nothing.
-	exited = false
-	_ = runCommand(t, "logs", "web")
-	if !exited {
+	if !refused("logs", "web") {
 		t.Error("a broken config did not stop `orobox logs`")
 	}
 	if ConfigError == nil {

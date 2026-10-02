@@ -247,7 +247,7 @@ func TestLayerSpecBuildOpts(t *testing.T) {
 }
 
 // --no-cache must rebuild the layer too: the run ID goes in a build argument declared right after
-// the final FROM, so every RUN of the final stage misses the cache.
+// each FROM, so every RUN of the stage misses the cache.
 func TestLayerSpecNoCacheBustsTheLayer(t *testing.T) {
 	l := &LayerSpec{
 		Dockerfile: []byte("ARG OROBOX_BASE_IMAGE\nFROM ${OROBOX_BASE_IMAGE}\nUSER root\nRUN apk add --no-cache git\n"),
@@ -258,7 +258,7 @@ func TestLayerSpecNoCacheBustsTheLayer(t *testing.T) {
 	}
 	got := l.dockerfileFor("run-42")
 	if !strings.Contains(got, "FROM ${OROBOX_BASE_IMAGE}\nARG OROBOX_CACHE_BUST\nUSER root") {
-		t.Errorf("cache-bust ARG not placed after the final FROM:\n%s", got)
+		t.Errorf("cache-bust ARG not placed after the FROM:\n%s", got)
 	}
 	opts := l.buildOpts("run-42")
 	found := false
@@ -272,53 +272,46 @@ func TestLayerSpecNoCacheBustsTheLayer(t *testing.T) {
 	}
 }
 
-// The build context is uploaded with the patterns of its .dockerignore excluded, as docker build
-// would, and with the project's own excludes when the context is the project root.
-func TestLayerContextExcludes(t *testing.T) {
+// The ignore patterns are the ones `docker build` would apply locally, in order, negations
+// included and parsed as Docker parses them (BOM, `! name`, comments).
+func TestLayerIgnorePatterns(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, ".dockerignore"), []byte("# comment\n\nnode_modules\n!keep.txt\n/var/cache\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".dockerignore"), []byte("\ufeff# comment\n\nnode_modules\n! keep.txt\n/var/cache\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got := layerContextExcludes(dir, "", false)
-	for _, want := range []string{"node_modules", "var/cache"} {
-		if !containsString(got, want) {
-			t.Errorf("excludes %v lack %q", got, want)
-		}
-	}
-	for _, unwanted := range []string{"# comment", ""} {
-		if containsString(got, unwanted) {
-			t.Errorf("excludes %v must not contain %q", got, unwanted)
-		}
-	}
-	// A negation re-includes files, so it has to reach the exclude list, in order.
-	if !containsString(got, "!keep.txt") {
-		t.Errorf("excludes %v lost the negation !keep.txt", got)
-	}
-	if root := layerContextExcludes(dir, "", true); len(root) <= len(got) {
-		t.Errorf("a project-root context must add the project excludes: %v", root)
+	got := layerIgnorePatterns(dir, "Dockerfile", false)
+	if want := []string{"node_modules", "!keep.txt", "var/cache"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("patterns = %v, want %v", got, want)
 	}
 }
 
-func containsString(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
+// As locally: a Dockerfile-specific ignore file replaces .dockerignore only when the layer is
+// the project Dockerfile alone (built with -f there); with other image.* keys the local build
+// reads the Dockerfile from stdin, which only ever honours .dockerignore.
+func TestLayerIgnorePatternsFollowTheLocalRule(t *testing.T) {
+	dir := t.TempDir()
+	for name, content := range map[string]string{".dockerignore": "generic\n", "Dockerfile.dockerignore": "specific\n"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
 		}
 	}
-	return false
+	if got := layerIgnorePatterns(dir, "Dockerfile", true); strings.Join(got, ",") != "specific" {
+		t.Errorf("Dockerfile-only layer: patterns = %v, want [specific]", got)
+	}
+	if got := layerIgnorePatterns(dir, "Dockerfile", false); strings.Join(got, ",") != "generic" {
+		t.Errorf("layer with image.* lines: patterns = %v, want [generic]", got)
+	}
 }
 
-// As Docker does, a Dockerfile-specific ignore file replaces the context's .dockerignore.
-func TestLayerContextExcludesPrefersTheDockerfileSpecificFile(t *testing.T) {
+// The upload leaves out the ignore patterns, then the project's own excludes when the context is
+// the project root — last, so a negation in .dockerignore cannot pull a git-ignored file back in.
+func TestLayerUploadExcludesPutTheProjectExcludesLast(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, ".dockerignore"), []byte("generic\n"), 0o644); err != nil {
-		t.Fatal(err)
+	got := layerUploadExcludes(dir, []string{"a", "!b"}, true)
+	if len(got) < 3 || got[0] != "a" || got[1] != "!b" {
+		t.Errorf("excludes = %v, want the ignore patterns first and the project excludes after", got)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "Dockerfile.dockerignore"), []byte("specific\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	got := layerContextExcludes(dir, "Dockerfile", false)
-	if !containsString(got, "specific") || containsString(got, "generic") {
-		t.Errorf("excludes = %v, want only the Dockerfile-specific patterns", got)
+	if plain := layerUploadExcludes(dir, []string{"a"}, false); strings.Join(plain, ",") != "a" {
+		t.Errorf("excludes = %v, want only the ignore patterns outside the project root", plain)
 	}
 }

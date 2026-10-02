@@ -106,6 +106,18 @@ func TestHeartbeatStaysQuietWithDebug(t *testing.T) {
 	}
 }
 
+// The layer build is not an exec of its own command, so no engine span is followed for it.
+func TestStartUnfollowedFollowsNoSpan(t *testing.T) {
+	log := newLogBuffer(nil)
+	r := newReporter(&strings.Builder{}, false, log)
+
+	task := r.startUnfollowed("image", "build the project image layer")
+	defer task.ok("")
+	if task.reader != nil || task.stream {
+		t.Error("an unfollowed step must not follow an engine span")
+	}
+}
+
 func TestReleaseStreamsEveryLine(t *testing.T) {
 	now := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
 	var out strings.Builder

@@ -290,12 +290,22 @@ func (r *resolver) service(name string, svc *yamlv3.Node) {
 			r.volume(deref(v))
 		}
 	}
+	// A service extending another inherits its build, context included.
+	if isSet(mapGet(svc, "extends")) {
+		r.built[name] = true
+	}
 	if b := mapGet(svc, "build"); isSet(b) {
 		switch b.Kind {
 		case yamlv3.ScalarNode:
 			r.buildContext(b)
 		case yamlv3.MappingNode:
-			r.buildMapping(b, !r.built[name])
+			defaultContext := !r.built[name] && mapGet(b, "context") == nil
+			if defaultContext {
+				// The context is about to be added: make sure the mapping is this service's
+				// own, not an anchor other services share (`build: *b`) or one merged in.
+				b = ownBuildMapping(svc)
+			}
+			r.buildMapping(b, defaultContext)
 		}
 		r.built[name] = true
 	}
@@ -357,6 +367,38 @@ func (r *resolver) buildMapping(b *yamlv3.Node, defaultContext bool) {
 	if ssh != nil && ssh.Kind == yamlv3.MappingNode {
 		mapEntries(ssh, func(_ string, v *yamlv3.Node) { r.scalar(v) })
 	}
+}
+
+// ownBuildMapping returns svc's build mapping as an entry of svc itself, copying it there when
+// it is an alias of a shared anchor or comes in through a merge key. A copy at the service is
+// what compose would merge anyway, so the service's build is unchanged; it only stops an edit
+// to it from reaching every other service that shares the anchor.
+func ownBuildMapping(svc *yamlv3.Node) *yamlv3.Node {
+	for i := 0; i+1 < len(svc.Content); i += 2 {
+		if svc.Content[i].Value == "build" && !isMergeKey(svc.Content[i]) {
+			v := svc.Content[i+1]
+			if v.Kind != yamlv3.AliasNode {
+				return v
+			}
+			c := copyMapping(deref(v))
+			svc.Content[i+1] = c
+			return c
+		}
+	}
+	c := copyMapping(mapGet(svc, "build"))
+	svc.Content = append(svc.Content, &yamlv3.Node{Kind: yamlv3.ScalarNode, Tag: "!!str", Value: "build"}, c)
+	return c
+}
+
+// copyMapping returns a copy of mapping m whose own entries can be changed without touching m;
+// the values are shared, which is fine because only keys are added to the copy. Merge keys are
+// resolved into plain entries, the mapping's own keys winning.
+func copyMapping(m *yamlv3.Node) *yamlv3.Node {
+	c := &yamlv3.Node{Kind: yamlv3.MappingNode, Tag: "!!map"}
+	mapEntries(m, func(key string, value *yamlv3.Node) {
+		c.Content = append(c.Content, &yamlv3.Node{Kind: yamlv3.ScalarNode, Tag: "!!str", Value: key}, value)
+	})
+	return c
 }
 
 // keyValue rewrites the value of a `key=value` scalar when isPath accepts it. An entry
@@ -557,7 +599,8 @@ func BuildServices(resolved []byte) (map[string]bool, error) {
 	built := map[string]bool{}
 	for _, doc := range docs {
 		mapEntries(mapGet(doc.Content[0], "services"), func(name string, svc *yamlv3.Node) {
-			if isSet(mapGet(svc, "build")) {
+			// extends brings the extended service's build, context included.
+			if isSet(mapGet(svc, "build")) || isSet(mapGet(svc, "extends")) {
 				built[name] = true
 			}
 		})

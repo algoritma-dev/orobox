@@ -63,11 +63,16 @@ func OverrideAnalysis() composeoverride.Analysis {
 		merged.MissingPaths = append(merged.MissingPaths, a.MissingPaths...)
 		merged.CoreImageOverrides = append(merged.CoreImageOverrides, a.CoreImageOverrides...)
 		merged.HasBuild = merged.HasBuild || a.HasBuild
-		for _, u := range a.URLs {
+		for _, u := range append(append([]composeoverride.ServiceURL{}, a.URLs...), a.ProfiledURLs...) {
 			urls[u.Service] = u.URL // later file overwrites
 		}
+		// Files are merged in order, so a later file clearing a service's profiles wins over an
+		// earlier one setting them, and the other way round.
 		for _, name := range a.Profiled {
 			profiled[name] = true
+		}
+		for _, name := range a.Unprofiled {
+			profiled[name] = false
 		}
 	}
 	// Profiles declared in one file apply to the service in every file: `up` starts it in none.
@@ -104,7 +109,7 @@ func writeComposeOverrides(internalDir, projectDir string) (changed bool, err er
 
 	var errs []error
 	analyses := make([]composeoverride.Analysis, 0, len(OverrideFiles))
-	for _, f := range OverrideFiles {
+	for i, f := range OverrideFiles {
 		drop := func() {
 			// A file that cannot be used must not leave a stale copy behind.
 			changed = removeIfExists(filepath.Join(internalDir, f.Resolved)) || changed
@@ -123,10 +128,19 @@ func writeComposeOverrides(internalDir, projectDir string) (changed bool, err er
 		if perr == nil {
 			test, droppedTest, perr = pruneFor(resolved, testServices, testKnown)
 		}
-		// The analysis is of what `up` runs: the base copy, after pruning.
+		// URLs, profiles and builds are what `up` runs: the base copy, after pruning. Missing
+		// mounts and core image overrides are reported for the test copy as well, so a tweak to
+		// db-test is checked too.
 		var analysis composeoverride.Analysis
 		if perr == nil && base != nil {
 			analysis, perr = composeoverride.Analyze(base, CoreServices, pathExists)
+		}
+		if perr == nil && test != nil {
+			var testAnalysis composeoverride.Analysis
+			if testAnalysis, perr = composeoverride.Analyze(test, CoreServices, pathExists); perr == nil {
+				analysis.MissingPaths = mergeMissing(analysis.MissingPaths, testAnalysis.MissingPaths)
+				analysis.CoreImageOverrides = mergeNames(analysis.CoreImageOverrides, testAnalysis.CoreImageOverrides)
+			}
 		}
 		if perr != nil {
 			drop()
@@ -135,7 +149,11 @@ func writeComposeOverrides(internalDir, projectDir string) (changed bool, err er
 		}
 		changed = writeOrRemove(filepath.Join(internalDir, f.ResolvedTest), test) || changed
 		changed = writeOrRemove(filepath.Join(internalDir, f.Resolved), base) || changed
-		warnDropped(f.Source, droppedBase, droppedTest)
+		// After an earlier file failed, its services are missing from the known set, and this
+		// file's tweaks to them would be reported as typos; the real error is already reported.
+		if i == 0 || len(errs) == 0 {
+			warnDropped(f.Source, droppedBase, droppedTest)
+		}
 		warnOverride(analysis)
 		analyses = append(analyses, analysis)
 
@@ -305,4 +323,34 @@ func appendOverrideArgs(args []string, internalDir string, test bool) []string {
 		}
 	}
 	return args
+}
+
+// mergeMissing appends to a the paths of b it does not list yet.
+func mergeMissing(a, b []composeoverride.MissingPath) []composeoverride.MissingPath {
+	seen := map[string]bool{}
+	for _, p := range a {
+		seen[p.Path] = true
+	}
+	for _, p := range b {
+		if !seen[p.Path] {
+			seen[p.Path] = true
+			a = append(a, p)
+		}
+	}
+	return a
+}
+
+// mergeNames appends to a the names of b it does not list yet.
+func mergeNames(a, b []string) []string {
+	seen := map[string]bool{}
+	for _, n := range a {
+		seen[n] = true
+	}
+	for _, n := range b {
+		if !seen[n] {
+			seen[n] = true
+			a = append(a, n)
+		}
+	}
+	return a
 }

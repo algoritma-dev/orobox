@@ -2,6 +2,7 @@ package docker
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/algoritma-dev/orobox/internal/config"
 	"github.com/algoritma-dev/orobox/internal/output"
+	"github.com/algoritma-dev/orobox/internal/utils"
 	"github.com/spf13/viper"
 	yamlv3 "gopkg.in/yaml.v3"
 )
@@ -1408,14 +1410,21 @@ func TestGetNginxPortsPrecedence(t *testing.T) {
 			t.Errorf("got %s/%s, want 9000/9443", httpPort, httpsPort)
 		}
 	})
-	t.Run("nginx_http_port beats env", func(t *testing.T) {
+	t.Run("env beats nginx_http_port in the config file", func(t *testing.T) {
+		// Loaded the way initConfig loads it: from a file, with AutomaticEnv on. viper puts an
+		// ORO_* variable above the file, so the variable wins over the deprecated key.
 		viper.Reset()
 		t.Cleanup(viper.Reset)
 		t.Setenv("ORO_NGINX_HTTP_PORT", "6000")
-		viper.Set("nginx_http_port", "7000")
+		viper.SetEnvPrefix("ORO")
+		viper.AutomaticEnv()
+		viper.SetConfigType("yaml")
+		if err := viper.ReadConfig(strings.NewReader("nginx_http_port: 7000\n")); err != nil {
+			t.Fatal(err)
+		}
 		httpPort, httpsPort := GetNginxPorts()
-		if httpPort != "7000" || httpsPort != "8443" {
-			t.Errorf("got %s/%s, want 7000/8443", httpPort, httpsPort)
+		if httpPort != "6000" || httpsPort != "8443" {
+			t.Errorf("got %s/%s, want 6000/8443", httpPort, httpsPort)
 		}
 	})
 	t.Run("env beats the default", func(t *testing.T) {
@@ -1438,4 +1447,25 @@ func TestGetNginxPortsPrecedence(t *testing.T) {
 			t.Errorf("got %s/%s, want 8080/8443", httpPort, httpsPort)
 		}
 	})
+}
+
+// After the command layer reported the php_ini problem, EnsureDockerCompose does not repeat it.
+func TestPhpIniWarningIsNotRepeatedAfterItWasReported(t *testing.T) {
+	resetWarned()
+	ResetPhpIniProblemReported()
+	t.Cleanup(func() { resetWarned(); ResetPhpIniProblemReported() })
+
+	var printed bytes.Buffer
+	defer utils.SetWriter(&printed)()
+
+	SetPhpIniProblemReported()
+	warnPhpIniProblem(errors.New("php_ini file conf/missing.ini does not exist"))
+	if printed.Len() != 0 {
+		t.Errorf("warning printed although it was already reported: %q", printed.String())
+	}
+	ResetPhpIniProblemReported()
+	warnPhpIniProblem(errors.New("php_ini file conf/missing.ini does not exist"))
+	if !strings.Contains(printed.String(), "Ignoring php_ini") {
+		t.Errorf("warning missing when nothing reported it: %q", printed.String())
+	}
 }

@@ -114,7 +114,7 @@ var (
 // over the key in .orobox.yaml, because viper's AutomaticEnv maps it onto that key — then
 // 8080 / 8443.
 // The old spellings keep working so existing configs do not break, but the `ports:` section wins
-// because it is the documented one and the only one that can say "do not publish" (0).
+// because it is the documented one.
 func GetNginxPorts() (httpPort string, httpsPort string) {
 	return resolveNginxPort("http", "nginx_http_port", "ORO_NGINX_HTTP_PORT"),
 		resolveNginxPort("https", "nginx_https_port", "ORO_NGINX_HTTPS_PORT")
@@ -122,7 +122,8 @@ func GetNginxPorts() (httpPort string, httpsPort string) {
 
 // resolveNginxPort applies the GetNginxPorts precedence to one of the two ports.
 func resolveNginxPort(portsKey, legacyKey, envVar string) string {
-	// IsSet rather than GetInt != 0: an explicit 0 must reach the template.
+	// IsSet rather than GetInt != 0, so a ports value is never mistaken for an unset one
+	// (Validate already refuses 0 for the web ports).
 	if viper.IsSet("ports." + portsKey) {
 		return strconv.Itoa(viper.GetInt("ports." + portsKey))
 	}
@@ -529,6 +530,10 @@ var phpIniProblemReported bool
 
 // SetPhpIniProblemReported records that the php_ini problem was already reported to the user.
 func SetPhpIniProblemReported() { phpIniProblemReported = true }
+
+// ResetPhpIniProblemReported forgets SetPhpIniProblemReported. Tests call it so one test's
+// suppression cannot hide the warning in the next.
+func ResetPhpIniProblemReported() { phpIniProblemReported = false }
 
 // warnPhpIniProblem warns, once, that php_ini is ignored, unless the user was already told.
 func warnPhpIniProblem(err error) {

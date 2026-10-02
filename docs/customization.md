@@ -276,10 +276,11 @@ MY_API_KEY=xyz
 ```
 
 They are layered over the file Orobox generates: your file is appended after it, in its own
-order, so your values win and your `${...}` references resolve (`OPTS="${OPTS} --more"` extends
-the generated value); the generated values that use a key you changed are then repeated after
-it, so they follow your value. Multi-line quoted values (a PEM key) are copied as they are. Run
-`orobox up` to apply.
+order, so your values win and your `${...}` references resolve. `OPTS="${OPTS} --more"` extends
+the generated value: the merged file holds the generated value in place of `${OPTS}`, so compose
+and the application read the same thing. The generated values that use a key you changed are
+then read again after your file, until nothing more depends on it, so they follow your value.
+Multi-line quoted values (a PEM key) are copied as they are. Run `orobox up` to apply.
 
 > **`project` and `demo` installs:** the application (`application`, `php-fpm-app`) reads your
 > checkout's own `.env-app.local`, which `orobox init` seeds once from the merged file. A later
@@ -476,8 +477,10 @@ The [Blackfire](https://www.blackfire.io/) profiler: agent service plus PHP prob
   `.env` is committed.
 - When `php_ini` is the path of an ini file of your own, Orobox does not edit that file: the rest
   of the recipe is applied and it prints the line to add yourself
-  (`blackfire.agent_socket = tcp://blackfire:8307`). Once the line is there, nothing more is
-  reported.
+  (`blackfire.agent_socket = tcp://blackfire:8307`). The check runs when the recipe is added: to
+  confirm the line is there, add the recipe again with `orobox extend add --force blackfire`
+  (which also puts the recipe's service back as the recipe defines it); it then reports nothing
+  for the ini file.
 
 ### Recipe ports
 

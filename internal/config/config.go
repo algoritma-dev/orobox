@@ -323,12 +323,6 @@ func (c *OroConfig) Validate() error {
 // option of that command (`--allow-untrusted`, `--registry=...`) rather than as a package.
 var imageEntryPattern = regexp.MustCompile(`^[A-Za-z0-9@][A-Za-z0-9@._+:/=~-]*$`)
 
-// heredocPattern finds a shell heredoc (`<<EOF`, `<<-EOF`, `<< 'EOF'`) in an image.run entry.
-// BuildKit expands a heredoc in a RUN line by reading the lines that follow it as the body, so in
-// a generated Dockerfile it would swallow the instructions after it. The leading `[^<]` keeps the
-// single-line here-string (`<<<word`) allowed.
-var heredocPattern = regexp.MustCompile(`(^|[^<])<<-?\s*["'\\]?[A-Za-z_]`)
-
 // trimRunEntries strips the line terminators a YAML block scalar leaves at the end of an
 // image.run entry: a folded `>` scalar always ends in a newline the user never typed. Only the
 // trailing ones go, because a line break inside an entry is still an error (see validateImage).
@@ -388,7 +382,7 @@ func (c *OroConfig) validateImage() error {
 		if strings.ContainsAny(entry, "\r\n") || strings.HasSuffix(strings.TrimRight(entry, " \t"), `\`) {
 			return fmt.Errorf("config error: 'image.run' entry %d (%s) must be a single line without a trailing backslash; join commands with && or move the script into 'image.dockerfile'", i, strconv.Quote(entry))
 		}
-		if heredocPattern.MatchString(entry) {
+		if HasShellHeredoc(entry) {
 			return fmt.Errorf("config error: 'image.run' entry %d (%s) uses a heredoc, which would read the generated Dockerfile lines after it as its body; write the file in a project Dockerfile and set 'image.dockerfile' instead", i, strconv.Quote(entry))
 		}
 	}

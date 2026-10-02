@@ -210,3 +210,17 @@ func TestAnalyzeReportsProfiledServices(t *testing.T) {
 		t.Errorf("Profiled = %v, want [tools]", a.Profiled)
 	}
 }
+
+// A later `profiles: !reset []` (or an empty list) clears the profiles an earlier document gave.
+func TestAnalyzeProfilesFollowTheLastDocument(t *testing.T) {
+	a, err := Analyze([]byte("services:\n  tool:\n    image: x\n    profiles: [tools]\n    labels:\n      dev.orobox.url: http://localhost:1\n---\nservices:\n  tool:\n    profiles: !reset []\n"), nil, func(string) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a.Profiled) != 0 || len(a.URLs) != 1 {
+		t.Errorf("Profiled = %v, URLs = %v; want no profiles and the URL listed", a.Profiled, a.URLs)
+	}
+	if len(a.Unprofiled) != 1 || a.Unprofiled[0] != "tool" {
+		t.Errorf("Unprofiled = %v, want [tool]", a.Unprofiled)
+	}
+}

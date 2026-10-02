@@ -110,8 +110,9 @@ func (r *reporter) start(step, command string) *task {
 }
 
 // startUnfollowed announces a step that is not an exec of its own command — the image layer
-// build, say — so there is no engine span to follow: following one keyed on the step's label
-// would never match, wait for a cache status that never comes, and report "no output yet".
+// build, say — so there is no engine span to follow: one keyed on the step's label would never
+// match and would wait for a cache status that never comes. The heartbeat lines still print, so
+// a long build keeps saying how long it has been running.
 func (r *reporter) startUnfollowed(step, command string) *task {
 	return r.startTask(step, command, false)
 }

@@ -194,11 +194,13 @@ func existingAncestor(dir string) string {
 
 // checkInside reports an error when dir, with symlinks resolved, is not root or below it.
 func checkInside(root, dir string) error {
-	realRoot, err := filepath.EvalSymlinks(root)
+	// Both paths are made absolute first: EvalSymlinks keeps a relative path relative, and Rel
+	// between a relative root and an absolute target (or the reverse) cannot be computed.
+	realRoot, err := resolvePath(root)
 	if err != nil {
 		return err
 	}
-	realDir, err := filepath.EvalSymlinks(dir)
+	realDir, err := resolvePath(dir)
 	if err != nil {
 		return err
 	}
@@ -207,6 +209,15 @@ func checkInside(root, dir string) error {
 		return fmt.Errorf("%s resolves to %s, outside the project", dir, realDir)
 	}
 	return nil
+}
+
+// resolvePath returns path made absolute, with every symlink in it resolved.
+func resolvePath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(abs)
 }
 
 // WriteAll writes every artifact against the same data and stops at the first failure: a

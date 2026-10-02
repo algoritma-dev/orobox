@@ -111,6 +111,11 @@ func ExtendImage(configPath string) ([]Receipt, error) {
 		if updatedConfig, err = doc.Bytes(); err != nil {
 			return nil, fmt.Errorf("%s: %w", p.config, err)
 		}
+		// Same reason: a config the write would refuse (a symlink out of the project) is found
+		// before the Dockerfile exists.
+		if err := checkWritable(p.dir, p.config); err != nil {
+			return nil, err
+		}
 	}
 
 	var receipts []Receipt
@@ -174,6 +179,13 @@ func ExtendCompose(configPath string, local bool) ([]Receipt, error) {
 		name, tmpl = ComposeLocalOverrideFile, "templates/extend/compose.local.yaml.tmpl"
 	}
 
+	// The .gitignore write is checked first: a local override created without its ignore entry
+	// is the one file this command must not leave behind for git to pick up.
+	if local {
+		if err := checkWritable(projectDir, ".gitignore"); err != nil {
+			return nil, err
+		}
+	}
 	receipt, err := writeTemplateOnce(projectDir, name, tmpl)
 	if err != nil {
 		return nil, err
@@ -228,8 +240,8 @@ func configuredDockerfile(configFile string, src []byte) (string, error) {
 }
 
 // writeTemplateOnce renders tmpl into rel under projectDir unless a file is already there, and
-// says which of the two happened. It goes through Write so the never-overwrite rule is the one
-// every other generated file already follows.
+// says which of the two happened. The write is exclusive and confined to the project, so a file
+// that appeared since the check is never overwritten and a symlink never leads it outside.
 func writeTemplateOnce(projectDir, rel, tmpl string) (Receipt, error) {
 	receipt := Receipt{Path: filepath.ToSlash(rel), Action: ActionSkipped}
 	// Lstat: a dangling symlink is an existing entry, never something to write through.

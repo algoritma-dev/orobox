@@ -288,6 +288,7 @@ func TestInitConfigAcceptsLegacyNginxPorts(t *testing.T) {
 // `down` and `clear` only tear the stack down, so a php_ini file that has gone missing must not
 // lock the user out of them; every other command still refuses the config.
 func TestConfigGateToleratesMissingFilesForTeardown(t *testing.T) {
+	t.Cleanup(docker.ResetPhpIniProblemReported)
 	loadTestConfig(t, rootTestConfig+"php_ini: conf/missing.ini\n", nil)
 	if ConfigError == nil {
 		t.Fatal("expected the missing php_ini file to be reported")

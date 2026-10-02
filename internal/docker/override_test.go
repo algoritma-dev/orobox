@@ -513,3 +513,50 @@ func TestOverrideAnalysisListsOnlyServicesUpStarts(t *testing.T) {
 		t.Errorf("URLs for %v, want only minio", names)
 	}
 }
+
+// The local file clearing the profiles the team file gave makes the service start, so its URL
+// is listed again.
+func TestOverrideAnalysisHonoursAProfilesReset(t *testing.T) {
+	projectDir, internalDir := overrideProject(t, map[string]string{
+		".orobox.compose.yaml":       "services:\n  tool:\n    image: x\n    profiles: [tools]\n    labels:\n      dev.orobox.url: http://localhost:1\n",
+		".orobox.compose.local.yaml": "services:\n  tool:\n    profiles: !reset []\n",
+	})
+	writeGenerated(t, internalDir)
+	if _, err := writeComposeOverrides(internalDir, projectDir); err != nil {
+		t.Fatal(err)
+	}
+	if urls := OverrideAnalysis().URLs; len(urls) != 1 || urls[0].Service != "tool" {
+		t.Errorf("URLs = %v, want tool", urls)
+	}
+}
+
+// A missing mount on a test-only tweak (db-test) is reported too.
+func TestMissingPathOnATestOnlyServiceIsReported(t *testing.T) {
+	projectDir, internalDir := overrideProject(t, map[string]string{
+		".orobox.compose.yaml": "services:\n  db-test:\n    volumes:\n      - ./missing:/x\n",
+	})
+	writeGenerated(t, internalDir)
+	var printed bytes.Buffer
+	defer utils.SetWriter(&printed)()
+	if _, err := writeComposeOverrides(internalDir, projectDir); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(printed.String(), filepath.Join(projectDir, "missing")) {
+		t.Errorf("no warning for the missing mount:\n%s", printed.String())
+	}
+}
+
+// With a broken team file, the local file's tweaks to its services are not reported as typos.
+func TestNoTypoWarningWhenTheTeamFileIsBroken(t *testing.T) {
+	projectDir, internalDir := overrideProject(t, map[string]string{
+		".orobox.compose.yaml":       "services: [broken\n",
+		".orobox.compose.local.yaml": "services:\n  minio:\n    ports: [\"1:1\"]\n",
+	})
+	writeGenerated(t, internalDir)
+	var printed bytes.Buffer
+	defer utils.SetWriter(&printed)()
+	_, _ = writeComposeOverrides(internalDir, projectDir)
+	if strings.Contains(printed.String(), "misspelled") {
+		t.Errorf("misleading typo warning:\n%s", printed.String())
+	}
+}

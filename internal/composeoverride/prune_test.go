@@ -117,3 +117,12 @@ func TestPruneRefusesAServiceItCannotRemove(t *testing.T) {
 		t.Errorf("want an error naming ghost, got %v", err)
 	}
 }
+
+// An entry that also arrives through a merge key cannot be fully removed, so pruning refuses
+// rather than leave compose a half-removed service it rejects anyway.
+func TestPruneRefusesAServiceAlsoMergedIn(t *testing.T) {
+	src := "x-extra: &extra\n  db-test:\n    environment:\n      A: b\nservices:\n  <<: *extra\n  db-test:\n    environment:\n      C: d\n"
+	if _, _, err := Prune([]byte(src), []string{"application"}); err == nil || !strings.Contains(err.Error(), "db-test") {
+		t.Errorf("want an error naming db-test, got %v", err)
+	}
+}

@@ -622,12 +622,21 @@ func TestAppendUniqueKeepsTheLineCommentOfANullValue(t *testing.T) {
 	}
 }
 
-// A file ending in `---` (or a `---` followed only by a comment) holds one real document;
-// nothing would be lost by editing it.
+// A file ending in `---` holds one real document; nothing would be lost by editing it.
 func TestParseAcceptsATrailingEmptyDocument(t *testing.T) {
-	for _, src := range []string{"a: 1\n---\n", "a: 1\n---\n# end\n"} {
+	for _, src := range []string{"a: 1\n---\n", "---\na: 1 # one\n---\n", "# head\n---\na: 1\n---\n\n"} {
 		if _, err := Parse([]byte(src)); err != nil {
 			t.Errorf("Parse(%q): %v", src, err)
+		}
+	}
+}
+
+// Comments after a trailing `---` would be dropped on write — the decoder does not even keep
+// them — so the file is refused rather than edited.
+func TestParseRefusesCommentsAfterATrailingDocumentMarker(t *testing.T) {
+	for _, src := range []string{"a: 1\n---\n# end\n", "a: 1\n--- # end\n", "---\na: 1\n---\n\n# end\n"} {
+		if _, err := Parse([]byte(src)); err == nil || !strings.Contains(err.Error(), "comments after") {
+			t.Errorf("Parse(%q) = %v, want a refusal about the comments", src, err)
 		}
 	}
 }
@@ -646,5 +655,29 @@ func TestMergeMappingRejectsBeforeCreatingTheTarget(t *testing.T) {
 	}
 	if d.Has([]string{"services"}) {
 		t.Error("the target was created although the merge was refused")
+	}
+}
+
+// A cycle (an alias inside its own anchor, which yaml.v3 can hand over) stops at the depth cap
+// as a null, so the clone ends and every key keeps its value slot.
+func TestCloneNodeStopsAtTheDepthCap(t *testing.T) {
+	key := &yaml.Node{Kind: yaml.ScalarNode, Value: "self"}
+	loop := &yaml.Node{Kind: yaml.MappingNode, Tag: tagMap}
+	loop.Content = []*yaml.Node{key, {Kind: yaml.AliasNode, Alias: loop}}
+
+	c := cloneNode(loop, 0)
+	depth := 0
+	for c.Kind == yaml.MappingNode {
+		if len(c.Content) != 2 {
+			t.Fatalf("mapping at depth %d has %d nodes, want a key and a value", depth, len(c.Content))
+		}
+		c = c.Content[1]
+		depth++
+	}
+	if c.Kind != yaml.ScalarNode || c.Tag != tagNull {
+		t.Errorf("the clone ends in %v %s, want a null", c.Kind, c.Tag)
+	}
+	if depth > maxCloneDepth {
+		t.Errorf("clone went %d levels deep, past the cap of %d", depth, maxCloneDepth)
 	}
 }

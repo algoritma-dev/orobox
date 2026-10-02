@@ -295,3 +295,72 @@ func TestWriteEnvFileReadsProjectFileNextToConfig(t *testing.T) {
 		t.Errorf("merged .env = %q, want %q", got, want)
 	}
 }
+
+// Compose resolves an env_file's references against the project environment — for Orobox the
+// same merged .env, read whole — while Dotenv reads it in order. Both must agree, so the merged
+// file has to mean the same thing either way: a self-reference is inlined (else env_file services
+// would apply `--more` twice), and project keys that use a re-read generated key are re-read too.
+func TestMergeEnvMeansTheSameReadInOrderOrWhole(t *testing.T) {
+	template := "ORO_APP_DOMAIN=oro.local\nORO_APP_URL=http://${ORO_APP_DOMAIN}/\nOPTS=--a\n"
+	project := "ORO_APP_DOMAIN=shop.local\nMY_CALLBACK=${ORO_APP_URL}cb\nOPTS=\"${OPTS} --timeout=0\"\n"
+	merged := string(MergeEnv([]byte(template), []byte(project), ".env"))
+
+	inOrder := resolvedEnv(merged)
+	whole := resolvedWhole(merged)
+	for key, want := range map[string]string{
+		"ORO_APP_URL": "http://shop.local/",
+		"MY_CALLBACK": "http://shop.local/cb",
+		"OPTS":        "--a --timeout=0",
+	} {
+		if inOrder[key] != want {
+			t.Errorf("in order: %s = %q, want %q\n%s", key, inOrder[key], want, merged)
+		}
+		if whole[key] != want {
+			t.Errorf("whole: %s = %q, want %q\n%s", key, whole[key], want, merged)
+		}
+	}
+}
+
+// resolvedWhole reads a dotenv file the way compose resolves an env_file against a project
+// environment made of that same file: every reference sees the file's final values.
+func resolvedWhole(content string) map[string]string {
+	final := effectiveEnvRaw(content)
+	ref := regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)`)
+	var resolve func(key string, depth int) string
+	resolve = func(key string, depth int) string {
+		v := strings.TrimSpace(final[key])
+		if len(v) >= 2 && v[0] == '\'' && v[len(v)-1] == '\'' {
+			return v[1 : len(v)-1]
+		}
+		if len(v) >= 2 && v[0] == '"' && v[len(v)-1] == '"' {
+			v = v[1 : len(v)-1]
+		}
+		if depth > 8 {
+			return v
+		}
+		return ref.ReplaceAllStringFunc(v, func(m string) string {
+			name := strings.Trim(m, "${}")
+			if name == key {
+				// compose resolves a self-reference against the project environment's value,
+				// which is this same final line.
+				return strings.Trim(strings.TrimSpace(final[key]), `"`)
+			}
+			return resolve(name, depth+1)
+		})
+	}
+	out := map[string]string{}
+	for key := range final {
+		out[key] = resolve(key, 0)
+	}
+	return out
+}
+
+func effectiveEnvRaw(content string) map[string]string {
+	values := map[string]string{}
+	for _, e := range parseEnvEntries(content) {
+		if e.assignment {
+			values[e.key] = e.value
+		}
+	}
+	return values
+}

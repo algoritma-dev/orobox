@@ -75,7 +75,11 @@ func runDeployInitCommand(conf *config.OroConfig) {
 	// hand. Refusing to write leaves a working project.
 	if err := conf.ValidateDeploy(); err != nil {
 		utils.PrintError(err.Error())
-		utils.PrintInfo(fmt.Sprintf("Nothing was written: %s is unchanged. Re-run 'orobox deploy-init' and answer the required questions (stage name, ref, host, user, deploy path).", filepath.Base(deployInitConfigPath())))
+		rerun := "orobox deploy-init"
+		if cfgFile != "" {
+			rerun += " --config " + cfgFile
+		}
+		utils.PrintInfo(fmt.Sprintf("Nothing was written: %s is unchanged. Re-run '%s' and answer the required questions (stage name, ref, host, user, deploy path).", deployInitConfigPath(), rerun))
 		os.Exit(1)
 	}
 

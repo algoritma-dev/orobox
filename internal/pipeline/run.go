@@ -544,11 +544,17 @@ func (r *runner) baseContainer() *dagger.Container {
 	}
 
 	dir := r.client.Directory()
+	var patterns []string
 	if layer.ContextDir != "" {
+		patterns = layerIgnorePatterns(layer.ContextDir, layer.DockerfileName, layer.DockerfileOnly)
 		dir = r.client.Host().Directory(layer.ContextDir, dagger.HostDirectoryOpts{
-			Exclude: layerContextExcludes(layer.ContextDir, layer.DockerfileName, layer.ContextIsProjectRoot),
+			Exclude: layerUploadExcludes(layer.ContextDir, patterns, layer.ContextIsProjectRoot),
 		})
 	}
+	// dockerBuild applies an ignore file of its own after the upload: the rendered Dockerfile's
+	// `<name>.dockerignore`, else the context's .dockerignore. Writing the first with the patterns
+	// chosen above (never empty, or the engine would fall back) makes it apply exactly those.
+	dir = dir.WithNewFile(layerIgnoreFileName, "# written by orobox: the patterns docker build applies locally\n"+strings.Join(patterns, "\n")+"\n")
 	cacheBust := ""
 	if r.plan.NoCache {
 		cacheBust = r.runID

@@ -269,7 +269,7 @@ Recipes publish fixed host ports (varnish 6081, selenium 7900, sftp 2222), so tw
 
 Each recipe, what it configures and how to use it is described in [Ready-made services](customization.md#ready-made-services-recipes).
 
-When `php_ini` in `.orobox.yaml` is the path of an ini file of your own, Orobox does not edit that file: the rest of the recipe is applied, and the directives the file does not set yet are printed as lines to add to it by hand. Once they are there, adding the recipe again reports nothing left to do.
+When `php_ini` in `.orobox.yaml` is the path of an ini file of your own, Orobox does not edit that file: the rest of the recipe is applied, and the directives the file does not set yet are printed as lines to add to it by hand. The check runs only when the recipe is added; adding it again, with `--force` because its service now exists, replaces the service with the recipe's and reports nothing left to do once the directives are in the file.
 
 ### 17. Test Environment (`test-init`)
 Creates, or resets, the test database that `orobox test` runs against: starts `db-test` (plus

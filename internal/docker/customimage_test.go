@@ -569,3 +569,19 @@ func TestInsertAfterEveryFrom(t *testing.T) {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+// BuildKit heredoc forms the FROM parser must skip: a backslash-quoted delimiter, a hyphenated
+// one, an fd prefix, and a heredoc under ONBUILD.
+func TestFromImagesSkipsEveryHeredocForm(t *testing.T) {
+	for _, body := range []string{
+		"RUN python3 <<\\EOF\nfrom os import path\nEOF\n",
+		"RUN cat <<END-X\nFROM nope\nEND-X\n",
+		"RUN cat 3<<EOF\nfrom x import y\nEOF\n",
+		"ONBUILD RUN <<EOF\nFROM nope\nEOF\n",
+	} {
+		src := "ARG OROBOX_BASE_IMAGE\nFROM ${OROBOX_BASE_IMAGE}\n" + body
+		if err := CheckExtendsBaseImage("Dockerfile", []byte(src)); err != nil {
+			t.Errorf("%q: %v", body, err)
+		}
+	}
+}

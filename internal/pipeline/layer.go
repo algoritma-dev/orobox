@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,12 +33,16 @@ type LayerSpec struct {
 	ContextIsProjectRoot bool
 	// DockerfileName is the project Dockerfile's file name, for its own `<name>.dockerignore`.
 	DockerfileName string
+	// DockerfileOnly is set when the layer is the project Dockerfile unchanged (no image.* lines
+	// appended): locally it is then built with `-f <path>`, which honours `<name>.dockerignore`.
+	DockerfileOnly bool
 }
 
-// cacheBustArg is the build argument --no-cache sets to the run ID. Declared right after the
-// final FROM, it changes the cache key of every instruction after it, so the layer is really
-// rebuilt — Dagger, unlike `docker build`, has no option to ignore its cache. It is declared in
-// every stage, so a multi-stage build is rebuilt whole, like `docker build --no-cache`.
+// cacheBustArg is the build argument --no-cache sets to the run ID. Declared right after a FROM,
+// it changes the cache key of every instruction after it in that stage, so the layer is really
+// rebuilt — Dagger, unlike `docker build`, has no option to ignore its cache. It is declared after
+// every FROM (an ARG is scoped to its stage), so a multi-stage build is rebuilt whole, like
+// `docker build --no-cache`.
 const cacheBustArg = "OROBOX_CACHE_BUST"
 
 // dockerfileFor returns the Dockerfile to build: the rendered one, with the cache-busting ARG
@@ -59,18 +64,19 @@ func (l *LayerSpec) buildOpts(cacheBust string) dagger.DirectoryDockerBuildOpts 
 	return dagger.DirectoryDockerBuildOpts{Dockerfile: layerDockerfileName, BuildArgs: args}
 }
 
-// layerContextExcludes are the paths left out of the uploaded build context: the patterns of the
-// Dockerfile's own `<name>.dockerignore` when it exists, else of the context's .dockerignore —
-// the file `docker build` would honour locally — in order, negations (`!keep`) included, plus
-// the project's own excludes when the context is the project root (vendor/, var/, node_modules/
-// would otherwise be shipped to the engine on every run).
-func layerContextExcludes(contextDir, dockerfileName string, projectRoot bool) []string {
-	var excludes []string
-	if projectRoot {
-		excludes = append(excludes, HostExcludes(contextDir)...)
-	}
+// layerIgnoreFileName is the ignore file Dagger's dockerBuild reads for the rendered Dockerfile:
+// `<dockerfile>.dockerignore`, before falling back to the context's .dockerignore. Orobox writes
+// it with the patterns it chose, so the engine applies exactly the rule the local build applies.
+const layerIgnoreFileName = layerDockerfileName + ".dockerignore"
+
+// layerIgnorePatterns are the ignore patterns `docker build` would apply to this layer locally:
+// the Dockerfile's own `<name>.dockerignore` when the layer is that Dockerfile alone (built with
+// `-f <path>` there) and the file exists, else the context's .dockerignore (the only one a
+// Dockerfile read from stdin honours). Parsed the way Docker parses them, in order, negations
+// included.
+func layerIgnorePatterns(contextDir, dockerfileName string, dockerfileOnly bool) []string {
 	candidates := []string{".dockerignore"}
-	if dockerfileName != "" {
+	if dockerfileOnly && dockerfileName != "" {
 		candidates = append([]string{dockerfileName + ".dockerignore"}, candidates...)
 	}
 	for _, name := range candidates {
@@ -78,18 +84,53 @@ func layerContextExcludes(contextDir, dockerfileName string, projectRoot bool) [
 		if err != nil {
 			continue
 		}
-		for _, line := range strings.Split(string(src), "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
-			}
-			if neg, ok := strings.CutPrefix(line, "!"); ok {
-				excludes = append(excludes, "!"+strings.TrimPrefix(neg, "/"))
-				continue
-			}
-			excludes = append(excludes, strings.TrimPrefix(line, "/"))
+		return parseIgnoreFile(src)
+	}
+	return nil
+}
+
+// parseIgnoreFile reads a .dockerignore as Docker does (moby/patternmatcher's ignorefile): a
+// UTF-8 BOM is dropped, a line starting with `#` is a comment, whitespace is trimmed, `!`
+// negates the (trimmed) rest, and patterns are cleaned and made relative to the context.
+func parseIgnoreFile(src []byte) []string {
+	src = bytes.TrimPrefix(src, []byte("\ufeff"))
+	var patterns []string
+	for _, line := range strings.Split(string(src), "\n") {
+		if strings.HasPrefix(line, "#") {
+			continue
 		}
-		break
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		negate := false
+		if rest, ok := strings.CutPrefix(line, "!"); ok {
+			negate, line = true, strings.TrimSpace(rest)
+			if line == "" {
+				continue
+			}
+		}
+		line = filepath.ToSlash(filepath.Clean(line))
+		if line != "/" {
+			line = strings.TrimPrefix(line, "/")
+		}
+		if negate {
+			line = "!" + line
+		}
+		patterns = append(patterns, line)
+	}
+	return patterns
+}
+
+// layerUploadExcludes are the paths left out of the uploaded build context: the ignore patterns,
+// then the project's own excludes when the context is the project root (vendor/, var/,
+// node_modules/ and the git-ignored paths would otherwise be shipped to the engine on every run).
+// The project's excludes come last: a later match wins, so a negation in .dockerignore cannot
+// pull a git-ignored file back in — a fresh CI checkout would not have it either.
+func layerUploadExcludes(contextDir string, patterns []string, projectRoot bool) []string {
+	excludes := append([]string{}, patterns...)
+	if projectRoot {
+		excludes = append(excludes, HostExcludes(contextDir)...)
 	}
 	return excludes
 }
@@ -160,6 +201,7 @@ func projectLayer(img config.ImageConfig, hostDir, baseImage string) (*LayerSpec
 	}
 
 	layer.Dockerfile = docker.RenderLayerDockerfile(projectDockerfile, img)
+	layer.DockerfileOnly = projectDockerfile != nil && bytes.Equal(layer.Dockerfile, projectDockerfile)
 	return layer, nil
 }
 

@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -258,29 +257,18 @@ var (
 	layerBuildImage = buildCustomImage
 )
 
-// heredocMarker matches a Dockerfile heredoc opener (`<<EOF`, `<<-EOF`, `<<"EOF"`) and captures
-// the dash and the delimiter word.
-var heredocMarker = regexp.MustCompile(`<<(-?)["']?([A-Za-z_][A-Za-z0-9_]*)["']?`)
-
-// startsHeredocWord reports whether the `<<` at index at begins a word outside any quotes.
-func startsHeredocWord(line string, at int) bool {
-	if at > 0 {
-		if prev := line[at-1]; prev != ' ' && prev != '\t' {
-			return false
+// opensHeredocs reports whether line belongs to an instruction that accepts heredocs: RUN,
+// COPY, ADD, or one of them under ONBUILD.
+func opensHeredocs(instruction, line string, continued bool) bool {
+	if heredocOpeners[instruction] {
+		return true
+	}
+	if instruction == "ONBUILD" && !continued {
+		if fields := strings.Fields(line); len(fields) > 1 {
+			return heredocOpeners[strings.ToUpper(fields[1])]
 		}
 	}
-	var quote byte
-	for i := 0; i < at; i++ {
-		switch c := line[i]; {
-		case quote != 0 && c == quote:
-			quote = 0
-		case quote == 0 && (c == '"' || c == '\''):
-			quote = c
-		case quote == '"' && c == '\\':
-			i++
-		}
-	}
-	return quote == 0
+	return instruction == "ONBUILD"
 }
 
 // heredocOpeners are the instructions that accept heredocs.
@@ -384,14 +372,9 @@ func fromInstructions(content []byte) []fromInstruction {
 			}
 		}
 
-		if heredocOpeners[instruction] {
-			for _, m := range heredocMarker.FindAllStringSubmatchIndex(line, -1) {
-				// BuildKit only opens a heredoc on a word that starts with `<<`: not a `<<<`
-				// here-string, not inside quotes (`echo "<<EOF"`), not mid-word (`$((1<<FOO))`).
-				if !startsHeredocWord(line, m[0]) {
-					continue
-				}
-				pending = append(pending, heredoc{word: line[m[4]:m[5]], stripTabs: m[3] > m[2]})
+		if opensHeredocs(instruction, trimmed, continued) {
+			for _, h := range config.HeredocWords(line) {
+				pending = append(pending, heredoc{word: h.Delimiter, stripTabs: h.StripTabs})
 			}
 		}
 

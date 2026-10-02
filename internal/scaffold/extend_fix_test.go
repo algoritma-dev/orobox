@@ -208,3 +208,58 @@ func TestExtendImageRefusesANonRegularFileAtTheDefaultPath(t *testing.T) {
 		t.Error("the config was pointed at a directory")
 	}
 }
+
+// A config the final write would refuse is found before the Dockerfile is written, so the
+// refusal leaves no Dockerfile the config does not name.
+func TestExtendImageRefusesAConfigLinkedOutsideBeforeWriting(t *testing.T) {
+	useRealTemplates(t)
+	dir := t.TempDir()
+	shared := filepath.Join(t.TempDir(), "orobox.yaml")
+	if err := os.WriteFile(shared, []byte(extendConfigWithComment), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(shared, cfgIn(dir)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ExtendImage(cfgIn(dir)); err == nil {
+		t.Fatal("want a refusal to write through the symlink")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "docker", "image", "Dockerfile")); err == nil {
+		t.Error("the Dockerfile was written before the config was refused")
+	}
+}
+
+// The same for the .gitignore of `extend compose --local`: no local override without its entry.
+func TestExtendComposeLocalRefusesAGitignoreLinkedOutsideBeforeWriting(t *testing.T) {
+	useRealTemplates(t)
+	dir := t.TempDir()
+	writeProjectFile(t, dir, ".orobox.yaml", extendConfigWithComment)
+	shared := filepath.Join(t.TempDir(), "gitignore")
+	if err := os.WriteFile(shared, []byte("/vendor/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(shared, filepath.Join(dir, ".gitignore")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ExtendCompose(cfgIn(dir), true); err == nil {
+		t.Fatal("want a refusal to write through the symlink")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ComposeLocalOverrideFile)); err == nil {
+		t.Error("the local override was written before the .gitignore was refused")
+	}
+}
+
+// A relative project root is compared as the absolute path it stands for.
+func TestCheckInsideAcceptsARelativeRoot(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkInside(".", filepath.Join(dir, "sub")); err != nil {
+		t.Errorf("relative root, absolute dir: %v", err)
+	}
+	if err := checkInside(dir, "sub"); err != nil {
+		t.Errorf("absolute root, relative dir: %v", err)
+	}
+}

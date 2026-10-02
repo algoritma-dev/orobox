@@ -66,9 +66,12 @@ group commits by theme rather than listing every commit.
 - Changed the `.env` / `.env.test` placed next to `.orobox.yaml`: it is now merged key by key over
   the file Orobox generates, where it used to replace the generated file entirely. List only the
   keys you change; keys the file does not define come from the generated one. The project file is
-  appended after the generated one (after a `# From .env` comment) in its own order, and the
-  generated keys that reference a key it changed are repeated after it, so every `${...}`
-  reference resolves to the project's value; multi-line quoted values are kept. The file is read from the directory holding the config file (it used to be the current
+  appended after the generated one (after a `# From .env` comment) in its own order; a value that
+  references its own key gets the generated value inlined; the generated keys (and project keys)
+  that reference a key it changed are read again after it until nothing more depends on one. So
+  every `${...}` reference resolves to the project's value both for Symfony Dotenv, which reads
+  the file in order, and for compose, which resolves the `env_file` against the whole file;
+  multi-line quoted values are kept. The file is read from the directory holding the config file (it used to be the current
   directory). A project that keeps a complete copy of `.env` still overrides every key it defines,
   but now also receives the keys it lacked, for example those added by a later Orobox release.
 - Documented `test-init`, `db backup` / `db restore` and `self-update` in `docs/commands.md`, and

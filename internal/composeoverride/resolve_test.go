@@ -587,3 +587,42 @@ func TestBuildServices(t *testing.T) {
 		t.Errorf("BuildServices = %v, want a and c", got)
 	}
 }
+
+// A service whose build comes from `extends` already has a context; a later `build: {args}`
+// must not get one spliced in on top.
+func TestResolveTreatsExtendsAsBuilt(t *testing.T) {
+	out, err := Resolve([]byte("services:\n  docs:\n    extends:\n      service: base\n    build:\n      args:\n        A: b\n"), testBase, testHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "context:") {
+		t.Errorf("a context was inserted into a service that extends another:\n%s", out)
+	}
+	got, err := BuildServices([]byte("services:\n  docs:\n    extends:\n      service: base\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got["docs"] {
+		t.Errorf("a service with extends must count as built for later files: %v", got)
+	}
+}
+
+// The default context is given to the service, never to an anchor other services share.
+func TestResolveDoesNotLeakTheDefaultContextThroughAnAnchor(t *testing.T) {
+	src := "x-b: &b\n  args:\n    A: b\nservices:\n  a:\n    build: *b\n  b:\n    build: *b\n"
+	out, err := ResolveAfter([]byte(src), testBase, testHome, map[string]bool{"a": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := yamlv3.Unmarshal(out, &doc); err != nil {
+		t.Fatal(err)
+	}
+	svcs := doc["services"].(map[string]any)
+	if _, ok := svcs["a"].(map[string]any)["build"].(map[string]any)["context"]; ok {
+		t.Errorf("service a (built earlier) got the default context through the shared anchor:\n%s", out)
+	}
+	if svcs["b"].(map[string]any)["build"].(map[string]any)["context"] != testBase {
+		t.Errorf("service b should get the project directory:\n%s", out)
+	}
+}

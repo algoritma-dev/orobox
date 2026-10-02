@@ -40,6 +40,7 @@ var rootCmd = &cobra.Command{
 		if err := configGate(cmd); err != nil {
 			utils.PrintError(err.Error())
 			exitOnConfigError(1)
+			return
 		}
 
 		warnDeprecatedConfig(cmd)
@@ -115,6 +116,10 @@ var ConfigError error
 // commands tolerate that case; see configGate.
 var configErrorIsFilesOnly bool
 
+// exitOnConfigError ends the process after a refused config. A variable so tests can observe the
+// refusal instead of losing the whole test binary to os.Exit.
+var exitOnConfigError = os.Exit
+
 // configGate returns the error that must stop cmd before it runs, or nil.
 //
 // `down` and `clear` are let through a config whose only problem is a missing file, with a
@@ -122,10 +127,6 @@ var configErrorIsFilesOnly bool
 // leave a stack running that the user can no longer stop through orobox — at the very moment the
 // file has been moved or deleted. A config that is invalid in itself still stops them, because
 // the compose files they run cannot be rendered from it.
-// exitOnConfigError ends the process after a refused config. A variable so tests can observe the
-// refusal instead of losing the whole test binary to os.Exit.
-var exitOnConfigError = os.Exit
-
 func configGate(cmd *cobra.Command) error {
 	// help, completion and version print nothing that depends on the config: a user fixing a
 	// broken file still needs `orobox help`, and a completion script must not fail to generate.

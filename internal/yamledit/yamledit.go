@@ -50,8 +50,9 @@ func Parse(src []byte) (*Doc, error) {
 	}
 	// Bytes writes back one document, so a second one would be silently deleted from the
 	// user's file. Refusing is the only edit that cannot lose data.
-	// A trailing `---` with nothing (or only comments) after it is not a second document worth
-	// keeping; anything with content is.
+	// A trailing `---` with nothing after it is not a second document worth keeping; anything
+	// with content is, and so are comments after it, which Bytes would drop just the same.
+	extraDocuments := false
 	for {
 		var extra yaml.Node
 		err := dec.Decode(&extra)
@@ -64,6 +65,10 @@ func Parse(src []byte) (*Doc, error) {
 		if !emptyDocument(&extra) {
 			return nil, errors.New("parse yaml: the file holds several YAML documents (separated by ---); merge them into one before orobox edits it")
 		}
+		extraDocuments = true
+	}
+	if extraDocuments && commentsAfterFirstDocument(src) {
+		return nil, errors.New("parse yaml: the file has comments after a trailing ---, which orobox would drop; move them above the --- or remove the ---")
 	}
 	if n.Kind == 0 {
 		// yaml.v3 reports "no document" for input without content and drops any
@@ -338,8 +343,45 @@ func isNull(n *yaml.Node) bool {
 	return n.Kind == yaml.ScalarNode && n.Tag == tagNull
 }
 
+// commentsAfterFirstDocument reports whether src has a comment after the marker that starts its
+// second document. The decoder cannot say: it drops a comment that follows a bare `---`.
+func commentsAfterFirstDocument(src []byte) bool {
+	lines := strings.Split(string(src), "\n")
+	seenContent, seenStart := false, false
+	for i, line := range lines {
+		if isDocumentStart(line) {
+			// A `---` before any content starts the first document, not a second one.
+			if seenContent || seenStart {
+				return hasComment(lines[i+1:]) || strings.Contains(line, "#")
+			}
+			seenStart = true
+			continue
+		}
+		if t := strings.TrimSpace(line); t != "" && !strings.HasPrefix(t, "#") {
+			seenContent = true
+		}
+	}
+	return false
+}
+
+// isDocumentStart reports whether line is a `---` document marker.
+func isDocumentStart(line string) bool {
+	rest, ok := strings.CutPrefix(line, "---")
+	return ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t' || rest[0] == '\r')
+}
+
+// hasComment reports whether any of lines is a comment.
+func hasComment(lines []string) bool {
+	for _, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			return true
+		}
+	}
+	return false
+}
+
 // emptyDocument reports whether a decoded document holds no content: a bare `---`, or one
-// followed only by comments.
+// followed only by comments (which commentsAfterFirstDocument then refuses).
 func emptyDocument(n *yaml.Node) bool {
 	if n.Kind == 0 {
 		return true

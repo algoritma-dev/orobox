@@ -131,11 +131,14 @@ of `orobox qa` and `orobox test` too.
   there and not inside the dependency install. The engine caches its layers like any other build,
   so an unchanged layer costs nothing on a warm runner; on cold runners it is built once per job
   (the generated CI's lint, test and deploy jobs each start their own engine). The build context
-  is uploaded without what the Dockerfile's `<name>.dockerignore` (or else the context's
-  `.dockerignore`) excludes, negations included, as `docker build` reads it. When the Dockerfile
+  is uploaded without what the ignore file excludes, negations included, as `docker build` reads
+  it. The ignore file is the one the local build uses: the Dockerfile's own `<name>.dockerignore`
+  when the layer is that Dockerfile unchanged (no `image.*` keys added to it, so it is built
+  with `-f <path>` locally), and the context's `.dockerignore` otherwise. When the Dockerfile
   sits next to `.orobox.yaml`, the paths the pipeline already excludes from the sources are left
-  out too — the git-ignored ones among them, so a root Dockerfile cannot `COPY` a git-ignored
-  file such as `auth.json` in the pipeline, exactly as a fresh CI checkout would not have it. A project Dockerfile whose final stage is not `FROM ${OROBOX_BASE_IMAGE}` is refused
+  out too — the git-ignored ones among them. They are applied after the ignore file, so a `!`
+  line there cannot bring one back: a root Dockerfile cannot `COPY` a git-ignored file such as
+  `auth.json` in the pipeline, exactly as a fresh CI checkout would not have it. A project Dockerfile whose final stage is not `FROM ${OROBOX_BASE_IMAGE}` is refused
   before the engine starts, as it is locally.
 - **`php_ini`** ([PHP settings](configuration.md#php-settings-php_ini)). The same `zz-project.ini`
   the development stack mounts is written into every step container: rendered from the map form,

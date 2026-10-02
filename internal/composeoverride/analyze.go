@@ -24,6 +24,12 @@ type Analysis struct {
 	// Profiled are the services that declare profiles, sorted. `up` starts none of them; a
 	// caller merging several files filters the URLs of every file against all of them.
 	Profiled []string
+	// Unprofiled are the services whose profiles this file clears (`profiles: !reset []`), sorted:
+	// a later file undoing the profiles an earlier one gave.
+	Unprofiled []string
+	// ProfiledURLs are the dev.orobox.url labels of services this file profiles: left out of URLs,
+	// but a later file clearing the profiles makes them apply again.
+	ProfiledURLs []ServiceURL
 }
 
 // MissingPath is a bind source that does not exist. The syntax matters because Docker treats
@@ -61,7 +67,7 @@ func Analyze(resolved []byte, coreServices []string, exists func(string) bool) (
 	}
 
 	// Compose merges the documents in order, so a URL set by a later document wins and a
-	// service is profiled when any document gives it profiles.
+	// service's profiles are those of the last document that mentions them.
 	coreSeen := map[string]bool{}
 	urls := map[string]string{}
 	profiled := map[string]bool{}
@@ -84,8 +90,10 @@ func Analyze(resolved []byte, coreServices []string, exists func(string) bool) (
 					}
 				}
 			}
-			if hasProfiles(mapGet(svc, "profiles")) {
-				profiled[name] = true
+			// The last document that mentions profiles decides: a later `profiles: !reset []`
+			// (or an empty list) clears what an earlier one set.
+			if p := mapGet(svc, "profiles"); p != nil {
+				profiled[name] = isSet(p) && hasProfiles(p)
 			}
 			if url, ok := labelValue(mapGet(svc, "labels"), urlLabel); ok {
 				urls[name] = url
@@ -98,12 +106,20 @@ func Analyze(resolved []byte, coreServices []string, exists func(string) bool) (
 	for name, url := range urls {
 		if !profiled[name] {
 			a.URLs = append(a.URLs, ServiceURL{Service: name, URL: url})
+		} else {
+			a.ProfiledURLs = append(a.ProfiledURLs, ServiceURL{Service: name, URL: url})
 		}
 	}
-	for name := range profiled {
-		a.Profiled = append(a.Profiled, name)
+	sort.Slice(a.ProfiledURLs, func(i, j int) bool { return a.ProfiledURLs[i].Service < a.ProfiledURLs[j].Service })
+	for name, on := range profiled {
+		if on {
+			a.Profiled = append(a.Profiled, name)
+		} else {
+			a.Unprofiled = append(a.Unprofiled, name)
+		}
 	}
 	sort.Strings(a.Profiled)
+	sort.Strings(a.Unprofiled)
 	sort.Slice(a.URLs, func(i, j int) bool { return a.URLs[i].Service < a.URLs[j].Service })
 	return a, nil
 }

@@ -124,14 +124,15 @@ ORO_MAILER_DSN=smtp://mail:1025
 MY_API_KEY=xyz
 ```
 
-Dotenv and compose read the file in order, let the last assignment of a key win, and resolve `${...}` against what they have read so far. The merged file is laid out so that this gives the values you meant:
+The merged file is read two ways: Symfony Dotenv reads it in order, resolving `${...}` against what it has read so far, while compose resolves the `env_file` against the project environment, which is this same file read whole. In both, the last assignment of a key wins. The merged file is laid out so that both readings give the values you meant:
 
 - the generated file, unchanged;
-- after a `# From .env` comment (`# From .env.test` for the test file), every assignment of your file, in your file's order. It reads as your file would on its own, on top of the generated values: `ORO_APP_DOMAIN=${MY_HOST}` works when `MY_HOST` is a key only your file defines, and `ORO_INSTALL_OPTIONS="${ORO_INSTALL_OPTIONS} --timeout=0"` extends the generated value once;
-- after that, again, every generated key that references a key you set (directly or through another such key) and that you do not set yourself, so it follows your value: change `ORO_APP_DOMAIN` and `ORO_APP_URL=http://${ORO_APP_DOMAIN}/` follows.
+- after a `# From .env` comment (`# From .env.test` for the test file), every assignment of your file, in your file's order. It reads as your file would on its own, on top of the generated values: `ORO_APP_DOMAIN=${MY_HOST}` works when `MY_HOST` is a key only your file defines, and `ORO_INSTALL_OPTIONS="${ORO_INSTALL_OPTIONS} --timeout=0"` extends the generated value once. A value that references its own key gets the generated value written in place of the reference, because a reference to itself would mean something else to compose;
+- after that, under a `# Values that use the keys above, read again` comment, every generated key that references a key you set and that you do not set yourself, so it follows your value: change `ORO_APP_DOMAIN` and `ORO_APP_URL=http://${ORO_APP_DOMAIN}/` follows. Your own keys that reference one of those are repeated too, and so on until nothing more depends on a key you changed.
+
 In your file:
 
-- Values are copied verbatim, `${...}` references and multi-line quoted values (a PEM key, say) included.
+- Values are copied verbatim, `${...}` references and multi-line quoted values (a PEM key, say) included, except a reference to the key's own name, which is replaced by the generated value as described above.
 - Comments and blank lines are dropped; only `KEY=value` assignments matter (an optional leading `export `, leading whitespace and Windows line endings are tolerated, and if a key appears twice the last one wins).
 
 A project that already keeps a complete copy of `.env` keeps working: every key it defines still overrides the generated one. The difference is that keys it does not define, for example ones added by a later Orobox release, now come from the generated file instead of being missing.
@@ -232,7 +233,7 @@ Rendering rules:
 
 - Directive names are written verbatim, dots and case included (`xdebug.log_level`, not a nested `xdebug:` map). They may contain only letters, digits, `.`, `_` and `-`.
 - Booleans become `On` / `Off`; numbers are written as they are.
-- **Constant expressions are written unquoted**, so PHP evaluates them: `error_reporting: "E_ALL & ~E_DEPRECATED"` becomes `error_reporting = E_ALL & ~E_DEPRECATED`. A value counts as an expression when it parses as php.ini's expression syntax, uses an operator (`|`, `&`, `^`, `~`, `!`), and its operands are numbers or upper-case constants (`E_ALL`, `E_NOTICE`). A lower-case word joined by an operator (`dev&test`) is a literal and is quoted.
+- **Constant expressions are written unquoted**, so PHP evaluates them: `error_reporting: "E_ALL & ~E_DEPRECATED"` becomes `error_reporting = E_ALL & ~E_DEPRECATED`. A value counts as an expression when it parses as php.ini's expression syntax, uses an operator (`|`, `&`, `^`, `~`, `!`), and its operands are numbers or upper-case constants (`E_ALL`, `E_NOTICE`). A lower-case word joined by an operator (`dev&test`) is a literal and is quoted. PHP evaluates an upper-case name it does not know as `0`, so a misspelled constant (`E_AL & ~E_DEPRECATED`) silently gives the wrong value rather than an error.
 - Strings that are php.ini keywords (`none`, `null`, `yes`, `no`, `on`, `off`, `true`, `false`, in any case) are double-quoted, so they reach PHP as the word: `session.cookie_samesite: None` stays `None` instead of becoming empty. Write a real YAML boolean (`true`) for an On/Off setting.
 - Strings containing `$` are single-quoted and taken literally; php.ini would otherwise expand `${VAR}` from the environment. A value containing both `$` and `'` cannot be written and is refused.
 - Other strings are double-quoted (with `\` and `"` escaped) when they contain whitespace (a multi-word value), `;`, `=`, `#`, `"`, `'`, `{`, `}`, `[`, `]`, operators or parentheses that do not form a valid expression, or when they are empty; anything else is written as it is. A value cannot span several lines.

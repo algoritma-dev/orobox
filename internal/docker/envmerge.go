@@ -14,11 +14,15 @@ import (
 //   - after "# From <source>", every project assignment, in the project file's own order. Its
 //     references resolve as they would in the project file alone, against the template above:
 //     `ORO_APP_DOMAIN=${MY_HOST}` works when MY_HOST is a key only the project has, and
-//     `OPTS=${OPTS} --more` extends the generated value once;
-//   - after that, again, every template assignment that references a key the project set
-//     (directly or through another such assignment) and that the project does not set itself.
-//     Read in the template part, they used the generated values; read again here, they use the
-//     project's — `ORO_APP_URL=http://${ORO_APP_DOMAIN}/` follows the project's domain.
+//     `OPTS=${OPTS} --more` extends the generated value once (see below);
+//   - after that, again, every value that uses a key the project changed: the template
+//     assignments the project does not set itself, then project assignments that use one of
+//     those, until nothing more depends on a changed key — `ORO_APP_URL=http://${ORO_APP_DOMAIN}/`
+//     follows the project's domain, and a project key built from ORO_APP_URL follows too.
+//
+// The file must mean the same read in order (Symfony Dotenv) or whole (compose resolves an
+// env_file against the project environment, which for Orobox is this same file), so a project
+// value referencing its own key has the earlier value inlined instead of the reference.
 //
 // The project file is a sparse override, not a replacement: every key it does not mention keeps
 // the template's value, so a key added by a later Orobox release still reaches a project whose
@@ -36,6 +40,7 @@ func MergeEnv(template, project []byte, source string) []byte {
 	if len(set) == 0 {
 		return template
 	}
+	templateEntries := parseEnvEntries(string(template))
 
 	var out bytes.Buffer
 	out.Write(template)
@@ -44,35 +49,99 @@ func MergeEnv(template, project []byte, source string) []byte {
 	if out.Len() > 0 && !bytes.HasSuffix(out.Bytes(), []byte("\n")) {
 		out.WriteByte('\n')
 	}
-	out.WriteString("\n# From " + source + "\n")
-	for _, e := range projectEntries {
+
+	// A project value that references its own key (`OPTS="${OPTS} --more"`) means "the value
+	// before this line". Dotenv reads it that way, but compose resolves an env_file against the
+	// project environment — the whole merged file, last values — and would apply `--more` twice.
+	// Inlining the earlier value makes both read the same thing.
+	previous := map[string]string{}
+	for _, e := range templateEntries {
 		if e.assignment {
-			out.WriteString(e.key + "=" + e.value + "\n")
+			previous[e.key] = e.value
 		}
 	}
+	var assignments []envEntry
+	for _, e := range projectEntries {
+		if !e.assignment {
+			continue
+		}
+		e.value = inlineSelfReference(e.key, e.value, previous[e.key])
+		previous[e.key] = e.value
+		assignments = append(assignments, e)
+	}
 
-	// Template assignments that depend on a changed key, in template order: a template key only
-	// references keys defined above it, so one pass also catches dependencies of dependencies.
+	out.WriteString("\n# From " + source + "\n")
+	for _, e := range assignments {
+		out.WriteString(e.key + "=" + e.value + "\n")
+	}
+
+	// Values that use a changed key are read again after it, until nothing more depends on a
+	// changed key: generated keys that reference a project key, then project keys that reference
+	// one of those, and so on. Read in order (Dotenv) or whole (compose's env_file), the file then
+	// gives every key the value that follows from the project's.
 	changed := make(map[string]bool, len(set))
 	for key := range set {
 		changed[key] = true
 	}
-	var reread []envEntry
-	for _, e := range parseEnvEntries(string(template)) {
-		if !e.assignment || set[e.key] || !referencesAny(e.value, changed) {
-			continue
+	appended := map[string]bool{}
+	for round := 0; round < 8; round++ {
+		var again []envEntry
+		for _, e := range templateEntries {
+			if e.assignment && !set[e.key] && !appended[e.key] && referencesAny(e.value, changed) {
+				again = append(again, e)
+			}
 		}
-		reread = append(reread, e)
-		changed[e.key] = true
-	}
-	if len(reread) > 0 {
-		out.WriteString("\n# Generated values that use the keys above, read again\n")
-		for _, e := range reread {
+		for _, e := range assignments {
+			if !appended[e.key] && referencesAny(e.value, newKeys(again)) {
+				again = append(again, e)
+			}
+		}
+		if len(again) == 0 {
+			break
+		}
+		if round == 0 {
+			out.WriteString("\n# Values that use the keys above, read again\n")
+		}
+		for _, e := range again {
 			out.WriteString(e.key + "=" + e.value + "\n")
+			appended[e.key] = true
+			changed[e.key] = true
 		}
 	}
 
 	return out.Bytes()
+}
+
+// newKeys returns the keys of entries as a set.
+func newKeys(entries []envEntry) map[string]bool {
+	keys := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		keys[e.key] = true
+	}
+	return keys
+}
+
+// selfReference matches ${KEY}, ${KEY:-…} openings and $KEY not followed by a name character.
+func selfReference(key string) *regexp.Regexp {
+	q := regexp.QuoteMeta(key)
+	return regexp.MustCompile(`\$\{` + q + `\}|\$` + q + `\b`)
+}
+
+// inlineSelfReference replaces key's references to itself in value with prev, the value key had
+// before (unquoted). A single-quoted value is a literal and is left alone.
+func inlineSelfReference(key, value, prev string) string {
+	if strings.HasPrefix(strings.TrimSpace(value), "'") {
+		return value
+	}
+	re := selfReference(key)
+	if !re.MatchString(value) {
+		return value
+	}
+	inner := strings.TrimSpace(prev)
+	if len(inner) >= 2 && (inner[0] == '"' || inner[0] == '\'') && inner[len(inner)-1] == inner[0] {
+		inner = inner[1 : len(inner)-1]
+	}
+	return re.ReplaceAllLiteralString(value, inner)
 }
 
 // envReference matches a ${NAME} (or ${NAME:-default}, ${NAME-default}) or $NAME reference.

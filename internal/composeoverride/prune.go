@@ -38,8 +38,9 @@ func ServiceNames(src []byte) ([]string, error) {
 // dropped lists the removed services in the order they first appear. With nothing to drop the
 // input is returned unchanged; an empty file returns (nil, nil, nil).
 //
-// Only a service's own entry under `services` is removed. One contributed to the services
-// mapping through a merge key cannot be taken out without rewriting the anchor, and is kept.
+// Only a service's own entry under `services` can be removed. A service that must go but is
+// (also) contributed to the services mapping through a merge key cannot be taken out without
+// rewriting the anchor, so Prune returns an error naming it instead.
 func Prune(resolved []byte, known []string) (out []byte, dropped []string, err error) {
 	docs, err := parseAll(resolved)
 	if err != nil || len(docs) == 0 {
@@ -65,6 +66,7 @@ func Prune(resolved []byte, known []string) (out []byte, dropped []string, err e
 		})
 	}
 	own := map[string]bool{}
+	merged := map[string]bool{}
 	for _, doc := range docs {
 		services := deref(ownValue(doc.Content[0], "services"))
 		if services == nil || services.Kind != yamlv3.MappingNode {
@@ -73,16 +75,20 @@ func Prune(resolved []byte, known []string) (out []byte, dropped []string, err e
 		for i := 0; i+1 < len(services.Content); i += 2 {
 			if !isMergeKey(services.Content[i]) {
 				own[services.Content[i].Value] = true
+				continue
+			}
+			for _, src := range mergeSources(services.Content[i+1]) {
+				mapEntries(src, func(name string, _ *yamlv3.Node) { merged[name] = true })
 			}
 		}
 	}
 	drop := map[string]bool{}
 	for _, name := range order {
 		if !isKnown[name] && !standalone[name] {
-			if !own[name] {
+			if merged[name] {
 				// Only an entry written under `services:` itself can be removed; one that comes
-				// in through a merge key lives in the anchor, and leaving it would make compose
-				// reject the project anyway.
+				// in through a merge key lives in the anchor, and leaving it — alone, or next to
+				// an own entry of the same name — would make compose reject the project anyway.
 				return nil, nil, fmt.Errorf("service %s extends a service this stack does not define, and it comes in through a YAML merge key, so it cannot be left out: give it an image or a build, or write it under services directly", name)
 			}
 			drop[name] = true
