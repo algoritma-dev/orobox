@@ -199,3 +199,35 @@ func TestUpOmitsProjectServicesWithoutURLLabels(t *testing.T) {
 		t.Errorf("up output must not print an empty Project services block\n---\n%s", out)
 	}
 }
+
+// up advertises what compose really runs: Adminer is on unless disabled, RedisInsight follows
+// Redis and Kibana follows Elasticsearch unless set explicitly, and the database connection
+// does not depend on Adminer being enabled.
+func TestUpOutputFollowsTheServicesComposeRuns(t *testing.T) {
+	out := runUpCaptured(t, map[string]any{
+		"services.redis":         true,
+		"services.redisinsight":  false,
+		"services.elasticsearch": true,
+		"services.kibana":        false,
+		"services.adminer":       false,
+	})
+	if strings.Contains(out, "RedisInsight") {
+		t.Errorf("RedisInsight is disabled and must not be advertised:\n%s", out)
+	}
+	if strings.Contains(out, "Kibana") {
+		t.Errorf("Kibana is disabled and must not be advertised:\n%s", out)
+	}
+	if strings.Contains(out, "Adminer") {
+		t.Errorf("Adminer is disabled and must not be advertised:\n%s", out)
+	}
+	if !strings.Contains(out, "External Database Connection") || !strings.Contains(out, "Port: 5432") {
+		t.Errorf("the database connection must be printed without Adminer:\n%s", out)
+	}
+}
+
+func TestUpAdvertisesAdminerByDefault(t *testing.T) {
+	out := runUpCaptured(t, map[string]any{})
+	if !strings.Contains(out, "Adminer is available at:") {
+		t.Errorf("Adminer runs by default and must be advertised:\n%s", out)
+	}
+}

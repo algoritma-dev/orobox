@@ -136,6 +136,9 @@ func Run(ctx context.Context, plan *Plan, opts Options) (Result, error) {
 		runID:  strconv.FormatInt(time.Now().UnixNano(), 10),
 	}
 	r.base = r.baseContainer()
+	if err := r.buildLayer(ctx); err != nil {
+		return Result{}, err
+	}
 
 	if opts.SSHAuthSock != "" {
 		r.sshSocket = client.Host().UnixSocket(opts.SSHAuthSock)
@@ -510,6 +513,22 @@ func (r *runner) withCaches(ctr *dagger.Container, step Step) *dagger.Container 
 	return ctr
 }
 
+// buildLayer builds the project image layer up front, as its own reported step. The base is
+// lazy, so without this a broken `image.apk` entry would only fail inside the first dependency
+// command and be reported as "installing the dependencies failed", far from its cause.
+func (r *runner) buildLayer(ctx context.Context) error {
+	if r.plan.Layer == nil {
+		return nil
+	}
+	task := r.report.startUnfollowed("image", "build the project image layer")
+	if _, err := r.base.Sync(ctx); err != nil {
+		task.fail()
+		return r.describe("building the project image layer", err)
+	}
+	task.ok("")
+	return nil
+}
+
 // baseContainer is the image the steps run on. Without a project layer it is the published tag,
 // as it always was. With one, Dagger builds the same Dockerfile the dev stack builds, on the
 // same published tag, so a project that needs an extension locally has it in the pipeline too.
@@ -526,9 +545,15 @@ func (r *runner) baseContainer() *dagger.Container {
 
 	dir := r.client.Directory()
 	if layer.ContextDir != "" {
-		dir = r.client.Host().Directory(layer.ContextDir)
+		dir = r.client.Host().Directory(layer.ContextDir, dagger.HostDirectoryOpts{
+			Exclude: layerContextExcludes(layer.ContextDir, layer.DockerfileName, layer.ContextIsProjectRoot),
+		})
 	}
-	return dir.WithNewFile(layerDockerfileName, string(layer.Dockerfile)).DockerBuild(layer.buildOpts())
+	cacheBust := ""
+	if r.plan.NoCache {
+		cacheBust = r.runID
+	}
+	return dir.WithNewFile(layerDockerfileName, layer.dockerfileFor(cacheBust)).DockerBuild(layer.buildOpts(cacheBust))
 }
 
 // container applies everything that is independent of a step's commands: image, caches,
@@ -541,7 +566,10 @@ func (r *runner) container(step Step) *dagger.Container {
 
 	// The same zz-project.ini the dev stack mounts, so every step — the install, the QA tools,
 	// PHPUnit, the release — sees the project's PHP settings. conf.d is read in name order, and
-	// the zz- prefix puts it after the image's own files.
+	// the zz- prefix puts it after the image's own files. It is written before the dependency
+	// steps on purpose, although that makes an edit to php_ini miss their cache: composer runs
+	// under these settings too (memory_limit above all), and installing the dependencies with
+	// different ones than the rest of the pipeline would hide the very failures they cause.
 	if r.plan.PhpIni != "" {
 		ctr = ctr.WithNewFile("/usr/local/etc/php/conf.d/zz-project.ini", r.plan.PhpIni)
 	}

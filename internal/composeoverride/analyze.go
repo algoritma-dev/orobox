@@ -21,6 +21,9 @@ type Analysis struct {
 	CoreImageOverrides []string      // core services whose `image` is redefined
 	HasBuild           bool          // any service has a `build` key
 	URLs               []ServiceURL  // services with a dev.orobox.url label, sorted by service
+	// Profiled are the services that declare profiles, sorted. `up` starts none of them; a
+	// caller merging several files filters the URLs of every file against all of them.
+	Profiled []string
 }
 
 // MissingPath is a bind source that does not exist. The syntax matters because Docker treats
@@ -97,6 +100,10 @@ func Analyze(resolved []byte, coreServices []string, exists func(string) bool) (
 			a.URLs = append(a.URLs, ServiceURL{Service: name, URL: url})
 		}
 	}
+	for name := range profiled {
+		a.Profiled = append(a.Profiled, name)
+	}
+	sort.Strings(a.Profiled)
 	sort.Slice(a.URLs, func(i, j int) bool { return a.URLs[i].Service < a.URLs[j].Service })
 	return a, nil
 }

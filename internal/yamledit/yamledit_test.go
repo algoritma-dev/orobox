@@ -522,3 +522,129 @@ func TestSetBoolReplacesAnExistingValue(t *testing.T) {
 		t.Errorf("want `use_tmpfs: false # keep`, got:\n%s", out)
 	}
 }
+
+// A file with several YAML documents would silently lose every document after the first on
+// re-encode; Parse refuses it instead of destroying the user's file.
+func TestParseRejectsMultipleDocuments(t *testing.T) {
+	_, err := Parse([]byte("services:\n  a:\n    image: x\n---\nservices:\n  b:\n    image: y\n"))
+	if err == nil || !strings.Contains(err.Error(), "document") {
+		t.Errorf("want an error about multiple documents, got %v", err)
+	}
+	// A leading `---` marker on a single document is fine.
+	if _, err := Parse([]byte("---\nservices: {}\n")); err != nil {
+		t.Errorf("single document with a leading marker: %v", err)
+	}
+}
+
+// yaml.v3 re-emits a decoded `<<` merge key with an explicit `!!merge` tag; the user's file must
+// keep the plain `<<` they wrote.
+func TestBytesKeepsPlainMergeKeys(t *testing.T) {
+	d, err := Parse([]byte("x-common: &c\n  image: x\nservices:\n  a:\n    <<: *c\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetScalar([]string{"services", "a", "restart"}, "no"); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := d.Bytes()
+	if strings.Contains(string(out), "!!merge") {
+		t.Errorf("merge key written with an explicit tag:\n%s", out)
+	}
+	if !strings.Contains(string(out), "<<: *c") {
+		t.Errorf("merge key lost:\n%s", out)
+	}
+}
+
+// Turning `image: ~ # keep` into a mapping must not drop the comment on that line.
+func TestWalkKeepsTheLineCommentOfANullValue(t *testing.T) {
+	d, err := Parse([]byte("image: ~ # keep me\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetScalar([]string{"image", "dockerfile"}, "docker/image/Dockerfile"); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := d.Bytes()
+	if !strings.Contains(string(out), "# keep me") {
+		t.Errorf("line comment lost:\n%s", out)
+	}
+}
+
+// A merged fragment must never carry aliases into the document: an alias to an anchor outside
+// the copied subtree would be written as an undefined `*name`, and a copied anchor name could
+// re-bind an anchor the user already uses.
+func TestMergeMappingExpandsAliasesAndDropsAnchors(t *testing.T) {
+	var frag yaml.Node
+	if err := yaml.Unmarshal([]byte("x: &shared {image: y}\nsvc:\n  <<: *shared\n  ports: [\"1:1\"]\n"), &frag); err != nil {
+		t.Fatal(err)
+	}
+	// Merge only `svc`, whose merge key points at an anchor outside the merged value.
+	root := frag.Content[0]
+	var svc *yaml.Node
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if root.Content[i].Value == "svc" {
+			svc = root.Content[i+1]
+		}
+	}
+	one := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "svc"}, svc}}
+
+	d, err := Parse([]byte("x-mine: &shared {image: mine}\nservices: {}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := d.MergeMapping([]string{"services"}, one, false); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := d.Bytes()
+	var check map[string]any
+	if err := yaml.Unmarshal(out, &check); err != nil {
+		t.Fatalf("merged document is not valid YAML: %v\n%s", err, out)
+	}
+	if strings.Count(string(out), "&shared") != 1 {
+		t.Errorf("the fragment's anchor must not be copied:\n%s", out)
+	}
+	if !strings.Contains(string(out), "image: y") {
+		t.Errorf("the aliased content must be inlined:\n%s", out)
+	}
+}
+
+func TestAppendUniqueKeepsTheLineCommentOfANullValue(t *testing.T) {
+	d, err := Parse([]byte("image:\n  php_extensions: ~ # probes\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.AppendUnique([]string{"image", "php_extensions"}, "blackfire"); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := d.Bytes()
+	if !strings.Contains(string(out), "# probes") {
+		t.Errorf("line comment lost:\n%s", out)
+	}
+}
+
+// A file ending in `---` (or a `---` followed only by a comment) holds one real document;
+// nothing would be lost by editing it.
+func TestParseAcceptsATrailingEmptyDocument(t *testing.T) {
+	for _, src := range []string{"a: 1\n---\n", "a: 1\n---\n# end\n"} {
+		if _, err := Parse([]byte(src)); err != nil {
+			t.Errorf("Parse(%q): %v", src, err)
+		}
+	}
+}
+
+func TestMergeMappingRejectsBeforeCreatingTheTarget(t *testing.T) {
+	d, err := Parse([]byte("a: 1\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var frag yaml.Node
+	if err := yaml.Unmarshal([]byte("? [x]\n: 1\n"), &frag); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := d.MergeMapping([]string{"services"}, frag.Content[0], false); err == nil {
+		t.Fatal("want an error for a non-scalar key")
+	}
+	if d.Has([]string{"services"}) {
+		t.Error("the target was created although the merge was refused")
+	}
+}

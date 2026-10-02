@@ -8,10 +8,12 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/algoritma-dev/orobox/internal/config"
+	"github.com/algoritma-dev/orobox/internal/docker"
 	"github.com/algoritma-dev/orobox/internal/yamledit"
 
 	yamlv3 "gopkg.in/yaml.v3"
@@ -121,6 +123,11 @@ func loadRecipe(fsys fs.FS, name string) (Recipe, error) {
 	if !hasMappingKey(&doc.Compose, "services") {
 		return Recipe{}, fmt.Errorf("recipe %s: compose.services is required", name)
 	}
+	if hasAnchorsOrAliases(&doc.Compose) || hasAnchorsOrAliases(&doc.Config) {
+		// Merged fragments are copied into the user's files; an anchor could re-bind one the
+		// user already uses, so recipes spell everything out.
+		return Recipe{}, fmt.Errorf("recipe %s: anchors and aliases are not allowed in a recipe", name)
+	}
 	r.Compose = &doc.Compose
 	switch {
 	case doc.Config.Kind == 0, doc.Config.Kind == yamlv3.ScalarNode && doc.Config.Tag == "!!null":
@@ -147,55 +154,88 @@ type plannedWrite struct {
 }
 
 // AddRecipe merges a recipe into the project: its compose fragment into .orobox.compose.yaml, its
-// config into .orobox.yaml, its env keys into .env and its files into docker/<name>/.
+// config into the config file at configPath, its env keys into .env and its files into
+// docker/<name>/. Everything lands next to the config file.
 //
 // A project value always wins over a recipe value, and a service the override already defines is
 // refused unless force is set, in which case only the recipe's own services are replaced. Every
 // change is computed before the first file is written, so a refused recipe leaves the project
-// exactly as it was.
-func AddRecipe(projectDir string, r Recipe, force bool) ([]Receipt, error) {
+// exactly as it was. todo lists what the user still has to do by hand that this recipe could not
+// do for them, beyond its notes (a directive for an ini file Orobox does not edit, a warning about
+// where its files landed).
+func AddRecipe(configPath string, r Recipe, force bool) (receipts []Receipt, todo []string, err error) {
+	p, err := openProject(configPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	projectDir := p.dir
+
 	compose, err := planRecipeCompose(projectDir, r, force)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	plan := []plannedWrite{compose}
 
 	if r.Config != nil {
-		cfg, err := planRecipeConfig(projectDir, r)
+		cfg, cfgTodo, err := planRecipeConfig(p, r)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		plan = append(plan, cfg)
+		todo = append(todo, cfgTodo...)
 	}
 	if len(r.Env) > 0 {
 		env, err := planRecipeEnv(projectDir, r)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		plan = append(plan, env)
 	}
 	if r.Files != nil {
 		files, err := planRecipeFiles(projectDir, r)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		plan = append(plan, files...)
+		if warning := buildContextWarning(p, r); warning != "" {
+			todo = append(todo, warning)
+		}
 	}
 
-	var receipts []Receipt
+	// Every write is checked before the first one, so a refused target (a symlink leading out of
+	// the project) leaves the project exactly as it was rather than with half a recipe in it.
 	for _, w := range plan {
 		if w.content != nil {
-			target := filepath.Join(projectDir, filepath.FromSlash(w.rel))
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return receipts, fmt.Errorf("could not create the directory of %s: %w", w.rel, err)
+			if err := checkWritable(projectDir, w.rel); err != nil {
+				return nil, nil, err
 			}
-			if err := os.WriteFile(target, w.content, 0o644); err != nil {
-				return receipts, fmt.Errorf("could not write %s: %w", w.rel, err)
+		}
+	}
+	for _, w := range plan {
+		if w.content != nil {
+			if err := writeInsideProject(projectDir, w.rel, w.content, w.action == ActionCreated); err != nil {
+				return receipts, todo, err
 			}
 		}
 		receipts = append(receipts, Receipt{Path: w.rel, Action: w.action})
 	}
-	return receipts, nil
+	return receipts, todo, nil
+}
+
+// buildContextWarning reports when the recipe's files land inside the image build context (the
+// directory of image.dockerfile). Every file there is hashed on each container start, so an
+// upload, a log or an edited VCL would rebuild the image and recreate the PHP containers.
+func buildContextWarning(p project, r Recipe) string {
+	dockerfile, err := configuredDockerfile(p.config, p.src)
+	if err != nil || dockerfile == "" {
+		return ""
+	}
+	context := path.Dir(dockerfile)
+	files := path.Join("docker", r.Name)
+	if context != "." && files != context && !strings.HasPrefix(files, context+"/") {
+		return ""
+	}
+	return fmt.Sprintf("%s/ is inside the image build context (the directory of %s): every change there rebuilds the image. Move the Dockerfile to a directory of its own (for example docker/image/) and update image.dockerfile.", files, dockerfile)
 }
 
 // planRecipeCompose merges the compose fragment into the team override, creating it when missing.
@@ -244,62 +284,106 @@ func planRecipeCompose(projectDir string, r Recipe, force bool) (plannedWrite, e
 	return finishYAMLPlan(ComposeOverrideFile, doc, before, exists)
 }
 
-// planRecipeConfig merges the recipe's config into .orobox.yaml.
+// planRecipeConfig merges the recipe's config into the project config.
 //
 // `orobox extend` runs without the global config validation, so the file is checked here: editing
 // a config that does not load would only bury the real problem under the recipe's keys.
-func planRecipeConfig(projectDir string, r Recipe) (plannedWrite, error) {
-	src, exists, err := readOptional(filepath.Join(projectDir, configFile))
+//
+// When php_ini is the path of the project's own ini file, Orobox does not edit that file (its
+// layout is the project's choice); the rest of the config still merges, and the directives the
+// file lacks are returned as todo lines for the user to add.
+func planRecipeConfig(p project, r Recipe) (plannedWrite, []string, error) {
+	configFile := p.config
+	cfg, err := config.ParseConfig(p.src)
 	if err != nil {
-		return plannedWrite{}, err
-	}
-	if !exists {
-		return plannedWrite{}, fmt.Errorf("the %s recipe changes %s and there is none in %s: run `orobox init` first",
-			r.Name, configFile, projectDir)
-	}
-	cfg, err := config.ParseConfig(src)
-	if err != nil {
-		return plannedWrite{}, fmt.Errorf("%s is not valid, fix it before adding a recipe: %w", configFile, err)
+		return plannedWrite{}, nil, fmt.Errorf("%s is not valid, fix it before adding a recipe: %w", configFile, err)
 	}
 	ini, err := cfg.PhpIniSettings()
 	if err != nil {
-		return plannedWrite{}, fmt.Errorf("%s: %w", configFile, err)
-	}
-	if recipeIni := mappingValue(r.Config, "php_ini"); recipeIni != nil && ini.File != "" {
-		// The ini file is the project's own, in whatever layout it chose: editing it would be a
-		// guess, so the user gets the exact lines instead.
-		var lines []string
-		for i := 0; i+1 < len(recipeIni.Content); i += 2 {
-			lines = append(lines, "  "+recipeIni.Content[i].Value+" = "+recipeIni.Content[i+1].Value)
-		}
-		return plannedWrite{}, fmt.Errorf("php_ini in %s is the file %s, which orobox does not edit; nothing was changed. Add these settings to it by hand:\n%s",
-			configFile, ini.File, strings.Join(lines, "\n"))
+		return plannedWrite{}, nil, fmt.Errorf("%s: %w", configFile, err)
 	}
 
-	doc, err := yamledit.Parse(src)
+	fragment := r.Config
+	var todo []string
+	if recipeIni := mappingValue(r.Config, "php_ini"); recipeIni != nil && ini.File != "" {
+		fragment = withoutKey(r.Config, "php_ini")
+		missing, err := missingIniDirectives(filepath.Join(p.dir, filepath.FromSlash(ini.File)), recipeIni)
+		if err != nil {
+			return plannedWrite{}, nil, err
+		}
+		if len(missing) > 0 {
+			todo = append(todo, fmt.Sprintf("php_ini in %s is the file %s, which orobox does not edit. Add to it:\n%s",
+				configFile, ini.File, missing))
+		}
+	}
+
+	doc, err := yamledit.Parse(p.src)
 	if err != nil {
-		return plannedWrite{}, fmt.Errorf("%s: %w", configFile, err)
+		return plannedWrite{}, nil, fmt.Errorf("%s: %w", configFile, err)
 	}
 	before, err := doc.Bytes()
 	if err != nil {
-		return plannedWrite{}, err
+		return plannedWrite{}, nil, err
 	}
-	if err := mergeRecipeConfig(doc, nil, r.Config); err != nil {
-		return plannedWrite{}, fmt.Errorf("%s: %w", configFile, err)
+	if err := mergeRecipeConfig(doc, nil, fragment); err != nil {
+		return plannedWrite{}, nil, fmt.Errorf("%s: %w", configFile, err)
 	}
 
-	w, err := finishYAMLPlan(configFile, doc, before, exists)
+	w, err := finishYAMLPlan(configFile, doc, before, true)
 	if err != nil {
-		return plannedWrite{}, err
+		return plannedWrite{}, nil, err
 	}
 	if w.content != nil {
 		// A recipe whose config does not load is a bug in the recipe, and the project must not
 		// pay for it with a config every other command refuses.
 		if _, err := config.ParseConfig(w.content); err != nil {
-			return plannedWrite{}, fmt.Errorf("the %s recipe would make %s invalid: %w", r.Name, configFile, err)
+			return plannedWrite{}, nil, fmt.Errorf("the %s recipe would make %s invalid: %w", r.Name, configFile, err)
 		}
 	}
-	return w, nil
+	return w, todo, nil
+}
+
+// missingIniDirectives renders, as php.ini lines, the directives of want that the ini file does
+// not set yet. A directive counts as set when a line assigns it, whatever the value: the
+// project's value always wins.
+func missingIniDirectives(iniPath string, want *yamlv3.Node) (string, error) {
+	src, err := os.ReadFile(iniPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("could not read %s: %w", filepath.Base(iniPath), err)
+	}
+	values := map[string]any{}
+	for i := 0; i+1 < len(want.Content); i += 2 {
+		key := want.Content[i].Value
+		set := regexp.MustCompile(`(?m)^\s*` + regexp.QuoteMeta(key) + `\s*=`)
+		if set.Match(src) {
+			continue
+		}
+		var v any
+		if err := want.Content[i+1].Decode(&v); err != nil {
+			return "", err
+		}
+		values[key] = v
+	}
+	if len(values) == 0 {
+		return "", nil
+	}
+	rendered, err := docker.RenderPhpIni(values)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(rendered, "\n"), nil
+}
+
+// withoutKey returns a shallow copy of mapping m without key.
+func withoutKey(m *yamlv3.Node, key string) *yamlv3.Node {
+	c := *m
+	c.Content = nil
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value != key {
+			c.Content = append(c.Content, m.Content[i], m.Content[i+1])
+		}
+	}
+	return &c
 }
 
 // mergeRecipeConfig walks the recipe's config mapping and applies it under path: mappings are
@@ -404,7 +488,8 @@ func planRecipeFiles(projectDir string, r Recipe) ([]plannedWrite, error) {
 			return nil
 		}
 		rel := path.Join("docker", r.Name, p)
-		switch _, err := os.Stat(filepath.Join(projectDir, filepath.FromSlash(rel))); {
+		// Lstat: a dangling symlink is an existing entry, never something to write through.
+		switch _, err := os.Lstat(filepath.Join(projectDir, filepath.FromSlash(rel))); {
 		case err == nil:
 			plan = append(plan, plannedWrite{rel: rel, action: ActionSkipped})
 			return nil
@@ -479,4 +564,19 @@ func mappingKeys(m *yamlv3.Node) []string {
 		keys = append(keys, m.Content[i].Value)
 	}
 	return keys
+}
+
+func hasAnchorsOrAliases(n *yamlv3.Node) bool {
+	if n == nil {
+		return false
+	}
+	if n.Anchor != "" || n.Kind == yamlv3.AliasNode {
+		return true
+	}
+	for _, c := range n.Content {
+		if hasAnchorsOrAliases(c) {
+			return true
+		}
+	}
+	return false
 }

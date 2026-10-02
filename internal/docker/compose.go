@@ -109,8 +109,10 @@ var (
 
 // GetNginxPorts returns the configured HTTP and HTTPS ports for Nginx.
 //
-// Precedence, highest first: `ports.http` / `ports.https`, the older `nginx_http_port` /
-// `nginx_https_port` keys, the ORO_NGINX_HTTP(S)_PORT environment variables, then 8080 / 8443.
+// Precedence, highest first: `ports.http` / `ports.https`, then the deprecated `nginx_http_port`
+// / `nginx_https_port` — where the ORO_NGINX_HTTP(S)_PORT environment variable, when set, wins
+// over the key in .orobox.yaml, because viper's AutomaticEnv maps it onto that key — then
+// 8080 / 8443.
 // The old spellings keep working so existing configs do not break, but the `ports:` section wins
 // because it is the documented one and the only one that can say "do not publish" (0).
 func GetNginxPorts() (httpPort string, httpsPort string) {
@@ -462,7 +464,7 @@ func EnsureDockerCompose() bool {
 	if err != nil {
 		// Validate rejects a malformed key while the config loads, so what reaches here is
 		// mostly a file that does not exist. Mounting nothing beats mounting a directory.
-		warnOnce(fmt.Sprintf("Ignoring php_ini: %v", err))
+		warnPhpIniProblem(err)
 		phpIni = config.PhpIni{}
 	}
 	iniState := syncPhpIni(internalDir, data.BundlePath, phpIni)
@@ -520,6 +522,21 @@ type phpIniState struct {
 	Changed bool
 }
 
+// phpIniProblemReported is set by the command layer when it has already told the user that the
+// php_ini setting cannot be used (`down` and `clear` go ahead despite a missing file and say so
+// on stderr); repeating it here would print the same problem twice.
+var phpIniProblemReported bool
+
+// SetPhpIniProblemReported records that the php_ini problem was already reported to the user.
+func SetPhpIniProblemReported() { phpIniProblemReported = true }
+
+// warnPhpIniProblem warns, once, that php_ini is ignored, unless the user was already told.
+func warnPhpIniProblem(err error) {
+	if !phpIniProblemReported {
+		warnOnce(fmt.Sprintf("Ignoring php_ini: %v", err))
+	}
+}
+
 // phpIniHash is the first 16 hex characters of the SHA-256 of the mounted ini. Compose decides
 // whether a container is stale from its configuration, and a bind mount's source path is part
 // of that configuration but its content is not: editing the ini under an unchanged path would
@@ -546,7 +563,7 @@ func syncPhpIni(internalDir, projectDir string, ini config.PhpIni) phpIniState {
 
 	source, err := phpIniMountSource(ini, internalDir, projectDir)
 	if err != nil {
-		warnOnce(fmt.Sprintf("Ignoring php_ini: %v", err))
+		warnPhpIniProblem(err)
 		return dropped()
 	}
 	if source == "" {
@@ -558,7 +575,7 @@ func syncPhpIni(internalDir, projectDir string, ini config.PhpIni) phpIniState {
 		// picked up too. Nothing is generated, so a leftover generated file goes away.
 		content, err := os.ReadFile(source)
 		if err != nil {
-			warnOnce(fmt.Sprintf("Ignoring php_ini: %v", err))
+			warnPhpIniProblem(err)
 			return dropped()
 		}
 		return phpIniState{Source: source, Hash: phpIniHash(content), Changed: emptyGeneratedPhpIni(generated)}
@@ -566,7 +583,7 @@ func syncPhpIni(internalDir, projectDir string, ini config.PhpIni) phpIniState {
 
 	content, err := RenderPhpIni(ini.Values)
 	if err != nil {
-		warnOnce(fmt.Sprintf("Ignoring php_ini: %v", err))
+		warnPhpIniProblem(err)
 		return dropped()
 	}
 	state := phpIniState{Source: source, Hash: phpIniHash([]byte(content))}
@@ -651,7 +668,7 @@ func GetBaseComposeArgs() []string {
 		}
 	}
 
-	return appendOverrideArgs(args, internalDir)
+	return appendOverrideArgs(args, internalDir, includeTestFiles)
 }
 
 // RunComposeCommandSilently runs docker compose with the provided arguments

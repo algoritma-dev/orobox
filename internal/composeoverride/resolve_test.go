@@ -373,8 +373,6 @@ services:
     build:
       <<: *b
       dockerfile: D
-  reset:
-    build: !reset null
 `)
 	a := service(t, doc, "a")["build"].(map[string]any)
 	if a["context"] != "/proj" || a["dockerfile"] != "Dockerfile.dev" {
@@ -384,8 +382,14 @@ services:
 	if merged["context"] != "/proj/from-anchor" {
 		t.Errorf("a context from a merge key must be rewritten, not replaced: %v", merged)
 	}
-	if got := service(t, doc, "reset")["build"]; got != nil {
-		t.Errorf("a !reset build must stay unset, got %v", got)
+	// The decoder reads a custom-tagged `!reset null` back as the string "null", so the check is
+	// on the resolved text: the reset must survive untouched, with no context spliced into it.
+	out, err := Resolve([]byte("services:\n  reset:\n    build: !reset null\n"), testBase, testHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "build: !reset null") || strings.Contains(string(out), "context") {
+		t.Errorf("a !reset build must stay as written, got:\n%s", out)
 	}
 }
 
@@ -550,5 +554,36 @@ func TestResolveTildeUser(t *testing.T) {
 	assertStrings(t, strList(t, w["volumes"]), []string{"/home/u/user/x:/y"})
 	if w["env_file"] != "/home/u/other/e.env" {
 		t.Errorf("env_file = %v", w["env_file"])
+	}
+}
+
+// A build mapping without `context` gets the project directory only when nothing before it set
+// one: compose merges build mappings key by key, so an inserted context would override a context
+// an earlier document (or the team file, for the local one) gave the same service.
+func TestResolveLeavesAnEarlierContextAlone(t *testing.T) {
+	out, err := Resolve([]byte("services:\n  docs:\n    build:\n      context: ./docs\n---\nservices:\n  docs:\n    build:\n      args:\n        A: b\n"), testBase, testHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(out), "context:") != 1 {
+		t.Errorf("a context was inserted into the second document:\n%s", out)
+	}
+
+	out, err = ResolveAfter([]byte("services:\n  docs:\n    build:\n      args:\n        A: b\n"), testBase, testHome, map[string]bool{"docs": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "context:") {
+		t.Errorf("a context was inserted although an earlier file builds the service:\n%s", out)
+	}
+}
+
+func TestBuildServices(t *testing.T) {
+	got, err := BuildServices([]byte("services:\n  a:\n    build: .\n  b:\n    image: x\n---\nservices:\n  c:\n    build:\n      context: .\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got["a"] || !got["c"] || got["b"] {
+		t.Errorf("BuildServices = %v, want a and c", got)
 	}
 }

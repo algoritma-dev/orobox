@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/algoritma-dev/orobox/internal/docker"
 )
 
 // Box owns one isolated environment for one matrix case.
@@ -336,6 +338,21 @@ func (b *Box) teardown() {
 	defer cancel()
 	_ = b.exec(ctx, "down")
 	b.dockerDownVolumes()
+	b.removeCustomImages()
+}
+
+// removeCustomImages deletes the image layers orobox built locally for this case (a case with
+// image.* keys builds one). They exist on no registry and nothing else removes them, so repeated
+// local runs would otherwise pile them up. Best-effort.
+func (b *Box) removeCustomImages() {
+	repo := docker.CustomImageRepository(filepath.Base(b.dir))
+	out, err := exec.Command("docker", "image", "ls", "-q", "--filter", "reference="+repo).Output()
+	if err != nil {
+		return
+	}
+	for _, id := range strings.Fields(string(out)) {
+		_ = exec.Command("docker", "image", "rm", "-f", id).Run()
+	}
 }
 
 // captureGeneratedConfig copies this case's generated configuration into the log directory.

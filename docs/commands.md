@@ -127,12 +127,14 @@ service with a `build:` section, `up` passes `--build` so it is rebuilt.
 
 Flags:
 - `-c`, `--clean`: tear the environment down, volumes included, before starting.
-- `--rebuild`: rebuild the image from the project's [`image` settings](configuration.md#image-customization-image) ignoring the Docker cache. Only useful with a custom layer configured: rebuilds happen automatically when the rendered Dockerfile, its build context or the base image change, so this is for the case Docker cannot see — an unpinned `RUN apk add` that should pick up a newer package.
+- `--rebuild`: pull the base image, then rebuild the project's image layer from its [`image` settings](configuration.md#image-customization-image) ignoring the Docker cache. Only useful with a custom layer configured: rebuilds happen automatically when the rendered Dockerfile, its build context or the base image change, so this is for the case Docker cannot see — an unpinned `RUN apk add` that should pick up a newer package.
 
-Once the stack is up, `up` prints the application URLs and, for every enabled optional service
-(Mailpit, Adminer, RedisInsight, RabbitMQ, Kibana), its URL and the DSN to put in your `.env`, all
-with the host ports configured in [`ports`](configuration.md#host-ports-ports). A service whose
-port is `0` is not listed. It then lists the services your [compose override](configuration.md#extending-the-stack-oroboxcomposeyaml) advertises with the `dev.orobox.url` label, after the built-in blocks:
+Once the stack is up, `up` prints the application URLs, the database connection for your IDE
+(host port `ports.db`) and, for every optional service compose actually runs, its URL and the DSN
+to put in your `.env`, all with the host ports configured in [`ports`](configuration.md#host-ports-ports).
+Adminer runs unless `services.adminer: false`; RedisInsight runs with Redis and Kibana with
+Elasticsearch unless they are switched off. A URL whose port is `0` is not printed (the DSN hint,
+which works inside the stack, still is). It then lists the services your [compose override](configuration.md#extending-the-stack-oroboxcomposeyaml) advertises with the `dev.orobox.url` label, after the built-in blocks:
 ```
 Project services:
   - minio: http://localhost:9001
@@ -146,8 +148,10 @@ orobox down
 ```
 
 ### 5. Shell Access (`shell`)
-Opens an interactive `bash` in a running container, `application` by default. Any service of the
-stack can be named, including the ones added by a compose override.
+Opens an interactive shell in a running container, `application` by default: `bash`, or `sh` when
+the image has no bash. Any running service of the stack can be named, including the ones added by
+a compose override (`db-test` belongs to the test stack and is reachable from `orobox test`
+commands only).
 ```bash
 orobox shell
 orobox shell consumer
@@ -216,16 +220,16 @@ If you run `orobox run --help`, you will see a dynamic list of all commands conf
 ### 16. Extending the environment (`extend`)
 Writes the files that customize the stack, with the required headers and commented examples, so you do not have to remember the file names or the syntax.
 ```bash
-orobox extend image             # docker/Dockerfile + image.dockerfile in .orobox.yaml
+orobox extend image             # docker/image/Dockerfile + image.dockerfile in .orobox.yaml
 orobox extend compose           # .orobox.compose.yaml
-orobox extend compose --local   # .orobox.compose.local.yaml, added to .gitignore
+orobox extend compose --local   # .orobox.compose.local.yaml (+ .gitignore entry if one exists)
 orobox extend add               # list the recipes
 orobox extend add varnish sftp  # add ready-made services
 ```
 
 | Command | Effect |
 | --- | --- |
-| `extend image` | Creates `docker/Dockerfile` with the `ARG OROBOX_BASE_IMAGE` / `FROM ${OROBOX_BASE_IMAGE}` header and commented examples, and sets `image.dockerfile` in `.orobox.yaml`. Needs an existing `.orobox.yaml` (run [`orobox init`](#2-initialization-init) first). |
+| `extend image` | Creates `docker/image/Dockerfile` with the `ARG OROBOX_BASE_IMAGE` / `FROM ${OROBOX_BASE_IMAGE}` header and commented examples, and sets `image.dockerfile` in `.orobox.yaml`. The Dockerfile gets a directory of its own because that directory is the build context, hashed on every container start. A file already at that path is adopted only if it is an Orobox layer (final `FROM ${OROBOX_BASE_IMAGE}`); otherwise the command refuses and nothing is written. |
 | `extend compose` | Creates `.orobox.compose.yaml` with commented examples: a new service with the `dev.orobox.url` label, an environment variable on a core service, an extra mount, and `!override` on `ports`. |
 | `extend compose --local` | Creates `.orobox.compose.local.yaml` for one developer's own tweaks, and appends `/.orobox.compose.local.yaml` to `.gitignore` when that file exists and does not list it yet. |
 | `extend add` | Lists the available recipes, one `name — description` line each. |
@@ -234,14 +238,15 @@ orobox extend add varnish sftp  # add ready-made services
 What the files do is described in [Custom Dockerfile](configuration.md#custom-dockerfile-imagedockerfile) and [Extending the stack](configuration.md#extending-the-stack-oroboxcomposeyaml).
 
 Rules shared by every `extend` subcommand:
-- **Nothing is overwritten.** A file that already exists is left alone and reported as `skipped`.
-- **`.orobox.yaml` keeps its comments.** The file is rewritten in place, so comments stay, but formatting is normalized: blank lines are dropped and indentation and the spacing before inline comments are tidied. Review the diff before committing. If the config already names a Dockerfile (`image.dockerfile`, or the deprecated top-level `dockerfile`), that path is used instead of `docker/Dockerfile` and the config is left as it is; a missing file is created at the configured path.
+- **It needs the project's config.** Every subcommand works against `.orobox.yaml` (or the file given with `--config`) and refuses to run without it: run [`orobox init`](#2-initialization-init) first. All files are written next to that config file, and never through a symlink pointing outside the project.
+- **Nothing you wrote is replaced.** `image` and `compose` never overwrite a file: an existing one is left alone and reported as `skipped`. `add` edits `.orobox.compose.yaml`, `.orobox.yaml` and `.env` in place, only adding what they lack (`--force` replaces the recipe's own services).
+- **`.orobox.yaml` keeps its comments.** The file is rewritten in place, so comments stay, but formatting is normalized: blank lines are dropped and indentation and the spacing before inline comments are tidied. Review the diff before committing. A file with several YAML documents (`---`) is refused rather than edited. If the config already names a Dockerfile (`image.dockerfile`, or the deprecated top-level `dockerfile`), that path is used instead of `docker/image/Dockerfile` and the config is left as it is; a missing file is created at the configured path.
 - **One line per file**, `<action> <path>` with the path relative to the project and the action `created`, `updated` or `skipped`:
   ```
-  created docker/Dockerfile
+  created docker/image/Dockerfile
   updated .orobox.yaml
   ```
-  With `--agent` these lines are all that is printed.
+  With `--agent` these lines are all that stdout carries; what a recipe leaves to do is printed on stderr, one `note: <recipe>: …` line each.
 
 #### Recipes
 A recipe is a ready-made service with everything it needs. `orobox extend add <recipe>` merges it into the project:
@@ -249,7 +254,7 @@ A recipe is a ready-made service with everything it needs. `orobox extend add <r
 - its services (and volumes) into `.orobox.compose.yaml`, created when missing. A service the file already defines is refused, naming it; `--force` replaces that service and leaves every other one alone;
 - its settings into `.orobox.yaml`: list items are appended without duplicates, other keys are only set when the project does not have them. The config must be valid first, since `extend` runs without the usual config check;
 - its variables into the `.env` next to `.orobox.yaml` (created when missing), only the keys that file does not define. They reach the stack through the [env merge](configuration.md#overriding-the-generated-env-files);
-- its files into `docker/<recipe>/`, never overwriting one.
+- its files into `docker/<recipe>/`, never overwriting one. When that directory lies inside the image build context (the directory of `image.dockerfile`), a warning says so: changes there would rebuild the image.
 
 A project value always wins over a recipe value. If any part of a recipe is refused, nothing of that recipe is written. With several recipes (`extend add a b`) they are applied in order, and the ones before a refused recipe stay applied; the ones after it are not attempted. Images are pinned, so a recipe added today runs the same image in a year. After the receipts, each recipe prints what is left to do.
 
@@ -264,7 +269,7 @@ Recipes publish fixed host ports (varnish 6081, selenium 7900, sftp 2222), so tw
 
 Each recipe, what it configures and how to use it is described in [Ready-made services](customization.md#ready-made-services-recipes).
 
-A recipe that sets `php_ini` keys is refused when `php_ini` in `.orobox.yaml` is the path of an ini file: Orobox does not edit that file, so the error lists the lines to add to it by hand.
+When `php_ini` in `.orobox.yaml` is the path of an ini file of your own, Orobox does not edit that file: the rest of the recipe is applied, and the directives the file does not set yet are printed as lines to add to it by hand. Once they are there, adding the recipe again reports nothing left to do.
 
 ### 17. Test Environment (`test-init`)
 Creates, or resets, the test database that `orobox test` runs against: starts `db-test` (plus
@@ -293,10 +298,13 @@ orobox db restore var/backup.sql
 ```
 - `backup <file>` runs `pg_dump --clean --if-exists` in the `db` container and writes the SQL to
   `<file>` on the host. A failed dump removes the partial file.
-- `restore <file>` starts `db` and `application` if needed, empties the database, recreates the
-  `uuid-ossp` extension, loads the file with `psql`, then sets Oro's `application_url`, `url` and
-  `secure_url` to the first configured domain (with its port), so a dump taken from another
-  environment opens on yours.
+- `restore <file>` starts `db` and `application` if needed and stops the services that boot an
+  Oro kernel (`web`, `php-fpm-app`, `ws`, `consumer`, `cron`) for the duration, so nothing works
+  against a database that is being replaced. It then empties the database, recreates the
+  `uuid-ossp` extension, loads the file with `psql`, sets Oro's `application_url`, `url` and
+  `secure_url` to the first configured domain (with its port) so a dump taken from another
+  environment opens on yours, clears `var/cache/dev`, runs `oro:platform:update --force` (so the
+  dump's schema is migrated to the code you have), and starts the stopped services again.
 
 ### 19. Update Orobox (`self-update`)
 Replaces the running binary with the latest release for your platform. When a newer release was

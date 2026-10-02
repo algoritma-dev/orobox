@@ -33,9 +33,9 @@ of the one before it, and you never have to learn the next one until you need it
 `orobox extend` writes the files for you with the right header and commented examples:
 
 ```bash
-orobox extend image             # docker/Dockerfile, and image.dockerfile in .orobox.yaml
+orobox extend image             # docker/image/Dockerfile, and image.dockerfile in .orobox.yaml
 orobox extend compose           # .orobox.compose.yaml
-orobox extend compose --local   # .orobox.compose.local.yaml, added to .gitignore
+orobox extend compose --local   # .orobox.compose.local.yaml (+ .gitignore entry if one exists)
 orobox extend add               # list the ready-made services
 orobox extend add varnish       # add one
 ```
@@ -71,7 +71,8 @@ Extensions are installed with [`install-php-extensions`](https://github.com/mloc
 which the published image ships at a pinned release. It fetches and removes the build
 dependencies on its own, so there is no `$PHPIZE_DEPS`, `pecl` or `docker-php-ext-configure` to
 deal with. Its README lists every supported extension; a specific version is written
-`redis-6.1.0`.
+`redis-6.1.0`. If your local copy of the base image is older than the tool, the layer downloads the
+same pinned release first, so the key works either way.
 
 ### Install a global npm tool
 
@@ -94,36 +95,54 @@ image:
     - mkdir -p /opt/reports && chmod 777 /opt/reports
 ```
 
-An entry is a single line. Join commands with `&&`; a line break or a trailing `\` is refused,
-because it would let the following text become Dockerfile instructions of its own. A script that
-does not fit on one line belongs in [your own Dockerfile](#write-your-own-dockerfile).
+An entry is a single line. Join commands with `&&`; a line break inside the entry, a trailing `\`
+or a heredoc (`<<EOF`) is refused, because the following text would become Dockerfile
+instructions of its own. A YAML folded scalar is fine for a long line:
 
-The `apk`, `php_extensions` and `npm` lists take plain names only (letters, digits and
-`@ . _ + : / = ~ -`); anything else is refused with a hint to move it to `run`.
+```yaml
+image:
+  run:
+    - >
+      curl -sSL https://example.com/tool -o /usr/local/bin/tool &&
+      chmod +x /usr/local/bin/tool
+```
+
+A script that does not fit on one line belongs in [your own Dockerfile](#write-your-own-dockerfile).
+
+The `apk`, `php_extensions` and `npm` lists take plain names only: letters, digits and
+`@ . _ + : / = ~ -`, starting with a letter, a digit or `@` (so an entry cannot sneak in an option
+like `--allow-untrusted`). Anything else is refused with a hint to move it to `run`.
 
 ### How the layer is built
 
-The keys render into a Dockerfile, one `RUN` per key in a fixed order, so changing one key reuses
-the cached layers before it:
+The keys render into a Dockerfile, one `RUN` per key in a fixed order (plus one that fetches
+`install-php-extensions` when the base image lacks it), so changing one key reuses the cached
+layers before it:
 
 ```dockerfile
 ARG OROBOX_BASE_IMAGE
 FROM ${OROBOX_BASE_IMAGE}
 USER root
 RUN apk add --no-cache imagemagick poppler-utils ghostscript
+RUN command -v install-php-extensions >/dev/null 2>&1 || (curl -fsSL https://github.com/mlocati/docker-php-extension-installer/releases/download/2.12.0/install-php-extensions -o /usr/local/bin/install-php-extensions && chmod +x /usr/local/bin/install-php-extensions)
 RUN install-php-extensions redis imagick xsl
 RUN npm install -g @playwright/test
 RUN curl -sSL https://example.com/tool -o /usr/local/bin/tool && chmod +x /usr/local/bin/tool
 ```
 
-You never run a build yourself. Whenever Orobox starts containers — `orobox up`, and the commands
-that bring services up on their own, such as `init`, `test` and `test-init` — it first compares a hash of the rendered Dockerfile, of the files in
-the build context and of the base image with the label on the existing layer, and rebuilds only
-when something differs. When nothing changed, the check costs a directory listing and one
-`docker image inspect`.
+You never run a build yourself. Whenever Orobox creates containers from the image — `orobox up`,
+and `init`, `test-init`, `db restore` or `test` when they have to start a service that is not
+running — it first compares a hash of the rendered Dockerfile, of the files in the build context
+(path, size and modification time) and of the base image with the label on the existing layer,
+and rebuilds only when something differs. When nothing changed, the check is a walk of the build
+context and one or two `docker image inspect`.
 
-`orobox up --rebuild` forces a build with `--no-cache --pull`. You only need it for what Docker's
-cache cannot see, such as an unpinned `apk add` that should pick up a newer package.
+Commands that work inside containers already running — `test` and `qa` on a running stack,
+`shell`, `console`, `run`, `xdebug` — neither rebuild nor switch: **run `orobox up` to move the
+running containers to a new layer.**
+
+`orobox up --rebuild` pulls the base image, then builds with `--no-cache`. You only need it for what
+Docker's cache cannot see, such as an unpinned `apk add` that should pick up a newer package.
 
 Removing every `image.*` key puts the project straight back on the published image.
 
@@ -135,7 +154,10 @@ For a multi-stage build, a compiled tool, or files `COPY`ed into the image, use 
 orobox extend image
 ```
 
-This creates `docker/Dockerfile` and sets `image.dockerfile: docker/Dockerfile` in `.orobox.yaml`.
+This creates `docker/image/Dockerfile` and sets `image.dockerfile: docker/image/Dockerfile` in
+`.orobox.yaml`. A file already at that path is adopted only if it is an Orobox layer (final
+`FROM ${OROBOX_BASE_IMAGE}`); a different Dockerfile there (a production image, say) makes the
+command refuse rather than build the wrong thing.
 The final stage must build on the image Orobox passes in the `OROBOX_BASE_IMAGE` build argument;
 earlier stages can use anything:
 
@@ -150,9 +172,14 @@ COPY --from=tool /go/bin/tool /usr/local/bin/tool
 COPY php-fpm-pool.conf /usr/local/etc/php-fpm.d/zz-pool.conf
 ```
 
-- The **build context is the Dockerfile's directory** (`docker/` here), not the repository root.
-  Put the files you `COPY` next to the Dockerfile. Only `docker/.dockerignore` is honoured; a
-  Dockerfile-specific `Dockerfile.dockerignore` is not.
+- The **build context is the Dockerfile's directory** (`docker/image/` here), not the repository
+  root. Put the files you `COPY` next to the Dockerfile — and nothing else: every file in the
+  context is part of the rebuild check, so runtime data there (recipe directories, fixtures,
+  uploads) would rebuild the image and recreate the PHP containers whenever it changes. That is
+  why the Dockerfile gets a directory of its own.
+- `.dockerignore`: with only a Dockerfile (no other `image.*` key) a `Dockerfile.dockerignore`
+  works — Docker uses it instead of `<context>/.dockerignore`; with other `image.*` keys the
+  rendered Dockerfile goes in on stdin and only `<context>/.dockerignore` applies.
 - A final `FROM` naming anything other than `${OROBOX_BASE_IMAGE}` is refused: with a hardcoded tag,
   `oro_version` would no longer decide which Oro image runs. Because the base arrives as a
   build argument, bumping `oro_version` moves your layer with it and the Dockerfile never needs
@@ -185,8 +212,20 @@ win.
 
 - Write directives as dotted keys, exactly as php.ini names them (`xdebug.mode`, not a nested
   `xdebug:` map). Case is preserved.
-- `true` / `false` become `On` / `Off`; strings with characters php.ini treats specially are quoted
-  for you.
+- `true` / `false` become `On` / `Off`.
+- Constant expressions stay unquoted, so PHP evaluates them:
+
+  ```yaml
+  php_ini:
+    error_reporting: E_ALL & ~E_DEPRECATED
+  ```
+
+- Words php.ini would turn into `1` or nothing (`None`, `yes`, `no`, `on`, `off`, …) are quoted
+  when you write them as strings, so `session.cookie_samesite: None` really sends `None`.
+- A value with `$` is written literally, in single quotes: php.ini would otherwise replace
+  `${VAR}` with an environment variable.
+- Multi-word values, and values with characters php.ini treats specially, are quoted for you
+  (`sendmail_path: msmtp -a default` keeps working).
 - Values are single-line; nested maps and lists are refused.
 
 Already have an ini file in the repository? Point at it instead, and it is mounted as it is:
@@ -228,18 +267,24 @@ on the service.
 
 ### Change environment variables
 
-Put a `.env` (and `.env.test` for the test environment) next to `.orobox.yaml` holding only the
-variables you change or add:
+Put a `.env` (and `.env.test` for the test environment) next to `.orobox.yaml` (or the file given
+with `--config`) holding only the variables you change or add:
 
 ```dotenv
 ORO_MAILER_DSN=smtp://mail:1025
 MY_API_KEY=xyz
 ```
 
-They are merged into the file Orobox generates: a variable it already defines is replaced in
-place, a new one is appended. Run `orobox up` to apply. See
-[Overriding the generated env files](configuration.md#overriding-the-generated-env-files) for how
-this interacts with `project` and `demo` installs, which own their `.env-app.local`.
+They are layered over the file Orobox generates: your file is appended after it, in its own
+order, so your values win and your `${...}` references resolve (`OPTS="${OPTS} --more"` extends
+the generated value); the generated values that use a key you changed are then repeated after
+it, so they follow your value. Multi-line quoted values (a PEM key) are copied as they are. Run
+`orobox up` to apply.
+
+> **`project` and `demo` installs:** the application (`application`, `php-fpm-app`) reads your
+> checkout's own `.env-app.local`, which `orobox init` seeds once from the merged file. A later
+> change to `.env` reaches only `ws`, `consumer` and `cron`; change `.env-app.local` for the
+> application itself. See [Overriding the generated env files](configuration.md#overriding-the-generated-env-files).
 
 To set a variable on **one** service only, use the compose override instead (next section).
 
@@ -300,7 +345,7 @@ absolute against the project directory. That includes paths reached through YAML
 `<<` merge keys. Your file is never modified.
 
 Compose **appends** to lists. To replace the ports of a core service, tag the list `!override`;
-to remove it, `!reset []` (Compose 2.24 or later):
+to remove it, `!reset []` (Docker Compose 2.24.4 or later):
 
 ```yaml
 services:
@@ -315,7 +360,7 @@ services:
 stay out of git:
 
 ```bash
-orobox extend compose --local   # creates it and adds it to .gitignore
+orobox extend compose --local   # creates it, and adds it to .gitignore if the project has one
 ```
 
 Use it for what only your machine needs: a port that clashes with another project of yours, a
@@ -327,11 +372,21 @@ mount of a local checkout of a dependency, Xdebug environment on a service.
   `docker compose down -v`. For data that must survive, declare the volume `external: true` and
   create it once with `docker volume create`.
 - **A broken file stops every command that runs compose**, naming the file. Orobox never runs the
-  stack with your override silently dropped. An empty or comments-only file counts as absent.
+  stack with your override silently dropped. An empty or comments-only file counts as absent; a
+  file with several YAML documents (`---`) works as compose reads it.
+- **The personal file may tweak what the team file adds** (a recipe's ports, say), and a `build:`
+  in a later file that only adds `args` keeps the context an earlier file gave it.
+- **Tweaking a service that is not always there is fine.** An entry for `db-test` (which exists
+  only for `orobox test` / `test-init`) or for an optional service you disabled is used where that
+  service exists and left out elsewhere, instead of breaking every command. A tweak to a service
+  the stack never defines gets a warning; a new service needs an `image` or a `build`.
 - **Warnings**, printed once per command: a bind-mount source that does not exist on the host
-  (Docker would create an empty directory there), and an `image:` set on one of Orobox's own
-  services (`application`, `web`, `php-fpm-app`, `ws`, `consumer`, `cron`, `volume-init`,
-  `web-init`), which detaches it from `oro_version` and from your image layer.
+  (in short syntax Docker creates an empty directory there; in long syntax it refuses to start the
+  container), and an `image:` set on one of Orobox's own services (`application`, `web`,
+  `php-fpm-app`, `ws`, `consumer`, `cron`, `volume-init`, `web-init`), which detaches it from
+  `oro_version` and from your image layer.
+- **`dev.orobox.url`** is printed as written (no `${VAR}` interpolation), and a service with
+  `profiles:` is not listed, since `orobox up` does not start it.
 - **The deploy pipeline does not read these files** (see [below](#what-reaches-the-deploy-pipeline)).
 
 ## Ready-made services (recipes)
@@ -349,7 +404,13 @@ Adding a recipe never overwrites your work: a service that already exists in
 `.orobox.compose.yaml` is refused (`--force` replaces only the recipe's services), settings are
 only added where `.orobox.yaml` does not have them, variables only where `.env` does not define
 them, and files only where none exists. If any part of a recipe is refused, nothing of it is
-written. Every recipe pins its image, and each prints what is left to do once it is added.
+written. The project needs its `.orobox.yaml` first (`orobox init`). Every recipe pins its image,
+and each prints what is left to do once it is added (on stderr with `--agent`).
+
+A recipe's files go to `docker/<recipe>/`. If your `image.dockerfile` sits in `docker/` itself,
+that directory is inside the image build context and every change there would rebuild the image;
+`extend add` warns about it. Keep the Dockerfile in a directory of its own (`docker/image/`, the
+`extend image` default).
 
 ### `varnish`
 
@@ -413,8 +474,10 @@ The [Blackfire](https://www.blackfire.io/) profiler: agent service plus PHP prob
 - Fill in the two variables with the server credentials from
   https://blackfire.io/my/settings/credentials, then run `orobox up`. Keep them out of git if your
   `.env` is committed.
-- When `php_ini` is the path of an ini file, the recipe is refused: Orobox does not edit your
-  file, and the error lists the line to add to it yourself.
+- When `php_ini` is the path of an ini file of your own, Orobox does not edit that file: the rest
+  of the recipe is applied and it prints the line to add yourself
+  (`blackfire.agent_socket = tcp://blackfire:8307`). Once the line is there, nothing more is
+  reported.
 
 ### Recipe ports
 
@@ -432,10 +495,10 @@ services:
 
 | You change… | What happens | What to run |
 | --- | --- | --- |
-| an `image.*` key, a file in the Dockerfile's directory, or `oro_version` | the layer is rebuilt the next time Orobox starts containers, and the containers move to it | `orobox up` |
+| an `image.*` key, a file in the Dockerfile's directory, or `oro_version` | the layer is rebuilt the next time Orobox creates containers; running containers stay on the old one until `up` recreates them | `orobox up` |
 | `php_ini` (map or the file it points to) | the PHP containers are recreated | `orobox up` |
 | `ports` | the affected containers are recreated with the new ports | `orobox up` |
-| `.env` / `.env.test` next to `.orobox.yaml` | the generated env files are regenerated | `orobox up` |
+| `.env` / `.env.test` next to `.orobox.yaml` | the generated env files are regenerated (for `project` / `demo`, the application itself reads `.env-app.local`) | `orobox up` |
 | `.orobox.compose.yaml` / `.orobox.compose.local.yaml` | Compose recreates the services whose definition changed | `orobox up` |
 | an upstream package you install unpinned | nothing (Docker's cache hides it) | `orobox up --rebuild` |
 
@@ -446,8 +509,11 @@ Nothing here needs `orobox init` again.
 `orobox deploy`, the generated GitLab CI and the Dagger engine of `orobox qa` / `orobox test` run on
 the **same image layer and the same PHP settings** as your development stack: Dagger builds the
 Dockerfile Orobox renders from `image.*` and writes the same `zz-project.ini` into every step. A
-project that needs `redis` locally therefore has it in CI too. The deploy summary shows a `Layer:`
-and a `php.ini:` line when they apply.
+project that needs `redis` locally therefore has it in CI too. The layer is built as a step of its
+own, before the dependencies, so a broken entry is reported as such. `--no-cache` rebuilds it. The
+deploy summary shows a `Layer:` and a `php.ini:` line when they apply; both come from your working
+tree, so with `orobox deploy` building another ref, the summary says the code and the image
+settings come from different places.
 
 The compose override, the recipes' services, `ports` and the `.env` merge describe the development
 stack only and do not reach the pipeline, which has its own services. See
@@ -460,10 +526,19 @@ are a package name that does not exist in the Alpine release of the image, or an
 `install-php-extensions` does not support for that PHP version. Run with `--debug` to stream the
 build as it happens.
 
-**My change to the image is not picked up.** The layer is rebuilt when Orobox starts containers;
-`orobox shell`, `console` and `run` enter the containers that are already running and do not
-rebuild. Run `orobox up`. If the change is an unpinned upstream package, use
-`orobox up --rebuild`.
+**My change to the image is not picked up.** The layer is rebuilt when Orobox creates containers,
+and running containers keep the old one: `orobox test`, `qa`, `shell`, `console` and `run` work in
+the containers that are already up. Run `orobox up`. If the change is an unpinned upstream
+package, use `orobox up --rebuild`.
+
+**`install-php-extensions: not found`.** With `image.php_extensions` the layer downloads the tool
+when the base image lacks it, so there it means the download failed — check network access from
+the build. In a Dockerfile of your own (`RUN install-php-extensions …`) nothing is downloaded for
+you: your local copy of the base image predates the tool, and `orobox up --rebuild` refreshes it.
+
+**The image rebuilds and the PHP containers restart every time.** Something in the build context
+keeps changing — a recipe directory, fixtures or uploads next to the Dockerfile. Move the
+Dockerfile to a directory of its own (`docker/image/`) and update `image.dockerfile`.
 
 **A mounted directory is empty inside the container.** The host path does not exist where Orobox
 resolved it — Orobox prints a warning naming the absolute path. Remember that relative paths are

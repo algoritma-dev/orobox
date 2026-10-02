@@ -61,7 +61,31 @@ func runExtend(t *testing.T, root string, args ...string) (payload, human string
 	// so --config is how a test aims the command at its project.
 	rootCmd.SetArgs(append([]string{"extend", "--config", configPath}, args...))
 	err = rootCmd.Execute()
+	lastExtendStderr = errs.String()
 	return out.String(), printed.String(), err
+}
+
+// lastExtendStderr is what the last runExtend wrote to the diagnostics stream.
+var lastExtendStderr string
+
+// In agent mode a recipe's follow-up instructions still reach the caller, on stderr: an agent
+// that adds blackfire must learn that the credentials are empty, without the notes polluting the
+// receipts on stdout.
+func TestExtendAddAgentModePrintsNotesOnStderr(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".orobox.yaml"), []byte("type: project\noro_version: \"7.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	payload, _, err := runExtendAgent(t, root, "add", "blackfire")
+	if err != nil {
+		t.Fatalf("extend add blackfire: %v", err)
+	}
+	if strings.Contains(payload, "BLACKFIRE_SERVER_ID") {
+		t.Errorf("notes leaked into the payload:\n%s", payload)
+	}
+	if !strings.Contains(lastExtendStderr, "note: blackfire:") || !strings.Contains(lastExtendStderr, "BLACKFIRE_SERVER_ID") {
+		t.Errorf("stderr = %q, want the blackfire notes", lastExtendStderr)
+	}
 }
 
 func TestExtendComposePrintsOneReceiptPerFile(t *testing.T) {
@@ -95,7 +119,7 @@ func TestExtendImageSetsTheConfigKey(t *testing.T) {
 		t.Fatalf("extend image: %v", err)
 	}
 
-	want := "created docker/Dockerfile\nupdated .orobox.yaml\n"
+	want := "created docker/image/Dockerfile\nupdated .orobox.yaml\n"
 	if payload != want {
 		t.Errorf("payload = %q, want %q", payload, want)
 	}
@@ -103,7 +127,7 @@ func TestExtendImageSetsTheConfigKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(cfg), "dockerfile: docker/Dockerfile") {
+	if !strings.Contains(string(cfg), "dockerfile: docker/image/Dockerfile") {
 		t.Errorf("image.dockerfile not set:\n%s", cfg)
 	}
 }

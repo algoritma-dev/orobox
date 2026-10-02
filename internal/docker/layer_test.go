@@ -156,7 +156,7 @@ func TestRenderPhpIniWritesExpressionsRaw(t *testing.T) {
 		"E_ALL & ~E_DEPRECATED & ~E_STRICT",
 		"E_ALL&~E_NOTICE",
 		"1|2",
-		"a^b",
+		"E_A^E_B",
 		"!(1|0)",
 		"~ ~E_ALL",
 		"-1 & 3",
@@ -168,6 +168,36 @@ func TestRenderPhpIniWritesExpressionsRaw(t *testing.T) {
 		}
 		if want := "k = " + value + "\n"; got != want {
 			t.Errorf("expression %q: got %q, want %q", value, got, want)
+		}
+	}
+}
+
+// Only constants and numbers are expression operands. A lowercase word joined by an operator is a
+// literal string (`dev&test`, an Xdebug trigger value) that PHP would silently evaluate to 0, and
+// a php.ini keyword as an operand is a syntax error that drops every later directive.
+func TestRenderPhpIniQuotesNonConstantOperands(t *testing.T) {
+	for _, value := range []string{"dev&test", "a.b|c.d", "x^y", "on|1", "Yes|1", "null|1", "TRUE|1", "off&on"} {
+		got, err := RenderPhpIni(map[string]any{"k": value})
+		if err != nil {
+			t.Fatalf("RenderPhpIni(%q): %v", value, err)
+		}
+		if want := "k = \"" + value + "\"\n"; got != want {
+			t.Errorf("%q: got %q, want %q", value, got, want)
+		}
+	}
+}
+
+// Raw, a value with several words is a syntax error as soon as one of them is a php.ini keyword
+// (`msmtp -a default --read-envelope-from on`), and PHP then drops every directive after it.
+// Quoted, a multi-word value reads back exactly as written.
+func TestRenderPhpIniQuotesMultiWordValues(t *testing.T) {
+	for _, value := range []string{"msmtp -a default --read-envelope-from on", "Yes please", "foo none", "1 on"} {
+		got, err := RenderPhpIni(map[string]any{"k": value})
+		if err != nil {
+			t.Fatalf("RenderPhpIni(%q): %v", value, err)
+		}
+		if want := "k = \"" + value + "\"\n"; got != want {
+			t.Errorf("%q: got %q, want %q", value, got, want)
 		}
 	}
 }

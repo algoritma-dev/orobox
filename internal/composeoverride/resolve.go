@@ -27,6 +27,14 @@ import (
 // internal config directory, not the directory holding the user's file. Rewriting them up
 // front is what makes `./docker/fixtures` mean what the user thinks it means.
 func Resolve(src []byte, baseDir, home string) ([]byte, error) {
+	return ResolveAfter(src, baseDir, home, nil)
+}
+
+// ResolveAfter is Resolve for a file that compose merges after other files: builtBefore names
+// the services an earlier file already gives a build. Compose merges build mappings key by key,
+// so the project directory Resolve inserts into a context-less `build:` must not land on top of
+// a context an earlier file (or an earlier document of this one) set.
+func ResolveAfter(src []byte, baseDir, home string, builtBefore map[string]bool) ([]byte, error) {
 	docs, err := parseAll(src)
 	if err != nil {
 		return nil, err
@@ -35,7 +43,11 @@ func Resolve(src []byte, baseDir, home string) ([]byte, error) {
 		return nil, nil
 	}
 
-	r := &resolver{baseDir: baseDir, home: home}
+	built := map[string]bool{}
+	for name := range builtBefore {
+		built[name] = true
+	}
+	r := &resolver{baseDir: baseDir, home: home, built: built}
 	for _, doc := range docs {
 		r.document(doc)
 		if r.err != nil {
@@ -244,7 +256,8 @@ func mapEntriesDepth(m *yamlv3.Node, seen map[string]bool, fn func(string, *yaml
 type resolver struct {
 	baseDir string
 	home    string
-	err     error // the first entry that could not be rewritten; Resolve returns it
+	built   map[string]bool // services that already have a build from an earlier document or file
+	err     error           // the first entry that could not be rewritten; Resolve returns it
 }
 
 func (r *resolver) fail(err error) {
@@ -255,7 +268,7 @@ func (r *resolver) fail(err error) {
 
 func (r *resolver) document(doc *yamlv3.Node) {
 	top := doc.Content[0]
-	mapEntries(mapGet(top, "services"), func(_ string, svc *yamlv3.Node) { r.service(svc) })
+	mapEntries(mapGet(top, "services"), func(name string, svc *yamlv3.Node) { r.service(name, svc) })
 	for _, section := range []string{"configs", "secrets"} {
 		mapEntries(mapGet(top, section), func(_ string, def *yamlv3.Node) {
 			r.scalar(mapGet(def, "file"))
@@ -268,7 +281,7 @@ func (r *resolver) document(doc *yamlv3.Node) {
 	}
 }
 
-func (r *resolver) service(svc *yamlv3.Node) {
+func (r *resolver) service(name string, svc *yamlv3.Node) {
 	if svc == nil || svc.Kind != yamlv3.MappingNode {
 		return
 	}
@@ -282,8 +295,9 @@ func (r *resolver) service(svc *yamlv3.Node) {
 		case yamlv3.ScalarNode:
 			r.buildContext(b)
 		case yamlv3.MappingNode:
-			r.buildMapping(b)
+			r.buildMapping(b, !r.built[name])
 		}
+		r.built[name] = true
 	}
 	r.scalarOrList(mapGet(svc, "env_file"), func(item *yamlv3.Node) {
 		if item.Kind == yamlv3.MappingNode {
@@ -304,11 +318,12 @@ func (r *resolver) service(svc *yamlv3.Node) {
 }
 
 // buildMapping rewrites the host paths of a long-syntax build. build.dockerfile is relative to
-// the context, so it stays as written.
-func (r *resolver) buildMapping(b *yamlv3.Node) {
+// the context, so it stays as written. defaultContext says whether a missing context may be
+// spelled out: only when nothing earlier gave this service a build.
+func (r *resolver) buildMapping(b *yamlv3.Node, defaultContext bool) {
 	if ctx := mapGet(b, "context"); ctx != nil {
 		r.buildContext(ctx)
-	} else {
+	} else if defaultContext {
 		// Compose defaults the context to ".", which it would read as the internal directory.
 		// Spelling out the project directory keeps `build: {dockerfile: x}` building the project.
 		b.Content = append([]*yamlv3.Node{
@@ -530,4 +545,22 @@ func escapeDollar(p string) string {
 // rule Compose uses to tell a path from a named volume.
 func isRelative(p string) bool {
 	return strings.HasPrefix(p, ".") || strings.HasPrefix(p, "~")
+}
+
+// BuildServices names the services a compose file gives a build, across its documents. The
+// local override is resolved after the team file with this set (see ResolveAfter).
+func BuildServices(resolved []byte) (map[string]bool, error) {
+	docs, err := parseAll(resolved)
+	if err != nil {
+		return nil, err
+	}
+	built := map[string]bool{}
+	for _, doc := range docs {
+		mapEntries(mapGet(doc.Content[0], "services"), func(name string, svc *yamlv3.Node) {
+			if isSet(mapGet(svc, "build")) {
+				built[name] = true
+			}
+		})
+	}
+	return built, nil
 }

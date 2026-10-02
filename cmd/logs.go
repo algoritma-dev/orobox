@@ -26,7 +26,12 @@ var logsCmd = &cobra.Command{
 Besides the shortcut flags, any compose service can be named directly, including the
 ones added in .orobox.compose.yaml: orobox logs minio`,
 	Args: cobra.ArbitraryArgs,
-	Run: func(cmd *cobra.Command, positional []string) {
+	// See upCmd: a compose failure is a runtime problem, not a usage problem.
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, positional []string) error {
+		// Reset flags for subsequent calls (important for tests), whichever way the run ends.
+		defer resetLogsFlags()
+
 		docker.EnsureDockerCompose()
 
 		var services []string
@@ -57,22 +62,27 @@ ones added in .orobox.compose.yaml: orobox logs minio`,
 		if len(services) == 0 {
 			utils.PrintWarning("Please specify at least one service or log type: <service>, --nginx, --php, --app, --consumer, --cron, or --ws")
 			_ = cmd.Help()
-			return
+			return nil
 		}
 
 		args := append([]string{"logs", "-f"}, services...)
 		if err := docker.RunComposeCommand("", args...); err != nil {
 			utils.PrintError(fmt.Sprintf("Error viewing logs: %v", err))
+			return err
 		}
-
-		// Reset flags for subsequent calls (important for tests)
-		logsNginx = false
-		logsPhp = false
-		logsApp = false
-		logsConsumer = false
-		logsCron = false
-		logsWs = false
+		return nil
 	},
+}
+
+// resetLogsFlags clears the shortcut flags, which cobra leaves set between Execute calls in one
+// process (the tests run several).
+func resetLogsFlags() {
+	logsNginx = false
+	logsPhp = false
+	logsApp = false
+	logsConsumer = false
+	logsCron = false
+	logsWs = false
 }
 
 // dedupe drops repeated entries, keeping the first occurrence of each.

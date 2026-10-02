@@ -22,8 +22,8 @@ at a host that does not exist inside the Compose network:
 - `ORO_WEBSOCKET_BACKEND_DSN=tcp://ws:8080` — how PHP reaches the server, direct, without nginx.
 - `ORO_WEBSOCKET_FRONTEND_DSN=//*:<published nginx port>/ws` — what the browser is told to use.
 
-The frontend port is the published nginx port (`nginx_https_port` when at least one domain uses
-SSL, `nginx_http_port` otherwise). Only one port can be advertised, so a configuration that mixes
+The frontend port is the published nginx port (`ports.https` when at least one domain uses SSL,
+`ports.http` otherwise; see [Host ports](configuration.md#host-ports-ports)). Only one port can be advertised, so a configuration that mixes
 SSL and plain domains advertises the HTTPS one and the plain domains fall back to no live updates.
 
 Websocket logs come from `orobox logs --ws`. The connection is not required for the application

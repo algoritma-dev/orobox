@@ -327,7 +327,7 @@ var imageEntryPattern = regexp.MustCompile(`^[A-Za-z0-9@][A-Za-z0-9@._+:/=~-]*$`
 // BuildKit expands a heredoc in a RUN line by reading the lines that follow it as the body, so in
 // a generated Dockerfile it would swallow the instructions after it. The leading `[^<]` keeps the
 // single-line here-string (`<<<word`) allowed.
-var heredocPattern = regexp.MustCompile(`(^|[^<])<<-?\s*["']?[A-Za-z_]`)
+var heredocPattern = regexp.MustCompile(`(^|[^<])<<-?\s*["'\\]?[A-Za-z_]`)
 
 // trimRunEntries strips the line terminators a YAML block scalar leaves at the end of an
 // image.run entry: a folded `>` scalar always ends in a newline the user never typed. Only the

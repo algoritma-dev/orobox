@@ -15,12 +15,24 @@ import (
 
 // OverrideFiles are the user's compose override files, in the order they are appended to the
 // compose command: the committed team file first, the git-ignored personal one after it, so
-// the local file wins. Source lives next to .orobox.yaml; Resolved is the path-rewritten copy
-// in the internal directory that compose actually reads.
-var OverrideFiles = []struct{ Source, Resolved string }{
-	{".orobox.compose.yaml", "compose.project.resolved.yaml"},
-	{".orobox.compose.local.yaml", "compose.local.resolved.yaml"},
+// the local file wins. Source lives next to .orobox.yaml; Resolved and ResolvedTest are the
+// path-rewritten copies in the internal directory that compose actually reads.
+//
+// There are two copies because the stack differs by command: db-test exists only when the test
+// compose file is included. A tweak to db-test (or to an optional service the project disabled)
+// is kept in the copy whose stack defines it and dropped from the other, since compose rejects
+// the whole project over a service that has neither an image nor a build context.
+var OverrideFiles = []struct{ Source, Resolved, ResolvedTest string }{
+	{".orobox.compose.yaml", "compose.project.resolved.yaml", "compose.project.resolved.test.yaml"},
+	{".orobox.compose.local.yaml", "compose.local.resolved.yaml", "compose.local.resolved.test.yaml"},
 }
+
+// generatedComposeFiles are the files Orobox renders, by mode. The override copy for a mode
+// may only extend services these define.
+var (
+	generatedBaseFiles = []string{"docker-compose.yml", "docker-compose.setup.yml"}
+	generatedTestFiles = []string{"docker-compose.yml", "docker-compose.setup.yml", "docker-compose.test.yml"}
+)
 
 // CoreServices are the Oro services Orobox generates. An override that redefines `image` on
 // one of them detaches it from oro_version and from the project's custom layer.
@@ -46,6 +58,7 @@ func OverrideError() error {
 func OverrideAnalysis() composeoverride.Analysis {
 	var merged composeoverride.Analysis
 	urls := map[string]string{}
+	profiled := map[string]bool{}
 	for _, a := range overrideAnalyses {
 		merged.MissingPaths = append(merged.MissingPaths, a.MissingPaths...)
 		merged.CoreImageOverrides = append(merged.CoreImageOverrides, a.CoreImageOverrides...)
@@ -53,9 +66,15 @@ func OverrideAnalysis() composeoverride.Analysis {
 		for _, u := range a.URLs {
 			urls[u.Service] = u.URL // later file overwrites
 		}
+		for _, name := range a.Profiled {
+			profiled[name] = true
+		}
 	}
+	// Profiles declared in one file apply to the service in every file: `up` starts it in none.
 	for service, url := range urls {
-		merged.URLs = append(merged.URLs, composeoverride.ServiceURL{Service: service, URL: url})
+		if !profiled[service] {
+			merged.URLs = append(merged.URLs, composeoverride.ServiceURL{Service: service, URL: url})
+		}
 	}
 	sort.Slice(merged.URLs, func(i, j int) bool { return merged.URLs[i].Service < merged.URLs[j].Service })
 	return merged
@@ -76,18 +95,57 @@ func writeComposeOverrides(internalDir, projectDir string) (changed bool, err er
 		home = ""
 	}
 
+	baseServices, baseKnown := generatedServices(internalDir, generatedBaseFiles)
+	testServices, testKnown := generatedServices(internalDir, generatedTestFiles)
+	// Compose applies the files in order, so a later file may tweak a service an earlier one
+	// adds (the local file moving a recipe's port) and must not have a build context forced on
+	// top of one an earlier file set. Both sets grow as the files are processed.
+	builtBefore := map[string]bool{}
+
 	var errs []error
 	analyses := make([]composeoverride.Analysis, 0, len(OverrideFiles))
 	for _, f := range OverrideFiles {
-		fileChanged, analysis, ferr := syncComposeOverride(
-			filepath.Join(projectDir, f.Source), filepath.Join(internalDir, f.Resolved), projectDir, home)
-		changed = changed || fileChanged
+		drop := func() {
+			// A file that cannot be used must not leave a stale copy behind.
+			changed = removeIfExists(filepath.Join(internalDir, f.Resolved)) || changed
+			changed = removeIfExists(filepath.Join(internalDir, f.ResolvedTest)) || changed
+		}
+		resolved, ferr := resolveComposeOverride(filepath.Join(projectDir, f.Source), projectDir, home, builtBefore)
 		if ferr != nil {
+			drop()
 			errs = append(errs, fmt.Errorf("%s: %w", f.Source, ferr))
 			continue
 		}
+
+		base, droppedBase, perr := pruneFor(resolved, baseServices, baseKnown)
+		var test []byte
+		var droppedTest []string
+		if perr == nil {
+			test, droppedTest, perr = pruneFor(resolved, testServices, testKnown)
+		}
+		// The analysis is of what `up` runs: the base copy, after pruning.
+		var analysis composeoverride.Analysis
+		if perr == nil && base != nil {
+			analysis, perr = composeoverride.Analyze(base, CoreServices, pathExists)
+		}
+		if perr != nil {
+			drop()
+			errs = append(errs, fmt.Errorf("%s: %w", f.Source, perr))
+			continue
+		}
+		changed = writeOrRemove(filepath.Join(internalDir, f.ResolvedTest), test) || changed
+		changed = writeOrRemove(filepath.Join(internalDir, f.Resolved), base) || changed
+		warnDropped(f.Source, droppedBase, droppedTest)
 		warnOverride(analysis)
 		analyses = append(analyses, analysis)
+
+		baseServices = append(baseServices, serviceNamesOf(base)...)
+		testServices = append(testServices, serviceNamesOf(test)...)
+		if built, err := composeoverride.BuildServices(resolved); err == nil {
+			for name := range built {
+				builtBefore[name] = true
+			}
+		}
 	}
 
 	overrideErr = errors.Join(errs...)
@@ -95,39 +153,93 @@ func writeComposeOverrides(internalDir, projectDir string) (changed bool, err er
 	return changed, overrideErr
 }
 
-// syncComposeOverride resolves one source file into dest. On every path that does not leave a
-// valid resolved copy behind, dest is removed.
-func syncComposeOverride(source, dest, projectDir, home string) (changed bool, analysis composeoverride.Analysis, err error) {
-	drop := func() bool { return os.Remove(dest) == nil }
-
+// resolveComposeOverride reads and resolves one source file. A missing file, or one holding
+// nothing but comments, yields a nil copy and no error: there is simply no override.
+func resolveComposeOverride(source, projectDir, home string, builtBefore map[string]bool) ([]byte, error) {
 	src, err := os.ReadFile(source)
 	if errors.Is(err, os.ErrNotExist) {
-		return drop(), analysis, nil
+		return nil, nil
 	}
 	if err != nil {
-		return drop(), analysis, err
+		return nil, err
 	}
+	return composeoverride.ResolveAfter(src, projectDir, home, builtBefore)
+}
 
-	resolved, err := composeoverride.Resolve(src, projectDir, home)
-	if err != nil {
-		return drop(), analysis, err
+// serviceNamesOf lists the services of a resolved copy; nil for no copy.
+func serviceNamesOf(copy []byte) []string {
+	if copy == nil {
+		return nil
 	}
-	if resolved == nil {
-		return drop(), analysis, nil
-	}
+	names, _ := composeoverride.ServiceNames(copy)
+	return names
+}
 
-	analysis, err = composeoverride.Analyze(resolved, CoreServices, pathExists)
-	if err != nil {
-		return drop(), composeoverride.Analysis{}, err
+// generatedServices lists the services Orobox's rendered files define for one mode. ok is false
+// when the files are not there yet (nothing rendered): there is then nothing to prune against,
+// and the override is passed through whole rather than pruned against a guess.
+func generatedServices(internalDir string, files []string) (names []string, ok bool) {
+	for _, name := range files {
+		src, err := os.ReadFile(filepath.Join(internalDir, name))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, false
+		}
+		found, err := composeoverride.ServiceNames(src)
+		if err != nil {
+			return nil, false
+		}
+		names = append(names, found...)
+		ok = true
 	}
+	return names, ok
+}
 
-	if old, rerr := os.ReadFile(dest); rerr == nil && bytes.Equal(old, resolved) {
-		return false, analysis, nil
+// pruneFor drops from resolved the services the given stack cannot extend. Without a known
+// stack the copy is returned unchanged.
+func pruneFor(resolved []byte, known []string, ok bool) ([]byte, []string, error) {
+	if resolved == nil || !ok {
+		return resolved, nil, nil
 	}
-	if err := os.WriteFile(dest, resolved, 0644); err != nil {
-		return drop(), composeoverride.Analysis{}, err
+	return composeoverride.Prune(resolved, known)
+}
+
+// warnDropped reports the services dropped from both copies: they extend nothing the stack ever
+// defines (a disabled optional service, a typo). A service dropped only from the base copy,
+// such as db-test, exists for test commands and is silently kept for them.
+func warnDropped(source string, droppedBase, droppedTest []string) {
+	inTest := map[string]bool{}
+	for _, svc := range droppedTest {
+		inTest[svc] = true
 	}
-	return true, analysis, nil
+	for _, svc := range droppedBase {
+		if inTest[svc] {
+			warnOnce(fmt.Sprintf("%s in %s extends a service that is not part of this stack (disabled, or misspelled); it is ignored", svc, source))
+		}
+	}
+}
+
+// writeOrRemove writes content to dest when it differs, or removes dest when content is nil,
+// and reports whether anything changed on disk.
+func writeOrRemove(dest string, content []byte) bool {
+	if content == nil {
+		return removeIfExists(dest)
+	}
+	if old, err := os.ReadFile(dest); err == nil && bytes.Equal(old, content) {
+		return false
+	}
+	if err := os.WriteFile(dest, content, 0644); err != nil {
+		// The runner would then read a stale copy; removing it at least fails loudly.
+		removeIfExists(dest)
+		return true
+	}
+	return true
+}
+
+func removeIfExists(path string) bool {
+	return os.Remove(path) == nil
 }
 
 func pathExists(p string) bool {
@@ -167,7 +279,11 @@ func resetWarned() {
 // are sometimes intended, but when they are not the failure shows up far from its cause.
 func warnOverride(a composeoverride.Analysis) {
 	for _, p := range a.MissingPaths {
-		warnOnce(fmt.Sprintf("bind mount source does not exist: %s — Docker would create an empty directory", p))
+		consequence := "Docker creates an empty directory there"
+		if p.LongSyntax {
+			consequence = "Docker refuses to start the container"
+		}
+		warnOnce(fmt.Sprintf("bind mount source does not exist: %s — %s", p.Path, consequence))
 	}
 	for _, svc := range a.CoreImageOverrides {
 		warnOnce(fmt.Sprintf("%s redefines image; it is detached from oro_version and the custom layer", svc))
@@ -175,10 +291,15 @@ func warnOverride(a composeoverride.Analysis) {
 }
 
 // appendOverrideArgs adds a -f for each resolved override that exists, last, so the overrides
-// win over everything Orobox generates (the test file included).
-func appendOverrideArgs(args []string, internalDir string) []string {
+// win over everything Orobox generates (the test file included). test picks the copies pruned
+// against the stack that includes the test compose file.
+func appendOverrideArgs(args []string, internalDir string, test bool) []string {
 	for _, f := range OverrideFiles {
-		resolved := filepath.Join(internalDir, f.Resolved)
+		name := f.Resolved
+		if test {
+			name = f.ResolvedTest
+		}
+		resolved := filepath.Join(internalDir, name)
 		if _, err := os.Stat(resolved); err == nil {
 			args = append(args, "-f", resolved)
 		}

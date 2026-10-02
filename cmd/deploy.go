@@ -50,7 +50,7 @@ upload the artifacts and update the application.`,
 
 func init() {
 	deployCmd.Flags().BoolVarP(&deployAssumeYes, "yes", "y", false, "Do not ask for confirmation before releasing")
-	deployCmd.Flags().BoolVar(&deployNoCache, "no-cache", false, "Rebuild everything: the dependency layers, the QA install and the test database")
+	deployCmd.Flags().BoolVar(&deployNoCache, "no-cache", false, "Rebuild everything: the project image layer, the dependency layers, the QA install and the test database")
 	deployCmd.Flags().BoolVar(&deploySkipQA, "skip-qa", false, "Skip the QA checks")
 	deployCmd.Flags().BoolVar(&deploySkipTest, "skip-test", false, "Skip the test suites")
 	deployCmd.Flags().BoolVar(&deploySkipRelease, "skip-release", false, "Check the code but do not release to the remote host; the artifacts are built only when there is nothing to check either")
@@ -305,10 +305,15 @@ func printDeploySummary(plan *pipeline.Plan) {
 	utils.PrintPlainf("  Target:     %s@%s:%d%s\n", stage.User, stage.Host, stage.SSHPort(), stage.DeployPath)
 	utils.PrintPlainf("  Image:      %s\n", plan.Image)
 	if plan.Layer != nil {
-		utils.PrintPlain("  Layer:      the project's image layer, built on that image")
+		utils.PrintPlain("  Layer:      the project's image layer from the working tree, built on that image")
 	}
 	if plan.PhpIni != "" {
-		utils.PrintPlain("  php.ini:    the project's php_ini settings (zz-project.ini)")
+		utils.PrintPlain("  php.ini:    the project's php_ini settings from the working tree (zz-project.ini)")
+	}
+	if (plan.Layer != nil || plan.PhpIni != "") && plan.Source.Kind == pipeline.SourceGit {
+		// The code comes from a clone of the ref, the image settings from .orobox.yaml and the
+		// files next to it: on another branch, or with uncommitted edits, the two can differ.
+		utils.PrintPlainf("  Note:       the image layer and php.ini come from the working tree, the code from %s\n", plan.Ref)
 	}
 	utils.PrintPlainf("  Suites:     %v\n", stage.Suites())
 	if plan.BuildsAssets() {

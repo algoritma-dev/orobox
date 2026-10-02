@@ -106,6 +106,17 @@ type task struct {
 // start announces a command and begins following its output. Exactly one of ok/fail must be
 // called.
 func (r *reporter) start(step, command string) *task {
+	return r.startTask(step, command, true)
+}
+
+// startUnfollowed announces a step that is not an exec of its own command — the image layer
+// build, say — so there is no engine span to follow: following one keyed on the step's label
+// would never match, wait for a cache status that never comes, and report "no output yet".
+func (r *reporter) startUnfollowed(step, command string) *task {
+	return r.startTask(step, command, false)
+}
+
+func (r *reporter) startTask(step, command string, follow bool) *task {
 	r.write(step, fmt.Sprintf("%s▸ [%s]%s %s\n", progressCyan, step, progressReset, label(command)))
 
 	t := &task{
@@ -117,7 +128,7 @@ func (r *reporter) start(step, command string) *task {
 		stopped:  make(chan struct{}),
 		tracker:  newDeployerTracker(),
 	}
-	if r.watch != nil && !r.verbose {
+	if follow && r.watch != nil && !r.verbose {
 		// With --debug the engine log is streamed in full already, so quoting it again would
 		// print every line twice.
 		t.reader = r.watch.follow(command)

@@ -53,7 +53,10 @@ it does not replace them.
   `init` and `up` it reads each customization back from the running stack: `image.php_extensions`
   (`php -m` lists `redis`), `image.apk` (`pdftotext` exists), `php_ini` (`memory_limit` is `3G`),
   `ports.db` (TCP 5440 accepts connections) and the override (`whoami` is running, answers on
-  8099 and is listed by `up`). It does not need its own `/etc/hosts` entry: it reuses the
+  8099 and is listed by `up`). It then stops the stack and runs `orobox qa --engine dagger
+  --php-cs-fixer`, asserting that the pipeline's "build the project image layer" step completes,
+  which is the pipeline half of the feature. Teardown also removes the image layers the case
+  built (`orobox-custom/<case>:*`). It does not need its own `/etc/hosts` entry: it reuses the
   project case's host.
 
 ### Grading

@@ -62,7 +62,13 @@ func BaseImageRef(oroVersion, imageSuffix string) string {
 // is part of it so two checkouts on the same machine never share a layer, and the Oro version
 // and install type are part of it so switching either does not reuse the wrong base.
 func CustomImageRef(oroVersion, imageSuffix string) string {
-	return fmt.Sprintf("%s/%s:%s-%s", customImageRepository, sanitizeImageName(config.GetProjectName()), oroVersion, imageSuffix)
+	return fmt.Sprintf("%s:%s-%s", CustomImageRepository(config.GetProjectName()), oroVersion, imageSuffix)
+}
+
+// CustomImageRepository is the repository a project's locally built layers are tagged under, for
+// a project directory named projectName. The e2e suite uses it to remove the layers it built.
+func CustomImageRepository(projectName string) string {
+	return customImageRepository + "/" + sanitizeImageName(projectName)
 }
 
 // IsCustomImageRef reports whether an image reference is a locally built Orobox layer. Such a
@@ -256,6 +262,27 @@ var (
 // the dash and the delimiter word.
 var heredocMarker = regexp.MustCompile(`<<(-?)["']?([A-Za-z_][A-Za-z0-9_]*)["']?`)
 
+// startsHeredocWord reports whether the `<<` at index at begins a word outside any quotes.
+func startsHeredocWord(line string, at int) bool {
+	if at > 0 {
+		if prev := line[at-1]; prev != ' ' && prev != '\t' {
+			return false
+		}
+	}
+	var quote byte
+	for i := 0; i < at; i++ {
+		switch c := line[i]; {
+		case quote != 0 && c == quote:
+			quote = 0
+		case quote == 0 && (c == '"' || c == '\''):
+			quote = c
+		case quote == '"' && c == '\\':
+			i++
+		}
+	}
+	return quote == 0
+}
+
 // heredocOpeners are the instructions that accept heredocs.
 var heredocOpeners = map[string]bool{"RUN": true, "COPY": true, "ADD": true}
 
@@ -264,18 +291,55 @@ var heredocOpeners = map[string]bool{"RUN": true, "COPY": true, "ADD": true}
 // continuation lines (after a line ending in `\`), comments, and heredoc bodies are skipped, and
 // FROM's own flags (`--platform=…`) are skipped to reach the image.
 func fromImages(content []byte) []string {
+	var images []string
+	for _, f := range fromInstructions(content) {
+		images = append(images, f.image)
+	}
+	return images
+}
+
+// fromInstruction is one FROM of a Dockerfile: the image it names and the index of the last
+// line it spans (a FROM continued with `\` ends on a later line).
+type fromInstruction struct {
+	image   string
+	endLine int
+}
+
+// InsertAfterEveryFrom returns content with line inserted right after every FROM instruction.
+// A build argument is scoped to its stage, so busting the cache of a multi-stage build means
+// declaring it in each one — as `docker build --no-cache` rebuilds every stage.
+func InsertAfterEveryFrom(content []byte, line string) []byte {
+	froms := fromInstructions(content)
+	if len(froms) == 0 {
+		return content
+	}
+	lines := strings.Split(string(content), "\n")
+	out := make([]string, 0, len(lines)+len(froms))
+	next := 0
+	for i, l := range lines {
+		out = append(out, l)
+		if next < len(froms) && froms[next].endLine == i {
+			out = append(out, line)
+			next++
+		}
+	}
+	return []byte(strings.Join(out, "\n"))
+}
+
+// fromInstructions parses content the way fromImages documents.
+func fromInstructions(content []byte) []fromInstruction {
 	type heredoc struct {
 		word      string
 		stripTabs bool
 	}
 	var (
-		images      []string
+		froms       []fromInstruction
 		pending     []heredoc // heredocs opened by the current instruction, read in order
 		continued   bool      // the previous line ended in `\`
 		instruction string    // keyword of the instruction being read
 	)
 
-	for _, line := range strings.Split(string(content), "\n") {
+	for i, line := range strings.Split(string(content), "\n") {
 		line = strings.TrimRight(line, "\r")
 
 		if len(pending) > 0 {
@@ -299,9 +363,21 @@ func fromImages(content []byte) []string {
 			fields := strings.Fields(trimmed)
 			instruction = strings.ToUpper(fields[0])
 			if instruction == "FROM" {
-				for _, f := range fields[1:] {
+				froms = append(froms, fromInstruction{endLine: i})
+			}
+		}
+		if instruction == "FROM" && len(froms) > 0 {
+			// The image is the first token that is not a flag, possibly on a continuation line.
+			last := &froms[len(froms)-1]
+			last.endLine = i
+			if last.image == "" {
+				fields := strings.Fields(strings.TrimSuffix(trimmed, "\\"))
+				if !continued && len(fields) > 0 {
+					fields = fields[1:]
+				}
+				for _, f := range fields {
 					if !strings.HasPrefix(f, "--") {
-						images = append(images, f)
+						last.image = f
 						break
 					}
 				}
@@ -310,8 +386,9 @@ func fromImages(content []byte) []string {
 
 		if heredocOpeners[instruction] {
 			for _, m := range heredocMarker.FindAllStringSubmatchIndex(line, -1) {
-				// `<<<` is a shell here-string, not a heredoc.
-				if m[0] > 0 && line[m[0]-1] == '<' {
+				// BuildKit only opens a heredoc on a word that starts with `<<`: not a `<<<`
+				// here-string, not inside quotes (`echo "<<EOF"`), not mid-word (`$((1<<FOO))`).
+				if !startsHeredocWord(line, m[0]) {
 					continue
 				}
 				pending = append(pending, heredoc{word: line[m[4]:m[5]], stripTabs: m[3] > m[2]})
@@ -320,7 +397,7 @@ func fromImages(content []byte) []string {
 
 		continued = strings.HasSuffix(trimmed, "\\")
 	}
-	return images
+	return froms
 }
 
 // CheckExtendsBaseImage refuses a Dockerfile whose final stage does not build on the published

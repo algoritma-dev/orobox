@@ -4,6 +4,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/algoritma-dev/orobox/internal/config"
@@ -12,6 +13,7 @@ import (
 	"github.com/algoritma-dev/orobox/internal/utils"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 // extendLocal and extendForce are package-level because cobra binds the flags to them; tests that
@@ -27,14 +29,16 @@ var extendCmd = &cobra.Command{
 	Long: `Extend writes the files that customize the stack, with the required headers and
 commented examples, so nobody has to remember the file names or the syntax.
 
-It never overwrites a file: an existing one is left alone and reported as skipped.
+It needs the project's .orobox.yaml (run 'orobox init' first). 'image' and 'compose'
+never overwrite a file: an existing one is left alone and reported as skipped. 'add'
+edits .orobox.compose.yaml, .orobox.yaml and .env in place, only adding what they lack.
 Every file it touches is reported on its own line as "<action> <path>", where the
 action is created, updated or skipped.`,
 }
 
 var extendImageCmd = &cobra.Command{
 	Use:   "image",
-	Short: "Create docker/Dockerfile and set image.dockerfile in .orobox.yaml",
+	Short: "Create docker/image/Dockerfile and set image.dockerfile in .orobox.yaml",
 	Long: `Creates a project Dockerfile that extends the Orobox image, with commented examples,
 and points image.dockerfile in .orobox.yaml at it. The comments in .orobox.yaml are kept.
 
@@ -47,7 +51,7 @@ changed. For a package or a PHP extension, image.apk and image.php_extensions in
 	SilenceErrors: true,
 	SilenceUsage:  true,
 	RunE: func(_ *cobra.Command, _ []string) error {
-		receipts, err := scaffold.ExtendImage(config.GetHostBundlePath())
+		receipts, err := scaffold.ExtendImage(extendConfigPath())
 		printReceipts(receipts)
 		if err != nil {
 			utils.PrintError(err.Error())
@@ -70,7 +74,7 @@ own tweaks, and adds it to .gitignore when that file exists and does not list it
 	SilenceErrors: true,
 	SilenceUsage:  true,
 	RunE: func(_ *cobra.Command, _ []string) error {
-		receipts, err := scaffold.ExtendCompose(config.GetHostBundlePath(), extendLocal)
+		receipts, err := scaffold.ExtendCompose(extendConfigPath(), extendLocal)
 		printReceipts(receipts)
 		if err != nil {
 			utils.PrintError(err.Error())
@@ -90,7 +94,8 @@ With recipe names, adds each one in order: its services are merged into
 .orobox.compose.yaml, its settings into .orobox.yaml (lists appended without duplicates,
 other keys only when missing) and its variables into the project .env (only the ones it
 does not define). Its files are copied to docker/<recipe>/. A value the project already
-has always wins, and an existing file is never overwritten.
+has always wins, and an existing file is never overwritten. When php_ini in .orobox.yaml
+is an ini file of your own, it is not edited: the directives it lacks are listed instead.
 
 A recipe whose service .orobox.compose.yaml already defines is refused; --force replaces
 that service and nothing else. After the receipts, each recipe prints what is left to do.`,
@@ -118,10 +123,10 @@ that service and nothing else. After the receipts, each recipe prints what is le
 			return err
 		}
 
-		root := config.GetHostBundlePath()
-		var added []scaffold.Recipe
+		configPath := extendConfigPath()
+		var added []addedRecipe
 		for _, r := range selected {
-			receipts, err := scaffold.AddRecipe(root, r, extendForce)
+			receipts, todo, err := scaffold.AddRecipe(configPath, r, extendForce)
 			printReceipts(receipts)
 			if err != nil {
 				printRecipeNotes(added)
@@ -129,7 +134,7 @@ that service and nothing else. After the receipts, each recipe prints what is le
 				utils.PrintError(err.Error())
 				return err
 			}
-			added = append(added, r)
+			added = append(added, addedRecipe{recipe: r, todo: todo})
 		}
 		printRecipeNotes(added)
 		return nil
@@ -174,15 +179,45 @@ func selectRecipes(recipes []scaffold.Recipe, names []string) ([]scaffold.Recipe
 	return selected, nil
 }
 
-// printRecipeNotes prints what each added recipe leaves to the user. They are hints around the
-// receipts, so agent mode drops them.
-func printRecipeNotes(recipes []scaffold.Recipe) {
-	for _, r := range recipes {
-		if r.Notes == "" {
+// extendConfigPath is the config file the extend subcommands edit: the one in use (the --config
+// file when one was given), or .orobox.yaml in the project directory.
+func extendConfigPath() string {
+	if used := viper.ConfigFileUsed(); used != "" {
+		return used
+	}
+	return filepath.Join(config.GetHostBundlePath(), ".orobox.yaml")
+}
+
+// addedRecipe is a recipe that was applied, with what it could not do for the user.
+type addedRecipe struct {
+	recipe scaffold.Recipe
+	todo   []string
+}
+
+// printRecipeNotes prints what each added recipe leaves to the user. They are instructions the
+// caller still needs — empty Blackfire credentials, a directive for an ini file — so agent mode
+// keeps them, on stderr, where they cannot be mistaken for the receipts on stdout.
+func printRecipeNotes(recipes []addedRecipe) {
+	for _, a := range recipes {
+		lines := append([]string{}, a.todo...)
+		if a.recipe.Notes != "" {
+			lines = append(lines, a.recipe.Notes)
+		}
+		if len(lines) == 0 {
 			continue
 		}
-		utils.PrintTitle(r.Name)
-		utils.PrintPlain(r.Notes)
+		if output.Agent() {
+			for _, block := range lines {
+				for _, line := range strings.Split(block, "\n") {
+					fmt.Fprintf(output.Diagnostics(), "note: %s: %s\n", a.recipe.Name, line)
+				}
+			}
+			continue
+		}
+		utils.PrintTitle(a.recipe.Name)
+		for _, block := range lines {
+			utils.PrintPlain(block)
+		}
 	}
 }
 

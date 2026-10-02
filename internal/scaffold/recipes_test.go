@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/algoritma-dev/orobox/internal/composeoverride"
 	"github.com/algoritma-dev/orobox/internal/config"
@@ -135,10 +136,11 @@ func TestRecipesComposeValid(t *testing.T) {
 func TestAddRecipeRefusesExistingService(t *testing.T) {
 	sftp := realRecipe(t, "sftp")
 	dir := t.TempDir()
+	writeProjectFile(t, dir, ".orobox.yaml", "type: project\noro_version: \"7.0\"\n")
 	existing := "# team services\nservices:\n  sftp:\n    image: mine:1\n  other:\n    image: keep:1 # stays\n"
 	writeProjectFile(t, dir, ".orobox.compose.yaml", existing)
 
-	_, err := AddRecipe(dir, sftp, false)
+	_, _, err := AddRecipe(cfgIn(dir), sftp, false)
 	if err == nil || !strings.Contains(err.Error(), "sftp") {
 		t.Fatalf("err = %v, want a refusal naming sftp", err)
 	}
@@ -149,7 +151,7 @@ func TestAddRecipeRefusesExistingService(t *testing.T) {
 		t.Errorf("refused recipe still copied its files (stat err %v)", err)
 	}
 
-	if _, err := AddRecipe(dir, sftp, true); err != nil {
+	if _, _, err := AddRecipe(cfgIn(dir), sftp, true); err != nil {
 		t.Fatalf("AddRecipe --force: %v", err)
 	}
 	got := readProjectFile(t, dir, ".orobox.compose.yaml")
@@ -180,7 +182,7 @@ func TestAddRecipeBlackfire(t *testing.T) {
 	writeProjectFile(t, dir, ".orobox.yaml", "# keep me\ntype: project\noro_version: \"7.0\"\nimage:\n  php_extensions: [redis]\nphp_ini:\n  memory_limit: 2G\n")
 	writeProjectFile(t, dir, ".env", "# mine\nBLACKFIRE_SERVER_ID=abc\n")
 
-	receipts, err := AddRecipe(dir, blackfire, false)
+	receipts, _, err := AddRecipe(cfgIn(dir), blackfire, false)
 	if err != nil {
 		t.Fatalf("AddRecipe: %v", err)
 	}
@@ -236,7 +238,7 @@ func TestAddRecipeBlackfire(t *testing.T) {
 
 	// Adding it again changes nothing: the forced service is the same one, lists are
 	// deduplicated, and keys the project already has win.
-	receipts, err = AddRecipe(dir, blackfire, true)
+	receipts, _, err = AddRecipe(cfgIn(dir), blackfire, true)
 	if err != nil {
 		t.Fatalf("AddRecipe again: %v", err)
 	}
@@ -256,7 +258,7 @@ func TestAddRecipeCreatesTheEnvFile(t *testing.T) {
 	dir := t.TempDir()
 	writeProjectFile(t, dir, ".orobox.yaml", "type: project\noro_version: \"7.0\"\n")
 
-	receipts, err := AddRecipe(dir, blackfire, false)
+	receipts, _, err := AddRecipe(cfgIn(dir), blackfire, false)
 	if err != nil {
 		t.Fatalf("AddRecipe: %v", err)
 	}
@@ -271,20 +273,84 @@ func TestAddRecipeCreatesTheEnvFile(t *testing.T) {
 	}
 }
 
-func TestAddRecipePhpIniFileConflict(t *testing.T) {
+// With php_ini pointing at the project's own ini file, Orobox does not edit that file, but the
+// rest of the recipe still applies; the directives the file lacks come back as a to-do. Once the
+// user has added them, running the recipe again reports nothing left to do.
+func TestAddRecipeWithAPhpIniFileListsTheMissingDirectives(t *testing.T) {
 	blackfire := realRecipe(t, "blackfire")
 	dir := t.TempDir()
-	cfg := "type: project\noro_version: \"7.0\"\nphp_ini: docker/php.ini\n"
-	writeProjectFile(t, dir, ".orobox.yaml", cfg)
+	writeProjectFile(t, dir, ".orobox.yaml", "type: project\noro_version: \"7.0\"\nphp_ini: docker/php.ini\n")
+	writeProjectFile(t, dir, "docker/php.ini", "memory_limit = 2G\n")
 
-	_, err := AddRecipe(dir, blackfire, false)
-	if err == nil || !strings.Contains(err.Error(), "blackfire.agent_socket") {
-		t.Fatalf("err = %v, want one naming blackfire.agent_socket", err)
+	_, todo, err := AddRecipe(cfgIn(dir), blackfire, false)
+	if err != nil {
+		t.Fatalf("AddRecipe: %v", err)
 	}
-	if !strings.Contains(err.Error(), "docker/php.ini") {
-		t.Errorf("err = %v, want it to name the project's ini file", err)
+	if !strings.Contains(readProjectFile(t, dir, ".orobox.compose.yaml"), "blackfire/blackfire") {
+		t.Error("the blackfire service was not added")
 	}
-	assertNothingWritten(t, dir, cfg)
+	cfg := readProjectFile(t, dir, ".orobox.yaml")
+	if !strings.Contains(cfg, "blackfire") || !strings.Contains(cfg, "php_ini: docker/php.ini") {
+		t.Errorf("config should gain the extension and keep the ini file:\n%s", cfg)
+	}
+	if got := strings.Join(todo, "\n"); !strings.Contains(got, "docker/php.ini") || !strings.Contains(got, "blackfire.agent_socket = tcp://blackfire:8307") {
+		t.Errorf("todo = %q, want the missing directive for docker/php.ini", got)
+	}
+	if readProjectFile(t, dir, "docker/php.ini") != "memory_limit = 2G\n" {
+		t.Error("the project's ini file must not be edited")
+	}
+
+	writeProjectFile(t, dir, "docker/php.ini", "memory_limit = 2G\nblackfire.agent_socket = tcp://blackfire:8307\n")
+	_, todo, err = AddRecipe(cfgIn(dir), blackfire, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range todo {
+		if strings.Contains(line, "agent_socket") {
+			t.Errorf("directive already present but still reported: %q", line)
+		}
+	}
+}
+
+// A recipe's files under docker/<recipe>/ that land inside the image build context make every
+// change there (an SFTP upload, an edited VCL) rebuild the image; the user is told.
+func TestAddRecipeWarnsWhenItsFilesLandInTheBuildContext(t *testing.T) {
+	dir := t.TempDir()
+	writeProjectFile(t, dir, ".orobox.yaml", "type: project\noro_version: \"7.0\"\nimage:\n  dockerfile: docker/Dockerfile\n")
+
+	_, todo, err := AddRecipe(cfgIn(dir), realRecipe(t, "varnish"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(todo, "\n"); !strings.Contains(got, "build context") {
+		t.Errorf("todo = %q, want a warning about the build context", got)
+	}
+
+	other := t.TempDir()
+	writeProjectFile(t, other, ".orobox.yaml", "type: project\noro_version: \"7.0\"\nimage:\n  dockerfile: docker/image/Dockerfile\n")
+	_, todo, err = AddRecipe(cfgIn(other), realRecipe(t, "varnish"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(todo, "\n"), "build context") {
+		t.Errorf("a Dockerfile in its own directory must not be warned about: %q", todo)
+	}
+}
+
+func TestLoadRecipeRejectsAnchorsAndAliases(t *testing.T) {
+	fsys := fstest.MapFS{
+		"recipes/bad/recipe.yaml": &fstest.MapFile{Data: []byte(
+			"description: d\nnotes: n\ncompose:\n  services:\n    a: &x {image: y}\n    b: *x\n")},
+	}
+	if _, err := LoadRecipes(fsys); err == nil || !strings.Contains(err.Error(), "anchor") {
+		t.Errorf("want a refusal of anchors/aliases, got %v", err)
+	}
+}
+
+func TestSftpRecipeNotesMentionTheArchitecture(t *testing.T) {
+	if !strings.Contains(realRecipe(t, "sftp").Notes, "amd64") {
+		t.Error("the sftp notes must say the image is amd64-only")
+	}
 }
 
 // extend is exempt from the global config validation, so the recipe has to check the config it is
@@ -298,7 +364,7 @@ func TestAddRecipeInvalidConfigWritesNothing(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
 			writeProjectFile(t, dir, ".orobox.yaml", cfg)
-			if _, err := AddRecipe(dir, blackfire, false); err == nil {
+			if _, _, err := AddRecipe(cfgIn(dir), blackfire, false); err == nil {
 				t.Fatal("AddRecipe accepted an invalid .orobox.yaml")
 			}
 			assertNothingWritten(t, dir, cfg)
@@ -307,7 +373,7 @@ func TestAddRecipeInvalidConfigWritesNothing(t *testing.T) {
 
 	t.Run("missing config", func(t *testing.T) {
 		dir := t.TempDir()
-		_, err := AddRecipe(dir, blackfire, false)
+		_, _, err := AddRecipe(cfgIn(dir), blackfire, false)
 		if err == nil || !strings.Contains(err.Error(), "orobox init") {
 			t.Fatalf("err = %v, want one pointing at orobox init", err)
 		}
@@ -317,10 +383,12 @@ func TestAddRecipeInvalidConfigWritesNothing(t *testing.T) {
 	})
 }
 
-// A recipe without a config section does not need a .orobox.yaml at all.
+// A recipe without a config section leaves .orobox.yaml alone: only the files it touches are
+// reported.
 func TestAddRecipeWithoutConfigSection(t *testing.T) {
 	dir := t.TempDir()
-	receipts, err := AddRecipe(dir, realRecipe(t, "selenium"), false)
+	writeProjectFile(t, dir, ".orobox.yaml", "type: project\noro_version: \"7.0\"\n")
+	receipts, _, err := AddRecipe(cfgIn(dir), realRecipe(t, "selenium"), false)
 	if err != nil {
 		t.Fatalf("AddRecipe: %v", err)
 	}
@@ -332,8 +400,9 @@ func TestAddRecipeWithoutConfigSection(t *testing.T) {
 func TestAddRecipeCopiesFiles(t *testing.T) {
 	varnish := realRecipe(t, "varnish")
 	dir := t.TempDir()
+	writeProjectFile(t, dir, ".orobox.yaml", "type: project\noro_version: \"7.0\"\n")
 
-	receipts, err := AddRecipe(dir, varnish, false)
+	receipts, _, err := AddRecipe(cfgIn(dir), varnish, false)
 	if err != nil {
 		t.Fatalf("AddRecipe: %v", err)
 	}
@@ -353,7 +422,7 @@ func TestAddRecipeCopiesFiles(t *testing.T) {
 	}
 
 	writeProjectFile(t, dir, "docker/varnish/default.vcl", "vcl 4.1; # mine\n")
-	receipts, err = AddRecipe(dir, varnish, true)
+	receipts, _, err = AddRecipe(cfgIn(dir), varnish, true)
 	if err != nil {
 		t.Fatalf("AddRecipe again: %v", err)
 	}
@@ -369,7 +438,8 @@ func TestAddRecipeCopiesFiles(t *testing.T) {
 // with the directory structure intact.
 func TestAddRecipeCopiesNestedFiles(t *testing.T) {
 	dir := t.TempDir()
-	receipts, err := AddRecipe(dir, realRecipe(t, "sftp"), false)
+	writeProjectFile(t, dir, ".orobox.yaml", "type: project\noro_version: \"7.0\"\n")
+	receipts, _, err := AddRecipe(cfgIn(dir), realRecipe(t, "sftp"), false)
 	if err != nil {
 		t.Fatalf("AddRecipe: %v", err)
 	}

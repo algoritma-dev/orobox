@@ -2,60 +2,43 @@ package docker
 
 import (
 	"bytes"
+	"regexp"
 	"strings"
 )
 
-// MergeEnv applies the project's assignments over the rendered template, in two places:
+// MergeEnv layers the project's assignments over the rendered template, so that what Dotenv and
+// compose read is what the project meant. Both read a file in order, let the last assignment of
+// a key win, and resolve "${...}" against what they have read so far. The merged file is:
 //
-//   - in the template part, the first definition of every key the project sets is replaced on
-//     its own line, so template keys that reference it (`URL=https://${ORO_APP_DOMAIN}`) are
-//     read with the project's value;
-//   - after "# From <source>", every project assignment is appended in the project file's own
-//     order, overrides included. Dotenv and compose let the last assignment of a key win, and
-//     Dotenv resolves "${...}" against what it has read so far, so this block reads exactly as
-//     the project file would on its own: `ORO_APP_DOMAIN=${MY_HOST}` resolves even when
-//     MY_HOST is a key the template does not have.
+//   - the template, unchanged;
+//   - after "# From <source>", every project assignment, in the project file's own order. Its
+//     references resolve as they would in the project file alone, against the template above:
+//     `ORO_APP_DOMAIN=${MY_HOST}` works when MY_HOST is a key only the project has, and
+//     `OPTS=${OPTS} --more` extends the generated value once;
+//   - after that, again, every template assignment that references a key the project set
+//     (directly or through another such assignment) and that the project does not set itself.
+//     Read in the template part, they used the generated values; read again here, they use the
+//     project's — `ORO_APP_URL=http://${ORO_APP_DOMAIN}/` follows the project's domain.
 //
-// The project file is a sparse override, not a replacement: the template keeps its order,
-// comments and every key the project does not mention, so a key added by a later Orobox
-// release still reaches a project whose .env was written against an older one. Values are
-// copied verbatim — quotes, multi-line quoted values and "${...}" references included; only a
-// leading "export ", leading whitespace and carriage returns are dropped.
+// The project file is a sparse override, not a replacement: every key it does not mention keeps
+// the template's value, so a key added by a later Orobox release still reaches a project whose
+// .env was written against an older one. Values are copied verbatim — quotes, multi-line quoted
+// values and "${...}" references included; only a leading "export ", leading whitespace and
+// carriage returns are dropped.
 func MergeEnv(template, project []byte, source string) []byte {
 	projectEntries := parseEnvEntries(string(project))
-	values := make(map[string]string)
-	hasAssignments := false
+	set := make(map[string]bool)
 	for _, e := range projectEntries {
 		if e.assignment {
-			values[e.key] = e.value
-			hasAssignments = true
+			set[e.key] = true
 		}
 	}
-	if !hasAssignments {
+	if len(set) == 0 {
 		return template
 	}
 
-	templateEntries := parseEnvEntries(string(template))
-	applied := make(map[string]bool, len(values))
-	parts := make([]string, len(templateEntries))
-	for i, e := range templateEntries {
-		parts[i] = e.raw
-		if !e.assignment {
-			continue
-		}
-		value, overridden := values[e.key]
-		// Only the first definition is replaced; a later duplicate in the template is left
-		// alone because the templates never define a key twice.
-		if !overridden || applied[e.key] {
-			continue
-		}
-		applied[e.key] = true
-		parts[i] = e.key + "=" + value
-	}
-
 	var out bytes.Buffer
-	out.WriteString(strings.Join(parts, "\n"))
-
+	out.Write(template)
 	// Separate the appended block from the template with one blank line, closing a final line
 	// that has no newline of its own.
 	if out.Len() > 0 && !bytes.HasSuffix(out.Bytes(), []byte("\n")) {
@@ -68,7 +51,50 @@ func MergeEnv(template, project []byte, source string) []byte {
 		}
 	}
 
+	// Template assignments that depend on a changed key, in template order: a template key only
+	// references keys defined above it, so one pass also catches dependencies of dependencies.
+	changed := make(map[string]bool, len(set))
+	for key := range set {
+		changed[key] = true
+	}
+	var reread []envEntry
+	for _, e := range parseEnvEntries(string(template)) {
+		if !e.assignment || set[e.key] || !referencesAny(e.value, changed) {
+			continue
+		}
+		reread = append(reread, e)
+		changed[e.key] = true
+	}
+	if len(reread) > 0 {
+		out.WriteString("\n# Generated values that use the keys above, read again\n")
+		for _, e := range reread {
+			out.WriteString(e.key + "=" + e.value + "\n")
+		}
+	}
+
 	return out.Bytes()
+}
+
+// envReference matches a ${NAME} (or ${NAME:-default}, ${NAME-default}) or $NAME reference.
+var envReference = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)|\$([A-Za-z_][A-Za-z0-9_]*)`)
+
+// referencesAny reports whether a dotenv value references one of keys. A single-quoted value is a
+// literal in Dotenv and compose, so it references nothing.
+func referencesAny(value string, keys map[string]bool) bool {
+	v := strings.TrimSpace(value)
+	if strings.HasPrefix(v, "'") {
+		return false
+	}
+	for _, m := range envReference.FindAllStringSubmatch(v, -1) {
+		name := m[1]
+		if name == "" {
+			name = m[2]
+		}
+		if keys[name] {
+			return true
+		}
+	}
+	return false
 }
 
 // envEntry is one logical unit of an env file: a single line, or an assignment whose quoted

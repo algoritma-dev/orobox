@@ -15,44 +15,62 @@ group commits by theme rather than listing every commit.
   in the `docs/configuration.md` reference.
   - `image` in `.orobox.yaml` builds a local layer on top of the published image: `apk`,
     `php_extensions`, `npm`, `run` (one `RUN` per key, in that order) or a `dockerfile` of your own.
-    Removing every key puts the project back on the published image. `orobox up --rebuild` forces
-    the build with `--no-cache --pull`.
+    Removing every key puts the project back on the published image. `orobox up --rebuild` pulls
+    the base image, then builds with `--no-cache`. The layer is rebuilt when Orobox creates
+    containers; only `orobox up` moves running containers to it. Entries are validated: plain names
+    starting with a letter, digit or `@` for `apk` / `php_extensions` / `npm`, single-line `run`
+    entries without heredocs (folded scalars are fine). A Dockerfile-only project is built with
+    `-f <path>`, so a Dockerfile-specific `.dockerignore` keeps working. `orobox extend image` puts
+    the Dockerfile in `docker/image/`, a build context of its own.
   - The published image now ships `install-php-extensions` in its final stage, preinstalled at a
     pinned version (2.12.0). Previously it existed only in the discarded builder stage, so a
-    `RUN install-php-extensions` in a project Dockerfile could not work.
+    `RUN install-php-extensions` in a project Dockerfile could not work. With `php_extensions` set,
+    the layer downloads the same release when an older cached base image lacks it.
   - `php_ini` sets PHP directives for every PHP service without rebuilding the image: a map of
     directives rendered into a mounted `zz-project.ini` (read after the image's own ini), or the
     path of an ini file of your own. A change recreates the containers on the next `orobox up`.
+    Constant expressions (`E_ALL & ~E_DEPRECATED`) are written unquoted so PHP evaluates them, ini
+    keywords given as strings (`None`, `yes`) and multi-word values are quoted, and values with `$`
+    are single-quoted so `${VAR}` is not expanded.
   - `ports` moves the host port of any published service (`http`, `https`, `db`, `db_test`,
     `redis`, `redisinsight`, `mail_ui`, `mail_smtp`, `rabbitmq`, `rabbitmq_ui`, `elasticsearch`,
     `kibana`, `adminer`, `gotenberg`); `0` means "do not publish". `ports.http` and `ports.https`
     cannot be `0`: the web port is the application's entry point and cannot be left unpublished.
-    They take precedence over `nginx_http_port` / `nginx_https_port` and the
-    `ORO_NGINX_HTTP_PORT` / `ORO_NGINX_HTTPS_PORT` variables, which keep working when `ports` does
-    not set them. An unknown key or a number outside 0-65535 is a configuration error. `orobox up`
-    prints the URLs and the database port using the configured values.
+    They take precedence over the deprecated `nginx_http_port` / `nginx_https_port` keys and the
+    `ORO_NGINX_HTTP_PORT` / `ORO_NGINX_HTTPS_PORT` variables (the variable winning over the key),
+    which keep working when `ports` does not set them. An unknown key, an empty value or a number outside 0-65535 is a configuration
+    error. `orobox up` prints the URLs and the database port using the configured values.
   - `.orobox.compose.yaml` (committed) and `.orobox.compose.local.yaml` (git-ignored) add or tweak
     services with a standard Docker Compose file, appended after Orobox's own compose files. Relative
     host paths are resolved against the directory holding `.orobox.yaml`; a `build:` service is
     built on every `orobox up`; a service label `dev.orobox.url` makes `up` list the service under
     "Project services". An invalid file stops every command that runs compose, naming the file.
+    Paths reached through anchors and merge keys, `build.additional_contexts`, `build.ssh` and
+    `develop.watch` are resolved too, multi-document files work, and a tweak to a service the stack
+    does not define for a command (`db-test` outside tests, a disabled optional service) is left
+    out for that command instead of breaking it.
   - `orobox extend image`, `orobox extend compose [--local]` and `orobox extend add <recipe>...`
     scaffold the above. The recipes are ready-made services with pinned images: `varnish`,
-    `selenium`, `sftp` and `blackfire`.
+    `selenium`, `sftp` and `blackfire`. `extend` needs the project's config (`--config` is
+    honoured), edits it in place keeping its comments, never writes through a symlink leading
+    outside the project, and in `--agent` mode prints the recipes' notes on stderr.
   - `orobox logs <service>` follows the logs of any service of the stack, including the ones an
     override adds, next to the existing `--nginx`, `--php`, `--app`, `--consumer`, `--cron` and `--ws`, which keep working.
   - The hash that decides whether the custom layer is stale now includes the rendered Dockerfile, so
     every existing custom layer rebuilds once after upgrading.
   - Pipeline parity: the Dagger pipeline (`orobox deploy`, and `qa` / `test` on that engine) now
     builds the project's `image` layer and applies `php_ini`, so CI runs the PHP the developer's
-    stack runs. The compose override is not used by the pipeline: it describes the development
-    stack only.
+    stack runs. The layer is built as a step of its own, its build context honours `.dockerignore`
+    (negations included), and `--no-cache` rebuilds every stage of it. The compose override is not used by the pipeline: it describes the
+    development stack only.
 - Changed the `.env` / `.env.test` placed next to `.orobox.yaml`: it is now merged key by key over
   the file Orobox generates, where it used to replace the generated file entirely. List only the
-  keys you change; keys the file does not define come from the generated one, and extra keys are
-  appended after a `# From .env` comment. A project that keeps a complete copy of `.env` still
-  overrides every key it defines, but now also receives the keys it lacked, for example those added
-  by a later Orobox release.
+  keys you change; keys the file does not define come from the generated one. The project file is
+  appended after the generated one (after a `# From .env` comment) in its own order, and the
+  generated keys that reference a key it changed are repeated after it, so every `${...}`
+  reference resolves to the project's value; multi-line quoted values are kept. The file is read from the directory holding the config file (it used to be the current
+  directory). A project that keeps a complete copy of `.env` still overrides every key it defines,
+  but now also receives the keys it lacked, for example those added by a later Orobox release.
 - Documented `test-init`, `db backup` / `db restore` and `self-update` in `docs/commands.md`, and
   corrected the cleanup command's name in the docs: it is `orobox clear`. `orobox clean`, the name
   the docs used to give it, is now accepted as an alias.
@@ -60,8 +78,18 @@ group commits by theme rather than listing every commit.
   dropping every comment and rewriting keys it has nothing to do with, and always wrote
   `./.orobox.yaml` even when `--config` named another file. It now edits only `test.use_tmpfs` and
   `test.tmpfs_size`, in the config file in use, and warns when it cannot.
+- Fixed a `.orobox.yaml` with a YAML syntax error being silently ignored: commands ran on an empty
+  configuration. It is now reported, naming the file, like any other configuration error (`help`,
+  `completion` and `version` still work).
+- Fixed `nginx_http_port` / `nginx_https_port` in `.orobox.yaml` being rejected as unknown keys;
+  they are accepted as deprecated spellings of `ports.http` / `ports.https`.
+- Fixed `orobox deploy-init` writing `./.orobox.yaml` even when `--config` named another file.
+- Fixed `orobox logs` exiting 0 when compose failed.
+- Fixed `orobox shell <service>` failing on images without bash; it falls back to `sh`.
+- Fixed `orobox up` advertising RedisInsight and Kibana when they are disabled, not advertising
+  Adminer when it runs by default, and printing the database connection only next to Adminer.
 - Deprecated the top-level `dockerfile` key in favour of `image.dockerfile`. It still works and is
-  read as `image.dockerfile`, but every command prints a warning asking you to move it, setting
+  read as `image.dockerfile`, but every command prints a warning on stderr asking you to move it, setting
   both is an error, and `orobox deploy-init` rewrites the file with the new key.
 - Fixed `orobox qa --agent` and `orobox test --agent` printing the pipeline's progress on the
   Dagger engine. Agent mode was honoured everywhere Orobox writes for a human except in

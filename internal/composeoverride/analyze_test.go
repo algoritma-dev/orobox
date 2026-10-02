@@ -200,3 +200,13 @@ func missingPaths(a Analysis) []string {
 	}
 	return out
 }
+
+func TestAnalyzeReportsProfiledServices(t *testing.T) {
+	a, err := Analyze([]byte("services:\n  tools:\n    image: x\n    profiles: [tools]\n  web:\n    image: y\n"), nil, func(string) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a.Profiled) != 1 || a.Profiled[0] != "tools" {
+		t.Errorf("Profiled = %v, want [tools]", a.Profiled)
+	}
+}

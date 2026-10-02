@@ -1,6 +1,7 @@
 package composeoverride
 
 import (
+	"fmt"
 	"sort"
 
 	yamlv3 "gopkg.in/yaml.v3"
@@ -63,9 +64,27 @@ func Prune(resolved []byte, known []string) (out []byte, dropped []string, err e
 			}
 		})
 	}
+	own := map[string]bool{}
+	for _, doc := range docs {
+		services := deref(ownValue(doc.Content[0], "services"))
+		if services == nil || services.Kind != yamlv3.MappingNode {
+			continue
+		}
+		for i := 0; i+1 < len(services.Content); i += 2 {
+			if !isMergeKey(services.Content[i]) {
+				own[services.Content[i].Value] = true
+			}
+		}
+	}
 	drop := map[string]bool{}
 	for _, name := range order {
 		if !isKnown[name] && !standalone[name] {
+			if !own[name] {
+				// Only an entry written under `services:` itself can be removed; one that comes
+				// in through a merge key lives in the anchor, and leaving it would make compose
+				// reject the project anyway.
+				return nil, nil, fmt.Errorf("service %s extends a service this stack does not define, and it comes in through a YAML merge key, so it cannot be left out: give it an image or a build, or write it under services directly", name)
+			}
 			drop[name] = true
 			dropped = append(dropped, name)
 		}

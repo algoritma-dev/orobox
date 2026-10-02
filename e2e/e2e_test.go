@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -564,7 +565,23 @@ func TestE2ECustomization(t *testing.T) {
 
 	// ports.db: the database is reachable from the host on the moved port.
 	assertTCPOpen(t, customizationDBPort)
+
+	// Pipeline parity: the Dagger engine builds the same layer before its first step. The
+	// compose stack is stopped first: the engine needs the runner's memory and disk, not the
+	// containers this case has finished with. One cheap tool is enough — the assertion is on the
+	// layer step completing, not on the analysis, whose findings may make the command exit
+	// non-zero.
+	box.Run("down")
+	qa := box.TryRun("qa", "--engine", "dagger", "--php-cs-fixer")
+	output := qa.Stdout + qa.Stderr
+	if !layerStepDone.MatchString(output) {
+		t.Errorf("the Dagger engine did not complete the project image layer step:\n%s", output)
+	}
 }
+
+// layerStepDone matches the reporter's success line for the layer step; colour codes sit between
+// the tick, the step name and the label.
+var layerStepDone = regexp.MustCompile(`✔ \[image\]\S* build the project image layer`)
 
 // versionsOf lists the Oro versions of a set of matrix cases.
 func versionsOf(cases []Case) []string {

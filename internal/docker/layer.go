@@ -188,7 +188,9 @@ func renderPhpIniString(v string) (string, error) {
 		return "'" + v + "'", nil
 	case isPhpIniExpression(v):
 		return v, nil
-	case strings.ContainsAny(v, phpIniQuoted+phpIniOperators+"()") || strings.TrimSpace(v) != v:
+	// Internal whitespace too: raw, a multi-word value is a syntax error as soon as one word is
+	// a keyword (`--read-envelope-from on`), and quoted it reads back exactly as written.
+	case strings.ContainsAny(v, phpIniQuoted+phpIniOperators+"() \t") || strings.TrimSpace(v) != v:
 		// Inside double quotes php.ini reads \" and \\ as escapes, so both are escaped to keep
 		// the value byte-for-byte what the project wrote.
 		escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(v)
@@ -207,7 +209,12 @@ func renderPhpIniString(v string) (string, error) {
 //	expr    = unary { ("|" | "&" | "^") unary }
 //	unary   = { "~" | "!" } primary
 //	primary = operand | "(" expr ")"
-//	operand = ["-" digit] { letter | digit | "_" | "." }   (at least one character)
+//	operand = number | constant
+//	number  = ["-"] digit { digit } [ "." digit { digit } ]
+//	constant = ( "A"…"Z" | "_" ) { "A"…"Z" | "0"…"9" | "_" }, not a php.ini keyword
+//
+// Only constants and numbers: a lowercase word joined by an operator (`dev&test`) is a literal
+// the user meant, which PHP would evaluate to 0, and a keyword operand (`on|1`) is a syntax error.
 //
 // Surrounding whitespace is not accepted: it would be lost unquoted.
 func isPhpIniExpression(v string) bool {
@@ -285,21 +292,46 @@ func (p *phpIniExprParser) primary() bool {
 }
 
 func (p *phpIniExprParser) operand() bool {
+	isDigit := func(c byte) bool { return c >= '0' && c <= '9' }
+	isUpper := func(c byte) bool { return (c >= 'A' && c <= 'Z') || c == '_' }
+
 	start := p.pos
-	// A negative number is one token in php.ini; a lone `-` is not an operator there.
-	if p.peek() == '-' {
-		if p.pos+1 >= len(p.s) || p.s[p.pos+1] < '0' || p.s[p.pos+1] > '9' {
+	switch c := p.peek(); {
+	case c == '-' || isDigit(c):
+		// A negative number is one token in php.ini; a lone `-` is not an operator there.
+		if c == '-' {
+			p.pos++
+		}
+		digits := p.pos
+		for isDigit(p.peek()) {
+			p.pos++
+		}
+		if p.pos == digits {
 			return false
 		}
-		p.pos++
-	}
-	for {
-		c := p.peek()
-		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '.' {
+		if p.peek() == '.' {
 			p.pos++
-			continue
+			frac := p.pos
+			for isDigit(p.peek()) {
+				p.pos++
+			}
+			if p.pos == frac {
+				return false
+			}
 		}
-		break
+		// A number glued to letters (`1e3x`, `10M`) is not an operand.
+		if c := p.peek(); isUpper(c) || (c >= 'a' && c <= 'z') {
+			return false
+		}
+		return true
+	case isUpper(c):
+		for c := p.peek(); isUpper(c) || isDigit(c); c = p.peek() {
+			p.pos++
+		}
+		if c := p.peek(); c >= 'a' && c <= 'z' || c == '.' {
+			return false
+		}
+		return !phpIniKeywords[strings.ToLower(p.s[start:p.pos])]
 	}
-	return p.pos > start
+	return false
 }

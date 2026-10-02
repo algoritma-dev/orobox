@@ -87,7 +87,9 @@ func Write(root string, a Artifact, data any) (Result, error) {
 	target := filepath.Join(root, a.RelPath)
 
 	if a.Ownership == WriteOnce {
-		switch _, err := os.Stat(target); {
+		// Lstat, not Stat: a dangling symlink is an existing entry, and following it would
+		// create the file wherever the link points.
+		switch _, err := os.Lstat(target); {
 		case err == nil:
 			return Result{Artifact: a, Skipped: true}, nil
 		case !errors.Is(err, os.ErrNotExist):
@@ -100,16 +102,111 @@ func Write(root string, a Artifact, data any) (Result, error) {
 		return Result{Artifact: a}, fmt.Errorf("could not render %s: %w", a.RelPath, err)
 	}
 
-	if dir := filepath.Dir(target); dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return Result{Artifact: a}, fmt.Errorf("could not create %s: %w", dir, err)
+	// Generators may write into a directory a project deliberately links elsewhere (a shared
+	// .gitlab, say), so Write does not confine the target; `orobox extend` uses
+	// writeInsideProject, which does.
+	if err := writeFile(root, filepath.ToSlash(a.RelPath), rendered, a.Ownership == WriteOnce, false); err != nil {
+		return Result{Artifact: a}, err
+	}
+	return Result{Artifact: a, Written: true}, nil
+}
+
+// writeInsideProject writes content to rel under root, creating the missing directories, and
+// refuses whatever would land outside root: a directory that resolves elsewhere through a
+// symlink, or a target that is itself a symlink pointing out of the project. With exclusive it
+// creates the file only if nothing exists there, so a file that appeared since it was checked is
+// never overwritten. `orobox extend` writes every file through it.
+func writeInsideProject(root, rel string, content []byte, exclusive bool) error {
+	if err := checkWritable(root, rel); err != nil {
+		return err
+	}
+	return writeFile(root, rel, content, exclusive, true)
+}
+
+// checkWritable reports whether rel can be written under root without leaving it. It creates
+// nothing, so a caller planning several writes can check them all before the first one.
+func checkWritable(root, rel string) error {
+	target := filepath.Join(root, filepath.FromSlash(rel))
+	// The nearest existing ancestor is checked, not the directory itself: MkdirAll would
+	// otherwise build the missing directories wherever a symlinked parent points.
+	if err := checkInside(root, existingAncestor(filepath.Dir(target))); err != nil {
+		return fmt.Errorf("refusing to write %s: %w", rel, err)
+	}
+	info, err := os.Lstat(target)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return nil
+	}
+	resolved, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		return fmt.Errorf("refusing to write %s: it is a symlink that leads nowhere", rel)
+	}
+	if err := checkInside(root, filepath.Dir(resolved)); err != nil {
+		return fmt.Errorf("refusing to write %s: it is a symlink to %s, outside the project", rel, resolved)
+	}
+	return nil
+}
+
+// writeFile writes content to rel under root. confine re-checks, once the directories exist,
+// that the target's directory is still inside root.
+func writeFile(root, rel string, content []byte, exclusive, confine bool) error {
+	target := filepath.Join(root, filepath.FromSlash(rel))
+	dir := filepath.Dir(target)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("could not create %s: %w", dir, err)
+	}
+	if confine {
+		if err := checkInside(root, dir); err != nil {
+			return fmt.Errorf("refusing to write %s: %w", rel, err)
 		}
 	}
-	if err := os.WriteFile(target, rendered, 0o644); err != nil {
-		return Result{Artifact: a}, fmt.Errorf("could not write %s: %w", a.RelPath, err)
-	}
 
-	return Result{Artifact: a, Written: true}, nil
+	flags := os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+	if exclusive {
+		flags = os.O_WRONLY | os.O_CREATE | os.O_EXCL
+	}
+	f, err := os.OpenFile(target, flags, 0o644)
+	if err != nil {
+		return fmt.Errorf("could not write %s: %w", rel, err)
+	}
+	if _, err := f.Write(content); err != nil {
+		f.Close()
+		return fmt.Errorf("could not write %s: %w", rel, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("could not write %s: %w", rel, err)
+	}
+	return nil
+}
+
+// existingAncestor returns dir, or its closest ancestor that exists.
+func existingAncestor(dir string) string {
+	for {
+		if _, err := os.Lstat(dir); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return dir
+		}
+		dir = parent
+	}
+}
+
+// checkInside reports an error when dir, with symlinks resolved, is not root or below it.
+func checkInside(root, dir string) error {
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return err
+	}
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(realRoot, realDir)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("%s resolves to %s, outside the project", dir, realDir)
+	}
+	return nil
 }
 
 // WriteAll writes every artifact against the same data and stops at the first failure: a

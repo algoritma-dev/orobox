@@ -958,6 +958,9 @@ func TestImageRunRejectsHeredoc(t *testing.T) {
 		{"cat << 'EOF' > /etc/x", true},
 		{`cat <<"EOF" > /etc/x`, true},
 		{"cat <<_END", true},
+		// A backslash-quoted delimiter is a heredoc to BuildKit too.
+		{`cat <<\EOF > /x`, true},
+		{`cat <<-\EOF > /x`, true},
 		// A here-string is single-line and not a Dockerfile heredoc.
 		{`cat <<< "hello"`, false},
 		{"tr a b <<<word", false},

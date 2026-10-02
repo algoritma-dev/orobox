@@ -234,7 +234,7 @@ func TestApplyProjectLayerDeprecatedAlias(t *testing.T) {
 
 func TestLayerSpecBuildOpts(t *testing.T) {
 	layer := &LayerSpec{BaseImage: layerTestPublishedTag}
-	opts := layer.buildOpts()
+	opts := layer.buildOpts("")
 
 	if opts.Dockerfile != ".orobox.layer.Dockerfile" {
 		t.Errorf("Dockerfile = %q, want the rendered file's name in the context", opts.Dockerfile)
@@ -243,5 +243,82 @@ func TestLayerSpecBuildOpts(t *testing.T) {
 		opts.BuildArgs[0].Name != config.DockerfileBaseImageArg ||
 		opts.BuildArgs[0].Value != layerTestPublishedTag {
 		t.Errorf("BuildArgs = %+v, want only %s=%s", opts.BuildArgs, config.DockerfileBaseImageArg, layerTestPublishedTag)
+	}
+}
+
+// --no-cache must rebuild the layer too: the run ID goes in a build argument declared right after
+// the final FROM, so every RUN of the final stage misses the cache.
+func TestLayerSpecNoCacheBustsTheLayer(t *testing.T) {
+	l := &LayerSpec{
+		Dockerfile: []byte("ARG OROBOX_BASE_IMAGE\nFROM ${OROBOX_BASE_IMAGE}\nUSER root\nRUN apk add --no-cache git\n"),
+		BaseImage:  layerTestPublishedTag,
+	}
+	if got := l.dockerfileFor(""); got != string(l.Dockerfile) {
+		t.Errorf("without a cache bust the Dockerfile must be unchanged, got:\n%s", got)
+	}
+	got := l.dockerfileFor("run-42")
+	if !strings.Contains(got, "FROM ${OROBOX_BASE_IMAGE}\nARG OROBOX_CACHE_BUST\nUSER root") {
+		t.Errorf("cache-bust ARG not placed after the final FROM:\n%s", got)
+	}
+	opts := l.buildOpts("run-42")
+	found := false
+	for _, a := range opts.BuildArgs {
+		if a.Name == "OROBOX_CACHE_BUST" && a.Value == "run-42" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("build args %v lack OROBOX_CACHE_BUST=run-42", opts.BuildArgs)
+	}
+}
+
+// The build context is uploaded with the patterns of its .dockerignore excluded, as docker build
+// would, and with the project's own excludes when the context is the project root.
+func TestLayerContextExcludes(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".dockerignore"), []byte("# comment\n\nnode_modules\n!keep.txt\n/var/cache\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := layerContextExcludes(dir, "", false)
+	for _, want := range []string{"node_modules", "var/cache"} {
+		if !containsString(got, want) {
+			t.Errorf("excludes %v lack %q", got, want)
+		}
+	}
+	for _, unwanted := range []string{"# comment", ""} {
+		if containsString(got, unwanted) {
+			t.Errorf("excludes %v must not contain %q", got, unwanted)
+		}
+	}
+	// A negation re-includes files, so it has to reach the exclude list, in order.
+	if !containsString(got, "!keep.txt") {
+		t.Errorf("excludes %v lost the negation !keep.txt", got)
+	}
+	if root := layerContextExcludes(dir, "", true); len(root) <= len(got) {
+		t.Errorf("a project-root context must add the project excludes: %v", root)
+	}
+}
+
+func containsString(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+// As Docker does, a Dockerfile-specific ignore file replaces the context's .dockerignore.
+func TestLayerContextExcludesPrefersTheDockerfileSpecificFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".dockerignore"), []byte("generic\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Dockerfile.dockerignore"), []byte("specific\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := layerContextExcludes(dir, "Dockerfile", false)
+	if !containsString(got, "specific") || containsString(got, "generic") {
+		t.Errorf("excludes = %v, want only the Dockerfile-specific patterns", got)
 	}
 }

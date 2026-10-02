@@ -16,3 +16,4 @@ notes: |
   password orobox, remote directory /upload.
   From the host: sftp -P 2222 orobox@localhost (same password). Uploaded files land in
   docker/sftp/upload.
+  The image is built for amd64 only: on an arm64 host (Apple Silicon) it runs under emulation.

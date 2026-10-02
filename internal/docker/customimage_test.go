@@ -525,3 +525,47 @@ func TestEnsureCustomImageWithoutRebuildDoesNotPullAPresentBase(t *testing.T) {
 		}
 	}
 }
+
+// The pipeline busts the layer cache under --no-cache by declaring a build argument right after
+// each FROM, before every RUN of its stage. The line must land after the FROMs Docker
+// really reads, not after a FROM inside a heredoc or in the middle of a continuation.
+func TestInsertAfterEveryFromSkipsHeredocsAndContinuations(t *testing.T) {
+	src := "ARG OROBOX_BASE_IMAGE\n" +
+		"FROM golang:1 AS tool\n" +
+		"RUN <<EOF\nFROM users;\nEOF\n" +
+		"FROM --platform=$BUILDPLATFORM \\\n  ${OROBOX_BASE_IMAGE}\n" +
+		"RUN echo final\n"
+	got := string(InsertAfterEveryFrom([]byte(src), "ARG OROBOX_CACHE_BUST"))
+	want := "ARG OROBOX_BASE_IMAGE\n" +
+		"FROM golang:1 AS tool\n" +
+		"ARG OROBOX_CACHE_BUST\n" +
+		"RUN <<EOF\nFROM users;\nEOF\n" +
+		"FROM --platform=$BUILDPLATFORM \\\n  ${OROBOX_BASE_IMAGE}\n" +
+		"ARG OROBOX_CACHE_BUST\n" +
+		"RUN echo final\n"
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// `<<EOF` inside quotes or shell arithmetic is not a heredoc to Docker; treating it as one would
+// swallow the following FROM and judge the wrong stage final.
+func TestFromImagesIgnoresHeredocMarkersThatAreNotWords(t *testing.T) {
+	for _, run := range []string{`RUN echo "<<EOF"`, `RUN echo '<<EOF'`, `RUN echo $((1<<FOO))`} {
+		src := "FROM alpine AS a\n" + run + "\nFROM ${OROBOX_BASE_IMAGE}\n"
+		if err := CheckExtendsBaseImage("Dockerfile", []byte(src)); err != nil {
+			t.Errorf("%s: %v", run, err)
+		}
+	}
+}
+
+// --no-cache must rebuild every stage, as `docker build --no-cache` does locally: an ARG is
+// scoped to its stage, so it is declared after each FROM.
+func TestInsertAfterEveryFrom(t *testing.T) {
+	src := "ARG OROBOX_BASE_IMAGE\nFROM golang:1 AS tool\nRUN go install x@latest\nFROM ${OROBOX_BASE_IMAGE}\nRUN echo final\n"
+	got := string(InsertAfterEveryFrom([]byte(src), "ARG OROBOX_CACHE_BUST"))
+	want := "ARG OROBOX_BASE_IMAGE\nFROM golang:1 AS tool\nARG OROBOX_CACHE_BUST\nRUN go install x@latest\nFROM ${OROBOX_BASE_IMAGE}\nARG OROBOX_CACHE_BUST\nRUN echo final\n"
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"dagger.io/dagger"
 	"github.com/algoritma-dev/orobox/internal/config"
@@ -26,15 +27,71 @@ type LayerSpec struct {
 	Dockerfile []byte
 	// BaseImage is the published tag the layer extends, passed as config.DockerfileBaseImageArg.
 	BaseImage string
+	// ContextIsProjectRoot is set when the project Dockerfile sits next to .orobox.yaml, so the
+	// build context is the whole working tree and needs the project's own excludes.
+	ContextIsProjectRoot bool
+	// DockerfileName is the project Dockerfile's file name, for its own `<name>.dockerignore`.
+	DockerfileName string
+}
+
+// cacheBustArg is the build argument --no-cache sets to the run ID. Declared right after the
+// final FROM, it changes the cache key of every instruction after it, so the layer is really
+// rebuilt — Dagger, unlike `docker build`, has no option to ignore its cache. It is declared in
+// every stage, so a multi-stage build is rebuilt whole, like `docker build --no-cache`.
+const cacheBustArg = "OROBOX_CACHE_BUST"
+
+// dockerfileFor returns the Dockerfile to build: the rendered one, with the cache-busting ARG
+// inserted when cacheBust is set.
+func (l *LayerSpec) dockerfileFor(cacheBust string) string {
+	if cacheBust == "" {
+		return string(l.Dockerfile)
+	}
+	return string(docker.InsertAfterEveryFrom(l.Dockerfile, "ARG "+cacheBustArg))
 }
 
 // buildOpts are the DockerBuild options for the layer. Kept apart from the runner so what the
 // build is told can be tested without a Dagger engine.
-func (l *LayerSpec) buildOpts() dagger.DirectoryDockerBuildOpts {
-	return dagger.DirectoryDockerBuildOpts{
-		Dockerfile: layerDockerfileName,
-		BuildArgs:  []dagger.BuildArg{{Name: config.DockerfileBaseImageArg, Value: l.BaseImage}},
+func (l *LayerSpec) buildOpts(cacheBust string) dagger.DirectoryDockerBuildOpts {
+	args := []dagger.BuildArg{{Name: config.DockerfileBaseImageArg, Value: l.BaseImage}}
+	if cacheBust != "" {
+		args = append(args, dagger.BuildArg{Name: cacheBustArg, Value: cacheBust})
 	}
+	return dagger.DirectoryDockerBuildOpts{Dockerfile: layerDockerfileName, BuildArgs: args}
+}
+
+// layerContextExcludes are the paths left out of the uploaded build context: the patterns of the
+// Dockerfile's own `<name>.dockerignore` when it exists, else of the context's .dockerignore —
+// the file `docker build` would honour locally — in order, negations (`!keep`) included, plus
+// the project's own excludes when the context is the project root (vendor/, var/, node_modules/
+// would otherwise be shipped to the engine on every run).
+func layerContextExcludes(contextDir, dockerfileName string, projectRoot bool) []string {
+	var excludes []string
+	if projectRoot {
+		excludes = append(excludes, HostExcludes(contextDir)...)
+	}
+	candidates := []string{".dockerignore"}
+	if dockerfileName != "" {
+		candidates = append([]string{dockerfileName + ".dockerignore"}, candidates...)
+	}
+	for _, name := range candidates {
+		src, err := os.ReadFile(filepath.Join(contextDir, name))
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(src), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			if neg, ok := strings.CutPrefix(line, "!"); ok {
+				excludes = append(excludes, "!"+strings.TrimPrefix(neg, "/"))
+				continue
+			}
+			excludes = append(excludes, strings.TrimPrefix(line, "/"))
+		}
+		break
+	}
+	return excludes
 }
 
 // ApplyProjectLayer makes the plan run on the image and php.ini settings the dev stack runs on:
@@ -98,6 +155,8 @@ func projectLayer(img config.ImageConfig, hostDir, baseImage string) (*LayerSpec
 		}
 		projectDockerfile = content
 		layer.ContextDir = filepath.Dir(path)
+		layer.ContextIsProjectRoot = filepath.Clean(layer.ContextDir) == filepath.Clean(hostDir)
+		layer.DockerfileName = filepath.Base(path)
 	}
 
 	layer.Dockerfile = docker.RenderLayerDockerfile(projectDockerfile, img)

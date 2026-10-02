@@ -4,27 +4,32 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/spf13/viper"
 )
 
-func TestMergeEnvReplacesInPlace(t *testing.T) {
+func TestMergeEnvKeepsTheTemplateAndAppendsTheProject(t *testing.T) {
 	got := string(MergeEnv([]byte("# c\nA=1\nB=2\n"), []byte("B=3\n"), ".env"))
-	// Replaced in place for template keys that reference B, and repeated in the project block.
-	want := "# c\nA=1\nB=3\n\n# From .env\nB=3\n"
+	want := "# c\nA=1\nB=2\n\n# From .env\nB=3\n"
 	if got != want {
 		t.Errorf("MergeEnv() = %q, want %q", got, want)
 	}
+	if v := resolvedEnv(got); v["B"] != "3" {
+		t.Errorf("B = %q, want 3", v["B"])
+	}
 }
 
-func TestMergeEnvReplacesOnlyTheFirstOccurrenceAndKeepsOtherLines(t *testing.T) {
+func TestMergeEnvLeavesTemplateLinesAsWritten(t *testing.T) {
 	template := "# head\n\nA=\"${B}/x\"   \nB=2\n# tail\nA=dup\n"
 	got := string(MergeEnv([]byte(template), []byte("A=9\n"), ".env"))
-	want := "# head\n\nA=9\nB=2\n# tail\nA=dup\n\n# From .env\nA=9\n"
-	if got != want {
-		t.Errorf("MergeEnv() = %q, want %q", got, want)
+	if !strings.HasPrefix(got, template) {
+		t.Errorf("template part changed: %q", got)
+	}
+	if v := resolvedEnv(got); v["A"] != "9" {
+		t.Errorf("A = %q, want the project's 9", v["A"])
 	}
 }
 
@@ -46,7 +51,7 @@ func TestMergeEnvAppendsAfterTemplateWithoutTrailingNewline(t *testing.T) {
 
 func TestMergeEnvKeepsReferencesVerbatim(t *testing.T) {
 	got := string(MergeEnv([]byte("A=1\nX=old\n"), []byte("X=\"${A}/x\"\nY='${A}'\n"), ".env"))
-	want := "A=1\nX=\"${A}/x\"\n\n# From .env\nX=\"${A}/x\"\nY='${A}'\n"
+	want := "A=1\nX=old\n\n# From .env\nX=\"${A}/x\"\nY='${A}'\n"
 	if got != want {
 		t.Errorf("MergeEnv() = %q, want %q", got, want)
 	}
@@ -65,7 +70,7 @@ func TestMergeEnvTolerantParsing(t *testing.T) {
 // also the last line Dotenv and compose read for it.
 func TestMergeEnvLastAssignmentWins(t *testing.T) {
 	got := string(MergeEnv([]byte("A=1\n"), []byte("A=2\nN=1\nA=3\nN=2\n"), ".env"))
-	want := "A=3\n\n# From .env\nA=2\nN=1\nA=3\nN=2\n"
+	want := "A=1\n\n# From .env\nA=2\nN=1\nA=3\nN=2\n"
 	if got != want {
 		t.Errorf("MergeEnv() = %q, want %q", got, want)
 	}
@@ -76,7 +81,7 @@ func TestMergeEnvLastAssignmentWins(t *testing.T) {
 
 func TestMergeEnvValueKeepsEqualsSignsAndSpaces(t *testing.T) {
 	got := string(MergeEnv([]byte("A=1\n"), []byte("  A = x=y \n"), ".env"))
-	want := "A= x=y \n\n# From .env\nA= x=y \n"
+	want := "A=1\n\n# From .env\nA= x=y \n"
 	if got != want {
 		t.Errorf("MergeEnv() = %q, want %q", got, want)
 	}
@@ -104,24 +109,61 @@ func TestMergeEnvFullCopyKeepsEffectiveValues(t *testing.T) {
 	}
 }
 
-// A project key referencing a key the project itself introduces must resolve: Dotenv resolves
-// ${...} against what it has read so far, so MY_HOST has to come before the ORO_APP_DOMAIN line
-// that is read last. The template line is still replaced in place, so template keys that
-// reference ORO_APP_DOMAIN see the project's value too.
-func TestMergeEnvProjectReferencesResolve(t *testing.T) {
-	template := "ORO_APP_DOMAIN=localhost\nURL=https://${ORO_APP_DOMAIN}\n"
-	project := "MY_HOST=shop.test\nORO_APP_DOMAIN=${MY_HOST}\n"
-	got := string(MergeEnv([]byte(template), []byte(project), ".env"))
+// What Dotenv and compose read must be what the project meant: its own keys resolve against each
+// other, and the generated keys that reference a key the project changed see the project's
+// value. Asserted on the resolved values, not the text.
+func TestMergeEnvResolvesReferencesBothWays(t *testing.T) {
+	template := "ORO_APP_DOMAIN=localhost\nORO_APP_URL=http://${ORO_APP_DOMAIN}/\n" +
+		"ORO_DB_PASSWORD=pass\nORO_DB_DSN=postgres://u:${ORO_DB_PASSWORD}@db/oro\n"
+	project := "MY_HOST=shop.test\nORO_APP_DOMAIN=${MY_HOST}\nDB_PASS=secret\nORO_DB_PASSWORD=${DB_PASS}\n"
+	v := resolvedEnv(string(MergeEnv([]byte(template), []byte(project), ".env")))
 
-	want := "ORO_APP_DOMAIN=${MY_HOST}\nURL=https://${ORO_APP_DOMAIN}\n" +
-		"\n# From .env\nMY_HOST=shop.test\nORO_APP_DOMAIN=${MY_HOST}\n"
-	if got != want {
-		t.Errorf("MergeEnv() = %q, want %q", got, want)
+	for key, want := range map[string]string{
+		"ORO_APP_DOMAIN":  "shop.test",
+		"ORO_APP_URL":     "http://shop.test/",
+		"ORO_DB_PASSWORD": "secret",
+		"ORO_DB_DSN":      "postgres://u:secret@db/oro",
+	} {
+		if v[key] != want {
+			t.Errorf("%s = %q, want %q", key, v[key], want)
+		}
 	}
-	block := got[strings.Index(got, "# From .env"):]
-	if strings.Index(block, "MY_HOST=") > strings.Index(block, "ORO_APP_DOMAIN=") {
-		t.Errorf("MY_HOST must precede the appended ORO_APP_DOMAIN: %q", block)
+}
+
+// A project value extending the generated one (`${KEY} --more`) extends it once.
+func TestMergeEnvSelfReferenceExtendsTheTemplateValueOnce(t *testing.T) {
+	template := "ORO_INSTALL_OPTIONS=--a\n"
+	project := "ORO_INSTALL_OPTIONS=\"${ORO_INSTALL_OPTIONS} --timeout=0\"\n"
+	v := resolvedEnv(string(MergeEnv([]byte(template), []byte(project), ".env")))
+	if v["ORO_INSTALL_OPTIONS"] != "--a --timeout=0" {
+		t.Errorf("ORO_INSTALL_OPTIONS = %q, want %q", v["ORO_INSTALL_OPTIONS"], "--a --timeout=0")
 	}
+}
+
+// resolvedEnv reads a dotenv file the way Symfony Dotenv and compose do for these cases: in order,
+// the last assignment of a key winning, ${VAR} / $VAR expanded against what was read so far
+// (not inside single quotes), surrounding quotes removed.
+func resolvedEnv(content string) map[string]string {
+	values := map[string]string{}
+	ref := regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)`)
+	for _, e := range parseEnvEntries(content) {
+		if !e.assignment {
+			continue
+		}
+		v := strings.TrimSpace(e.value)
+		if len(v) >= 2 && v[0] == '\'' && v[len(v)-1] == '\'' {
+			values[e.key] = v[1 : len(v)-1]
+			continue
+		}
+		if len(v) >= 2 && v[0] == '"' && v[len(v)-1] == '"' {
+			v = v[1 : len(v)-1]
+		}
+		values[e.key] = ref.ReplaceAllStringFunc(v, func(m string) string {
+			name := strings.Trim(m, "${}")
+			return values[name]
+		})
+	}
+	return values
 }
 
 // A quoted value may span lines. Its continuation lines are part of the value, never
@@ -131,7 +173,7 @@ func TestMergeEnvMultiLineQuotedValues(t *testing.T) {
 	project := "A=2\nKEY=\"new\nB=inside \\\" quote\nend\"\nC='x\ny'\n"
 	got := string(MergeEnv([]byte(template), []byte(project), ".env"))
 
-	want := "KEY=\"new\nB=inside \\\" quote\nend\"\nA=2\nS='one\ntwo'\n" +
+	want := template +
 		"\n# From .env\nA=2\nKEY=\"new\nB=inside \\\" quote\nend\"\nC='x\ny'\n"
 	if got != want {
 		t.Errorf("MergeEnv() =\n%s\nwant\n%s", got, want)
@@ -175,7 +217,7 @@ func TestWriteEnvFileMergesProjectFileOverTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "ORO_VERSION=9.9\n\n# From .env\nORO_VERSION=9.9\nMY_KEY=xyz\n"
+	want := "ORO_VERSION=6.1\n\n# From .env\nORO_VERSION=9.9\nMY_KEY=xyz\n"
 	if string(got) != want {
 		t.Errorf("merged .env = %q, want %q", got, want)
 	}

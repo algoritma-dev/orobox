@@ -29,6 +29,14 @@ func init() {
 	rootCmd.AddCommand(shellCmd)
 }
 
+// shellExecArgs returns the compose arguments that open an interactive shell in service. bash is
+// preferred, but not every image ships it — a service a project adds may be a busybox or alpine
+// image with only sh — so the command falls back to sh rather than failing with "bash: not found".
+func shellExecArgs(service string) []string {
+	args := docker.GetBaseComposeArgs()
+	return append(args, "exec", service, "sh", "-c", "command -v bash >/dev/null 2>&1 && exec bash || exec sh")
+}
+
 var runInteractiveShell = func(service string) {
 	composeCmd := docker.GetComposeCommand()
 	binary, err := exec.LookPath(composeCmd[0])
@@ -43,9 +51,7 @@ var runInteractiveShell = func(service string) {
 		os.Exit(1)
 	}
 
-	baseArgs := docker.GetBaseComposeArgs()
-	args := append(composeCmd, baseArgs...)
-	args = append(args, "exec", service, "bash")
+	args := append(composeCmd, shellExecArgs(service)...)
 	env := os.Environ()
 
 	err = syscall.Exec(binary, args, env)

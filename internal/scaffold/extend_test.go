@@ -15,6 +15,9 @@ import (
 
 const extendConfigWithComment = "# keep me\ntype: project\noro_version: \"7.0\"\n"
 
+// cfgIn is the path of the config file every extend entry point takes: .orobox.yaml in dir.
+func cfgIn(dir string) string { return filepath.Join(dir, ".orobox.yaml") }
+
 func writeProjectFile(t *testing.T, dir, rel, content string) {
 	t.Helper()
 	target := filepath.Join(dir, filepath.FromSlash(rel))
@@ -40,20 +43,20 @@ func TestExtendImageCreates(t *testing.T) {
 	dir := t.TempDir()
 	writeProjectFile(t, dir, ".orobox.yaml", extendConfigWithComment)
 
-	receipts, err := ExtendImage(dir)
+	receipts, err := ExtendImage(cfgIn(dir))
 	if err != nil {
 		t.Fatalf("ExtendImage: %v", err)
 	}
 
 	want := []Receipt{
-		{Path: "docker/Dockerfile", Action: ActionCreated},
+		{Path: "docker/image/Dockerfile", Action: ActionCreated},
 		{Path: ".orobox.yaml", Action: ActionUpdated},
 	}
 	if !reflect.DeepEqual(receipts, want) {
 		t.Errorf("receipts = %v, want %v", receipts, want)
 	}
 
-	dockerfile := readProjectFile(t, dir, "docker/Dockerfile")
+	dockerfile := readProjectFile(t, dir, "docker/image/Dockerfile")
 	if !strings.HasPrefix(dockerfile, "ARG OROBOX_BASE_IMAGE\nFROM ${OROBOX_BASE_IMAGE}") {
 		t.Errorf("Dockerfile does not start with the required header:\n%s", dockerfile)
 	}
@@ -70,33 +73,36 @@ func TestExtendImageCreates(t *testing.T) {
 	if err := yamlv3.Unmarshal([]byte(cfg), &parsed); err != nil {
 		t.Fatal(err)
 	}
-	if parsed.Image.Dockerfile != "docker/Dockerfile" {
-		t.Errorf("image.dockerfile = %q, want docker/Dockerfile\n%s", parsed.Image.Dockerfile, cfg)
+	if parsed.Image.Dockerfile != "docker/image/Dockerfile" {
+		t.Errorf("image.dockerfile = %q, want docker/image/Dockerfile\n%s", parsed.Image.Dockerfile, cfg)
 	}
 }
+
+// mineLayer is a user's own, valid layer Dockerfile at the default path.
+const mineLayer = "ARG OROBOX_BASE_IMAGE\nFROM ${OROBOX_BASE_IMAGE}\n# mine\n"
 
 func TestExtendImageNeverOverwrites(t *testing.T) {
 	useRealTemplates(t)
 	dir := t.TempDir()
 	writeProjectFile(t, dir, ".orobox.yaml", extendConfigWithComment)
-	writeProjectFile(t, dir, "docker/Dockerfile", "mine\n")
+	writeProjectFile(t, dir, "docker/image/Dockerfile", mineLayer)
 
-	receipts, err := ExtendImage(dir)
+	receipts, err := ExtendImage(cfgIn(dir))
 	if err != nil {
 		t.Fatalf("ExtendImage: %v", err)
 	}
 
 	want := []Receipt{
-		{Path: "docker/Dockerfile", Action: ActionSkipped},
+		{Path: "docker/image/Dockerfile", Action: ActionSkipped},
 		{Path: ".orobox.yaml", Action: ActionUpdated},
 	}
 	if !reflect.DeepEqual(receipts, want) {
 		t.Errorf("receipts = %v, want %v", receipts, want)
 	}
-	if got := readProjectFile(t, dir, "docker/Dockerfile"); got != "mine\n" {
+	if got := readProjectFile(t, dir, "docker/image/Dockerfile"); got != mineLayer {
 		t.Errorf("existing Dockerfile was modified: %q", got)
 	}
-	if !strings.Contains(readProjectFile(t, dir, ".orobox.yaml"), "dockerfile: docker/Dockerfile") {
+	if !strings.Contains(readProjectFile(t, dir, ".orobox.yaml"), "dockerfile: docker/image/Dockerfile") {
 		t.Error("image.dockerfile was not set")
 	}
 }
@@ -106,12 +112,12 @@ func TestExtendImageRendersValidLayer(t *testing.T) {
 	dir := t.TempDir()
 	writeProjectFile(t, dir, ".orobox.yaml", extendConfigWithComment)
 
-	if _, err := ExtendImage(dir); err != nil {
+	if _, err := ExtendImage(cfgIn(dir)); err != nil {
 		t.Fatalf("ExtendImage: %v", err)
 	}
 
-	content := []byte(readProjectFile(t, dir, "docker/Dockerfile"))
-	if err := docker.CheckExtendsBaseImage("docker/Dockerfile", content); err != nil {
+	content := []byte(readProjectFile(t, dir, "docker/image/Dockerfile"))
+	if err := docker.CheckExtendsBaseImage("docker/image/Dockerfile", content); err != nil {
 		t.Errorf("created Dockerfile is refused: %v", err)
 	}
 }
@@ -120,11 +126,11 @@ func TestExtendImageRequiresConfig(t *testing.T) {
 	useRealTemplates(t)
 	dir := t.TempDir()
 
-	_, err := ExtendImage(dir)
+	_, err := ExtendImage(cfgIn(dir))
 	if err == nil || !strings.Contains(err.Error(), "orobox init") {
 		t.Fatalf("err = %v, want one pointing at `orobox init`", err)
 	}
-	if _, statErr := os.Stat(filepath.Join(dir, "docker", "Dockerfile")); statErr == nil {
+	if _, statErr := os.Stat(filepath.Join(dir, "docker", "image", "Dockerfile")); statErr == nil {
 		t.Error("a Dockerfile was created without a config")
 	}
 }
@@ -145,7 +151,7 @@ func TestExtendImageKeepsConfiguredDockerfile(t *testing.T) {
 			dir := t.TempDir()
 			writeProjectFile(t, dir, ".orobox.yaml", tt.config)
 
-			receipts, err := ExtendImage(dir)
+			receipts, err := ExtendImage(cfgIn(dir))
 			if err != nil {
 				t.Fatalf("ExtendImage: %v", err)
 			}
@@ -160,7 +166,7 @@ func TestExtendImageKeepsConfiguredDockerfile(t *testing.T) {
 			if got := readProjectFile(t, dir, ".orobox.yaml"); got != tt.config {
 				t.Errorf(".orobox.yaml changed:\n%s", got)
 			}
-			if _, err := os.Stat(filepath.Join(dir, "docker", "Dockerfile")); err == nil {
+			if _, err := os.Stat(filepath.Join(dir, "docker", "image", "Dockerfile")); err == nil {
 				t.Error("a second Dockerfile was created at the default path")
 			}
 			content := []byte(readProjectFile(t, dir, tt.path))
@@ -176,7 +182,7 @@ func TestExtendImageRefusesEscapingPath(t *testing.T) {
 	dir := t.TempDir()
 	writeProjectFile(t, dir, ".orobox.yaml", "image:\n  dockerfile: ../outside/Dockerfile\n")
 
-	if _, err := ExtendImage(dir); err == nil {
+	if _, err := ExtendImage(cfgIn(dir)); err == nil {
 		t.Fatal("ExtendImage accepted a Dockerfile path outside the project")
 	}
 }
@@ -186,10 +192,10 @@ func TestExtendImageInvalidYAMLWritesNothing(t *testing.T) {
 	dir := t.TempDir()
 	writeProjectFile(t, dir, ".orobox.yaml", "type: [unclosed\n")
 
-	if _, err := ExtendImage(dir); err == nil {
+	if _, err := ExtendImage(cfgIn(dir)); err == nil {
 		t.Fatal("ExtendImage accepted an invalid .orobox.yaml")
 	}
-	if _, err := os.Stat(filepath.Join(dir, "docker", "Dockerfile")); err == nil {
+	if _, err := os.Stat(filepath.Join(dir, "docker", "image", "Dockerfile")); err == nil {
 		t.Error("a Dockerfile was created next to an unreadable config")
 	}
 }
@@ -197,8 +203,9 @@ func TestExtendImageInvalidYAMLWritesNothing(t *testing.T) {
 func TestExtendComposeCreates(t *testing.T) {
 	useRealTemplates(t)
 	dir := t.TempDir()
+	writeProjectFile(t, dir, ".orobox.yaml", extendConfigWithComment)
 
-	receipts, err := ExtendCompose(dir, false)
+	receipts, err := ExtendCompose(cfgIn(dir), false)
 	if err != nil {
 		t.Fatalf("ExtendCompose: %v", err)
 	}
@@ -209,7 +216,7 @@ func TestExtendComposeCreates(t *testing.T) {
 
 	// Never overwrites: a second run reports the file as skipped and leaves it alone.
 	writeProjectFile(t, dir, ".orobox.compose.yaml", "services:\n  mine: {}\n")
-	receipts, err = ExtendCompose(dir, false)
+	receipts, err = ExtendCompose(cfgIn(dir), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +239,8 @@ func TestExtendComposeTemplateParses(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
-			if _, err := ExtendCompose(dir, local); err != nil {
+			writeProjectFile(t, dir, ".orobox.yaml", extendConfigWithComment)
+			if _, err := ExtendCompose(cfgIn(dir), local); err != nil {
 				t.Fatalf("ExtendCompose: %v", err)
 			}
 			content := []byte(readProjectFile(t, dir, name))
@@ -287,9 +295,10 @@ func TestExtendComposeLocalGitignore(t *testing.T) {
 
 	t.Run("appends once", func(t *testing.T) {
 		dir := t.TempDir()
+		writeProjectFile(t, dir, ".orobox.yaml", extendConfigWithComment)
 		writeProjectFile(t, dir, ".gitignore", "/vendor/\n")
 
-		receipts, err := ExtendCompose(dir, true)
+		receipts, err := ExtendCompose(cfgIn(dir), true)
 		if err != nil {
 			t.Fatalf("ExtendCompose: %v", err)
 		}
@@ -301,7 +310,7 @@ func TestExtendComposeLocalGitignore(t *testing.T) {
 			t.Errorf("receipts = %v, want %v", receipts, want)
 		}
 
-		receipts, err = ExtendCompose(dir, true)
+		receipts, err = ExtendCompose(cfgIn(dir), true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -321,9 +330,10 @@ func TestExtendComposeLocalGitignore(t *testing.T) {
 
 	t.Run("adds the missing trailing newline", func(t *testing.T) {
 		dir := t.TempDir()
+		writeProjectFile(t, dir, ".orobox.yaml", extendConfigWithComment)
 		writeProjectFile(t, dir, ".gitignore", "/vendor/")
 
-		if _, err := ExtendCompose(dir, true); err != nil {
+		if _, err := ExtendCompose(cfgIn(dir), true); err != nil {
 			t.Fatal(err)
 		}
 		if got := readProjectFile(t, dir, ".gitignore"); got != "/vendor/\n/.orobox.compose.local.yaml\n" {
@@ -333,9 +343,10 @@ func TestExtendComposeLocalGitignore(t *testing.T) {
 
 	t.Run("recognizes the entry without the slash", func(t *testing.T) {
 		dir := t.TempDir()
+		writeProjectFile(t, dir, ".orobox.yaml", extendConfigWithComment)
 		writeProjectFile(t, dir, ".gitignore", "vendor\n.orobox.compose.local.yaml\n")
 
-		if _, err := ExtendCompose(dir, true); err != nil {
+		if _, err := ExtendCompose(cfgIn(dir), true); err != nil {
 			t.Fatal(err)
 		}
 		if got := readProjectFile(t, dir, ".gitignore"); got != "vendor\n.orobox.compose.local.yaml\n" {
@@ -345,8 +356,9 @@ func TestExtendComposeLocalGitignore(t *testing.T) {
 
 	t.Run("no gitignore is not created", func(t *testing.T) {
 		dir := t.TempDir()
+		writeProjectFile(t, dir, ".orobox.yaml", extendConfigWithComment)
 
-		receipts, err := ExtendCompose(dir, true)
+		receipts, err := ExtendCompose(cfgIn(dir), true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -361,9 +373,10 @@ func TestExtendComposeLocalGitignore(t *testing.T) {
 
 	t.Run("without --local the gitignore is left alone", func(t *testing.T) {
 		dir := t.TempDir()
+		writeProjectFile(t, dir, ".orobox.yaml", extendConfigWithComment)
 		writeProjectFile(t, dir, ".gitignore", "/vendor/\n")
 
-		if _, err := ExtendCompose(dir, false); err != nil {
+		if _, err := ExtendCompose(cfgIn(dir), false); err != nil {
 			t.Fatal(err)
 		}
 		if got := readProjectFile(t, dir, ".gitignore"); got != "/vendor/\n" {

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/algoritma-dev/orobox/internal/config"
+	"github.com/algoritma-dev/orobox/internal/docker"
 	"github.com/algoritma-dev/orobox/internal/output"
 	"github.com/algoritma-dev/orobox/internal/utils"
 
@@ -38,7 +39,7 @@ var rootCmd = &cobra.Command{
 
 		if err := configGate(cmd); err != nil {
 			utils.PrintError(err.Error())
-			os.Exit(1)
+			exitOnConfigError(1)
 		}
 
 		warnDeprecatedConfig(cmd)
@@ -121,12 +122,20 @@ var configErrorIsFilesOnly bool
 // leave a stack running that the user can no longer stop through orobox — at the very moment the
 // file has been moved or deleted. A config that is invalid in itself still stops them, because
 // the compose files they run cannot be rendered from it.
+// exitOnConfigError ends the process after a refused config. A variable so tests can observe the
+// refusal instead of losing the whole test binary to os.Exit.
+var exitOnConfigError = os.Exit
+
 func configGate(cmd *cobra.Command) error {
-	if ConfigError == nil || isConfigExempt(cmd) {
+	// help, completion and version print nothing that depends on the config: a user fixing a
+	// broken file still needs `orobox help`, and a completion script must not fail to generate.
+	if ConfigError == nil || isConfigExempt(cmd) || printsVerbatimOutput(cmd) {
 		return nil
 	}
 	if configErrorIsFilesOnly && isTeardownCommand(cmd) {
 		utils.PrintWarningStderr(fmt.Sprintf("%v\nContinuing anyway: '%s' only stops the environment and does not need that file.", ConfigError, cmd.Name()))
+		// EnsureDockerCompose would otherwise report the same file again, on stdout.
+		docker.SetPhpIniProblemReported()
 		return nil
 	}
 	return ConfigError

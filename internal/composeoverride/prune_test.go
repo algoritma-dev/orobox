@@ -107,3 +107,13 @@ func TestServiceNames(t *testing.T) {
 	}
 	assertStrings(t, names, []string{"application", "db-test", "web"})
 }
+
+// A service that reaches `services:` only through a merge key cannot be taken out of the file;
+// reporting it as dropped while leaving it in would let compose fail anyway.
+func TestPruneRefusesAServiceItCannotRemove(t *testing.T) {
+	src := "x-extra: &extra\n  ghost:\n    environment:\n      A: b\nservices:\n  <<: *extra\n  application:\n    environment:\n      B: c\n"
+	_, _, err := Prune([]byte(src), []string{"application"})
+	if err == nil || !strings.Contains(err.Error(), "ghost") {
+		t.Errorf("want an error naming ghost, got %v", err)
+	}
+}

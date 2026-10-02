@@ -79,31 +79,32 @@ var upCmd = &cobra.Command{
 			utils.PrintPlainf("	- ORO_MAILER_DSN=smtp://mail:1025\n")
 		}
 
-		if viper.GetBool("services.adminer") {
-			dbUser, dbPass, dbName, _ := docker.GetDatabaseCredentials()
+		dbUser, dbPass, dbName, _ := docker.GetDatabaseCredentials()
 
-			// With Adminer unpublished the block would be a header and credentials for a UI
-			// that cannot be opened, so the whole block goes.
-			if adminerPort := config.GetPort("adminer"); adminerPort != 0 {
-				utils.PrintTitle("Adminer is available at:")
-				printLocalURL("", "adminer", "")
-				utils.PrintPlainf("  - Credentials: %s / %s (Database: %s)\n", dbUser, dbPass, dbName)
-			}
+		// With Adminer unpublished the block would be a header and credentials for a UI that
+		// cannot be opened, so the whole block goes.
+		if serviceEnabled("services.adminer", true) && config.GetPort("adminer") != 0 {
+			utils.PrintTitle("Adminer is available at:")
+			printLocalURL("", "adminer", "")
+			utils.PrintPlainf("  - Credentials: %s / %s (Database: %s)\n", dbUser, dbPass, dbName)
+		}
 
-			// With the database port unpublished there is nothing to connect to from the host.
-			if dbPort := config.GetPort("db"); dbPort != 0 {
-				utils.PrintTitle("External Database Connection (e.g. PhpStorm):")
-				utils.PrintPlain("  - Host: localhost")
-				utils.PrintPlainf("  - Port: %d\n", dbPort)
-				utils.PrintPlainf("  - User: %s\n", dbUser)
-				utils.PrintPlainf("  - Password: %s\n", dbPass)
-				utils.PrintPlainf("  - Database: %s\n", dbName)
-			}
+		// The database always runs; with its port unpublished there is nothing to connect to
+		// from the host.
+		if dbPort := config.GetPort("db"); dbPort != 0 {
+			utils.PrintTitle("External Database Connection (e.g. PhpStorm):")
+			utils.PrintPlain("  - Host: localhost")
+			utils.PrintPlainf("  - Port: %d\n", dbPort)
+			utils.PrintPlainf("  - User: %s\n", dbUser)
+			utils.PrintPlainf("  - Password: %s\n", dbPass)
+			utils.PrintPlainf("  - Database: %s\n", dbName)
 		}
 
 		if viper.GetBool("services.redis") {
 			utils.PrintTitle("Redis is available at:")
-			printLocalURL("RedisInsight UI: ", "redisinsight", "")
+			if serviceEnabled("services.redisinsight", true) {
+				printLocalURL("RedisInsight UI: ", "redisinsight", "")
+			}
 			utils.PrintPlainf("  - Set in your .env:\n")
 			utils.PrintPlainf("	- ORO_REDIS_URL=redis://redis:6379\n")
 		}
@@ -117,7 +118,9 @@ var upCmd = &cobra.Command{
 
 		if viper.GetBool("services.elasticsearch") {
 			utils.PrintTitle("Elasticsearch is available at:")
-			printLocalURL("Kibana UI: ", "kibana", "")
+			if serviceEnabled("services.kibana", true) {
+				printLocalURL("Kibana UI: ", "kibana", "")
+			}
 			utils.PrintPlainf("  - Set in your .env:\n")
 			utils.PrintPlainf("	- ORO_SEARCH_URL=http://elasticsearch:9200\n")
 		}
@@ -133,6 +136,16 @@ var upCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+// serviceEnabled reads an optional-service toggle the way the compose generation does: unset
+// means the default (Adminer on with PostgreSQL, RedisInsight with Redis, Kibana with
+// Elasticsearch), so up never advertises a service compose does not run, or hides one it does.
+func serviceEnabled(key string, def bool) bool {
+	if !viper.IsSet(key) {
+		return def
+	}
+	return viper.GetBool(key)
 }
 
 // printLocalURL advertises a service published on the host as a "  - <label>http://localhost:<port><suffix>"

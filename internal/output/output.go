@@ -36,6 +36,10 @@ func Agent() bool { return agent }
 // verbatim output of a passthrough command. Never diagnostics.
 func Payload() io.Writer { return payloadWriter }
 
+// Diagnostics is the stream for what a caller may still need in agent mode but that is not the
+// payload: follow-up instructions, for instance. It is stderr, next to the errors.
+func Diagnostics() io.Writer { return errWriter }
+
 // SetWriters redirects both streams and returns a function restoring them, for tests.
 func SetWriters(payload, errs io.Writer) func() {
 	prevPayload, prevErr := payloadWriter, errWriter

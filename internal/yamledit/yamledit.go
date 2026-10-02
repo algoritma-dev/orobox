@@ -3,8 +3,11 @@
 //
 // Round-tripping through map[string]any would drop every comment and reorder
 // keys, which is unacceptable for files people hand-edit. Instead the document
-// is kept as a yaml.v3 node tree: only the nodes an edit touches change, so
-// comments, key order and the flow/block style of untouched content survive.
+// is kept as a yaml.v3 node tree, so values, comments, key order and the
+// flow/block style of untouched content survive an edit. The file is still
+// re-emitted whole by the encoder, which normalizes what the node tree does not
+// record: blank lines are dropped, indentation becomes two spaces, CRLF line
+// endings become LF and long plain scalars may be refolded.
 // It backs `orobox extend` and the recipes, which add keys, list items and
 // compose services to an existing file.
 //
@@ -16,6 +19,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -40,8 +44,26 @@ type Doc struct {
 // is rejected: every file orobox edits is a mapping at the top level.
 func Parse(src []byte) (*Doc, error) {
 	var n yaml.Node
-	if err := yaml.Unmarshal(src, &n); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(src))
+	if err := dec.Decode(&n); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parse yaml: %w", err)
+	}
+	// Bytes writes back one document, so a second one would be silently deleted from the
+	// user's file. Refusing is the only edit that cannot lose data.
+	// A trailing `---` with nothing (or only comments) after it is not a second document worth
+	// keeping; anything with content is.
+	for {
+		var extra yaml.Node
+		err := dec.Decode(&extra)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("parse yaml: %w", err)
+		}
+		if !emptyDocument(&extra) {
+			return nil, errors.New("parse yaml: the file holds several YAML documents (separated by ---); merge them into one before orobox edits it")
+		}
 	}
 	if n.Kind == 0 {
 		// yaml.v3 reports "no document" for input without content and drops any
@@ -76,6 +98,7 @@ func commentsOnly(src []byte) string {
 
 // Bytes serializes the document with a 2-space indent, comments kept.
 func (d *Doc) Bytes() ([]byte, error) {
+	clearMergeTags(d.doc)
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
@@ -168,6 +191,7 @@ func (d *Doc) AppendUnique(path []string, values ...string) error {
 		mapSet(parent, key, seq)
 	case isNull(seq):
 		toKind(seq, yaml.SequenceNode, tagSeq)
+		keepLineComment(parent, key, seq)
 	case seq.Kind != yaml.SequenceNode:
 		return fmt.Errorf("%s: cannot append to an existing %s", joinPath(path), kindName(seq.Kind))
 	}
@@ -202,26 +226,28 @@ func (d *Doc) MergeMapping(path []string, fragment *yaml.Node, overwrite bool) (
 	if fragment == nil || fragment.Kind != yaml.MappingNode {
 		return nil, nil, errors.New("merge: fragment must be a mapping")
 	}
+	// Every key is checked before the first change (walk below may already create the target),
+	// so a bad fragment leaves the document as it was instead of half merged.
+	for i := 0; i+1 < len(fragment.Content); i += 2 {
+		if k := fragment.Content[i]; k.Kind != yaml.ScalarNode {
+			return nil, nil, fmt.Errorf("merge: fragment key at line %d is not a scalar", k.Line)
+		}
+	}
 	target, err := d.walk(path)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	clones := map[*yaml.Node]*yaml.Node{}
 	for i := 0; i+1 < len(fragment.Content); i += 2 {
 		k, v := fragment.Content[i], fragment.Content[i+1]
-		if k.Kind != yaml.ScalarNode {
-			return nil, nil, fmt.Errorf("merge: fragment key at line %d is not a scalar", k.Line)
-		}
 		_, existing := mapGet(target, k.Value)
 		switch {
 		case existing == nil:
-			target.Content = append(target.Content, cloneNode(k, clones), cloneNode(v, clones))
+			target.Content = append(target.Content, cloneNode(k, 0), cloneNode(v, 0))
 			added = append(added, k.Value)
 		case overwrite:
 			for j := 0; j+1 < len(target.Content); j += 2 {
 				if target.Content[j+1] == existing {
-					target.Content[j+1] = cloneNode(v, clones)
+					target.Content[j+1] = cloneNode(v, 0)
 					break
 				}
 			}
@@ -265,6 +291,7 @@ func (d *Doc) walk(path []string) (*yaml.Node, error) {
 			mapSet(cur, seg, next)
 		case isNull(next):
 			toKind(next, yaml.MappingNode, tagMap)
+			keepLineComment(cur, seg, next)
 		case next.Kind == yaml.AliasNode:
 			return nil, fmt.Errorf("%s: refusing to edit through an alias", joinPath(path[:i+1]))
 		case next.Kind != yaml.MappingNode:
@@ -311,32 +338,80 @@ func isNull(n *yaml.Node) bool {
 	return n.Kind == yaml.ScalarNode && n.Tag == tagNull
 }
 
+// emptyDocument reports whether a decoded document holds no content: a bare `---`, or one
+// followed only by comments.
+func emptyDocument(n *yaml.Node) bool {
+	if n.Kind == 0 {
+		return true
+	}
+	if n.Kind == yaml.DocumentNode && len(n.Content) == 1 {
+		c := n.Content[0]
+		return c.Kind == yaml.ScalarNode && c.Tag == tagNull && c.Value == ""
+	}
+	return false
+}
+
+// keepLineComment moves the line comment of a value that just became a
+// collection onto its key: `image: ~ # note` would otherwise lose the note,
+// because the encoder has nowhere to put a line comment on a block mapping.
+func keepLineComment(parent *yaml.Node, key string, value *yaml.Node) {
+	if value.LineComment == "" {
+		return
+	}
+	if k, _ := mapGet(parent, key); k != nil && k.LineComment == "" {
+		k.LineComment, value.LineComment = value.LineComment, ""
+	}
+}
+
+// clearMergeTags drops the explicit !!merge tag the decoder puts on `<<` keys,
+// which the encoder would otherwise print as `!!merge <<:`.
+func clearMergeTags(n *yaml.Node) {
+	if n == nil {
+		return
+	}
+	if n.Kind == yaml.ScalarNode && n.Value == "<<" && n.Tag == "!!merge" {
+		n.Tag = ""
+	}
+	for _, c := range n.Content {
+		clearMergeTags(c)
+	}
+}
+
 // toKind turns n into an empty node of another kind in place, so comments
 // attached to it are kept.
 func toKind(n *yaml.Node, kind yaml.Kind, tag string) {
 	n.Kind, n.Tag, n.Value, n.Style, n.Content = kind, tag, "", 0, nil
 }
 
-// cloneNode deep-copies n. Aliases are re-pointed at the clone of their anchor
-// when it is part of the same copy (clones is shared across one merge), so the
-// copy never aliases into the fragment it came from.
-func cloneNode(n *yaml.Node, clones map[*yaml.Node]*yaml.Node) *yaml.Node {
+// cloneNode deep-copies n with every alias expanded into a copy of what it
+// points at, and without anchor names. An alias kept in the copy could point
+// at an anchor outside it (written as an undefined `*name`), and a copied
+// anchor name could re-bind one the user's document already uses. The depth
+// bound stops a cyclic alias from recursing forever.
+func cloneNode(n *yaml.Node, depth int) *yaml.Node {
 	if n == nil {
 		return nil
 	}
+	if depth > maxCloneDepth {
+		// Only a cyclic alias gets here. A null keeps the parent's key/value pairs aligned;
+		// dropping the child would shift every later pair and corrupt the mapping.
+		return &yaml.Node{Kind: yaml.ScalarNode, Tag: tagNull}
+	}
+	if n.Kind == yaml.AliasNode && n.Alias != nil {
+		return cloneNode(n.Alias, depth+1)
+	}
 	c := *n
-	clones[n] = &c
+	c.Anchor = ""
+	c.Alias = nil
 	c.Content = nil
 	for _, ch := range n.Content {
-		c.Content = append(c.Content, cloneNode(ch, clones))
-	}
-	if n.Alias != nil {
-		if a, ok := clones[n.Alias]; ok {
-			c.Alias = a
-		}
+		c.Content = append(c.Content, cloneNode(ch, depth+1))
 	}
 	return &c
 }
+
+// maxCloneDepth bounds cloneNode; real fragments are a handful of levels deep.
+const maxCloneDepth = 64
 
 func joinPath(path []string) string {
 	return strings.Join(path, ".")

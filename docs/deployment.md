@@ -76,7 +76,7 @@ The stage argument may be omitted when exactly one stage is configured.
 Options:
 - `--yes`, `-y`: Skip the confirmation prompt (implied when there is no TTY, e.g. in CI).
 - `--debug`, `-d`: Print every command's full output instead of its last lines, and stream the Dagger engine output.
-- `--no-cache`: Rebuild everything the run could have reused — the dependency layers, the QA install and the test database.
+- `--no-cache`: Rebuild everything the run could have reused — the project image layer, the dependency layers, the QA install and the test database.
 - `--skip-qa`: Skip the QA checks. The QA tool set is not installed either, so nothing is paid for it.
 - `--skip-test`: Skip the test suites.
 - `--skip-release`: Check the code, then stop before the remote release. Nothing connects to the stage host, so the confirmation prompt is skipped and no SSH deploy credentials are needed — only whatever the clone requires.
@@ -126,23 +126,36 @@ of `orobox qa` and `orobox test` too.
   `image.apk`, `image.php_extensions`, `image.npm` or `image.run` is set, Dagger builds the same
   Dockerfile `orobox up` builds, with `OROBOX_BASE_IMAGE` set to the published
   `algoritmadev/orobox:<oro_version>-project-latest` tag, and runs every step on the result. The
-  layer is always rendered for `type: project`, the only type the pipeline supports. The engine
-  caches its layers like any other build, so an unchanged layer costs nothing on a warm runner; a
-  cold CI runner builds it once per pipeline. A project Dockerfile whose final stage is not
-  `FROM ${OROBOX_BASE_IMAGE}` is refused before the engine starts, as it is locally.
+  layer is always rendered for `type: project`, the only type the pipeline supports. It is built
+  first, as a step of its own (`build the project image layer`), so a broken `image.*` entry fails
+  there and not inside the dependency install. The engine caches its layers like any other build,
+  so an unchanged layer costs nothing on a warm runner; on cold runners it is built once per job
+  (the generated CI's lint, test and deploy jobs each start their own engine). The build context
+  is uploaded without what the Dockerfile's `<name>.dockerignore` (or else the context's
+  `.dockerignore`) excludes, negations included, as `docker build` reads it. When the Dockerfile
+  sits next to `.orobox.yaml`, the paths the pipeline already excludes from the sources are left
+  out too — the git-ignored ones among them, so a root Dockerfile cannot `COPY` a git-ignored
+  file such as `auth.json` in the pipeline, exactly as a fresh CI checkout would not have it. A project Dockerfile whose final stage is not `FROM ${OROBOX_BASE_IMAGE}` is refused
+  before the engine starts, as it is locally.
 - **`php_ini`** ([PHP settings](configuration.md#php-settings-php_ini)). The same `zz-project.ini`
   the development stack mounts is written into every step container: rendered from the map form,
   or the project's own file copied unchanged.
 - **Where they are read from.** The project Dockerfile, its build context and a `php_ini` file
   are taken from the host working tree, the same place `.orobox.yaml` is read from, even when the
-  steps build a clone — so configuration and image never come from two different revisions. Paths
-  stay relative to `.orobox.yaml`, with or without `source_dir`.
+  steps build a clone — so the configuration and the image never come from two different
+  revisions. The code can: `orobox deploy` builds a clone of the stage's `ref`, so whenever a
+  layer or php.ini is used the summary prints a note that they come from the working tree and the
+  code from the ref — check it when you deploy from another branch or with uncommitted edits. Paths stay relative to
+  `.orobox.yaml`, with or without `source_dir`.
+- **php.ini and the dependency cache.** `zz-project.ini` is written before the dependency steps,
+  because composer runs under it too (`memory_limit` above all). The price is that an edit to
+  `php_ini` misses the cache of the dependency layers once.
 
 With none of these set nothing is built and the steps run on the published image unchanged.
 
 The summary `orobox deploy` prints before it starts says which of them apply: a `Layer:` line when
 the project's image layer is built on top of the published image, and a `php.ini:` line when the
-project's `php_ini` settings are written into the steps. `--no-cache` does not rebuild the layer;
+project's `php_ini` settings are written into the steps. `--no-cache` rebuilds the layer as well;
 see [What the pipeline caches](#what-the-pipeline-caches).
 
 **The compose override is development-only.** `.orobox.compose.yaml`, `.orobox.compose.local.yaml`
@@ -217,7 +230,7 @@ identical database.
 The QA and test caches are scoped to the Oro version and the stage's git ref, so two stages on
 different refs do not invalidate each other.
 
-`orobox deploy <stage> --no-cache` rebuilds all of it, except the project image layer (`image.*` keys and `image.dockerfile`): Dagger caches that layer by content, so it is rebuilt when its Dockerfile, build context or base image change, not by `--no-cache`.
+`orobox deploy <stage> --no-cache` rebuilds all of it, the project image layer (`image.*` keys and `image.dockerfile`) included, every stage of a multi-stage Dockerfile too. Dagger has no option to ignore its build cache, so Orobox declares an `OROBOX_CACHE_BUST` build argument right after every `FROM` and sets it to the run's ID, which changes the cache key of everything each stage runs. Without `--no-cache` the layer is reused until its Dockerfile, build context or base image change.
 
 #### Cache warmth in CI
 

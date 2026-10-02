@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/algoritma-dev/orobox/internal/docker"
 	"github.com/algoritma-dev/orobox/internal/yamledit"
 
 	yamlv3 "gopkg.in/yaml.v3"
@@ -30,11 +31,11 @@ type Receipt struct{ Path, Action string }
 func (r Receipt) String() string { return r.Action + " " + r.Path }
 
 const (
-	// configFile is the project config `extend image` edits.
-	configFile = ".orobox.yaml"
 	// defaultDockerfile is where `extend image` puts the Dockerfile when the config does not name
-	// one already.
-	defaultDockerfile = "docker/Dockerfile"
+	// one already. It gets a directory of its own because that directory is the build context:
+	// every file in it is hashed on each container start and a change triggers a rebuild, so it
+	// must not share docker/ with recipe data, fixtures or uploads that change at run time.
+	defaultDockerfile = "docker/image/Dockerfile"
 
 	// ComposeOverrideFile is the shared override file Orobox discovers by name. It and
 	// ComposeLocalOverrideFile repeat docker.OverrideFiles on purpose — scaffold writes files and
@@ -49,62 +50,110 @@ const (
 	gitignoreEntry = "/" + ComposeLocalOverrideFile
 )
 
+// project is the config file an `orobox extend` subcommand works against and the directory
+// holding it, where every other file it writes lives. The config is the one in use — the
+// --config file when one was given — so the command edits the file every other command reads.
+type project struct {
+	dir    string // directory holding the config file
+	config string // the config file's name, as receipts report it
+	src    []byte // the config file's content
+}
+
+// openProject reads the config file at configPath. Every extend subcommand requires it: without
+// a config there is no Orobox project, and the files would land where Orobox never looks.
+func openProject(configPath string) (project, error) {
+	p := project{dir: filepath.Dir(configPath), config: filepath.Base(configPath)}
+	src, err := os.ReadFile(configPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return p, fmt.Errorf("no %s in %s: run `orobox init` first", p.config, p.dir)
+	}
+	if err != nil {
+		return p, fmt.Errorf("could not read %s: %w", p.config, err)
+	}
+	p.src = src
+	return p, nil
+}
+
 // ExtendImage writes the project Dockerfile and points image.dockerfile at it.
 //
-// The project must already have a .orobox.yaml: the Dockerfile only means something once the
-// config references it, and creating a config here would skip everything `orobox init` decides.
 // When the config already names a Dockerfile (under image.dockerfile or the deprecated top-level
 // key) that path is used and the config is left untouched, so running the command never leaves a
 // second Dockerfile behind or rewrites a choice the user made. An existing Dockerfile is never
-// overwritten.
-func ExtendImage(projectDir string) ([]Receipt, error) {
-	configPath := filepath.Join(projectDir, configFile)
-	src, err := os.ReadFile(configPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("no %s in %s: run `orobox init` first", configFile, projectDir)
-	}
+// overwritten; one at the default path that the config does not name is adopted only when it is
+// an Orobox layer (final stage FROM ${OROBOX_BASE_IMAGE}).
+func ExtendImage(configPath string) ([]Receipt, error) {
+	p, err := openProject(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("could not read %s: %w", configFile, err)
+		return nil, err
 	}
 
-	// Everything that can fail on the config is checked before the first file is written, so a
-	// broken config does not leave a Dockerfile behind that nothing references.
-	doc, err := yamledit.Parse(src)
+	doc, err := yamledit.Parse(p.src)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", configFile, err)
+		return nil, fmt.Errorf("%s: %w", p.config, err)
 	}
-	configured, err := configuredDockerfile(src)
+	configured, err := configuredDockerfile(p.config, p.src)
 	if err != nil {
 		return nil, err
 	}
 
 	dockerfile := configured
-	if dockerfile == "" {
+	var updatedConfig []byte
+	if configured == "" {
 		dockerfile = defaultDockerfile
+		if err := checkAdoptable(p.dir, dockerfile); err != nil {
+			return nil, err
+		}
+		// The config edit is the step that can still fail, so it is prepared before the first
+		// file is written: a failure must not leave a Dockerfile nothing references.
+		if err := doc.SetScalar([]string{"image", "dockerfile"}, dockerfile); err != nil {
+			return nil, fmt.Errorf("%s: %w", p.config, err)
+		}
+		if updatedConfig, err = doc.Bytes(); err != nil {
+			return nil, fmt.Errorf("%s: %w", p.config, err)
+		}
 	}
 
 	var receipts []Receipt
-	receipt, err := writeTemplateOnce(projectDir, dockerfile, "templates/extend/Dockerfile.tmpl")
+	receipt, err := writeTemplateOnce(p.dir, dockerfile, "templates/extend/Dockerfile.tmpl")
 	if err != nil {
 		return receipts, err
 	}
 	receipts = append(receipts, receipt)
 
-	if configured != "" {
-		return append(receipts, Receipt{Path: configFile, Action: ActionSkipped}), nil
+	if updatedConfig == nil {
+		return append(receipts, Receipt{Path: p.config, Action: ActionSkipped}), nil
 	}
+	if err := writeInsideProject(p.dir, p.config, updatedConfig, false); err != nil {
+		return receipts, err
+	}
+	return append(receipts, Receipt{Path: p.config, Action: ActionUpdated}), nil
+}
 
-	if err := doc.SetScalar([]string{"image", "dockerfile"}, dockerfile); err != nil {
-		return receipts, fmt.Errorf("%s: %w", configFile, err)
+// checkAdoptable refuses to point the config at an existing file that is not an Orobox layer
+// Dockerfile: a project's own production Dockerfile at that path would otherwise be built as the
+// development layer, or rejected by the next `orobox up` far from this command.
+func checkAdoptable(dir, rel string) error {
+	target := filepath.Join(dir, filepath.FromSlash(rel))
+	info, err := os.Lstat(target)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
 	}
-	out, err := doc.Bytes()
 	if err != nil {
-		return receipts, fmt.Errorf("%s: %w", configFile, err)
+		return fmt.Errorf("could not check %s: %w", rel, err)
 	}
-	if err := os.WriteFile(configPath, out, 0o644); err != nil {
-		return receipts, fmt.Errorf("could not write %s: %w", configFile, err)
+	// Only a regular file can be the layer Dockerfile: a directory, or a symlink (dangling, or
+	// pointing who knows where), would be "skipped" by the write and then built by `orobox up`.
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s already exists and is not a regular file; set image.dockerfile to another path by hand", rel)
 	}
-	return append(receipts, Receipt{Path: configFile, Action: ActionUpdated}), nil
+	content, err := os.ReadFile(target)
+	if err != nil {
+		return fmt.Errorf("could not read %s: %w", rel, err)
+	}
+	if err := docker.CheckExtendsBaseImage(rel, content); err != nil {
+		return fmt.Errorf("%s already exists and is not an Orobox layer Dockerfile (%v); set image.dockerfile to another path by hand", rel, err)
+	}
+	return nil
 }
 
 // ExtendCompose writes the compose override, or with local the git-ignored personal one, and
@@ -113,7 +162,13 @@ func ExtendImage(projectDir string) ([]Receipt, error) {
 // The .gitignore is only ever appended to, and only when it already exists: creating one in a
 // directory that does not track files this way would be a surprise, and a bundle or project
 // without one has nothing to leak the local file into.
-func ExtendCompose(projectDir string, local bool) ([]Receipt, error) {
+func ExtendCompose(configPath string, local bool) ([]Receipt, error) {
+	p, err := openProject(configPath)
+	if err != nil {
+		return nil, err
+	}
+	projectDir := p.dir
+
 	name, tmpl := ComposeOverrideFile, "templates/extend/compose.yaml.tmpl"
 	if local {
 		name, tmpl = ComposeLocalOverrideFile, "templates/extend/compose.local.yaml.tmpl"
@@ -145,7 +200,7 @@ func ExtendCompose(projectDir string, local bool) ([]Receipt, error) {
 // The config is decoded loosely rather than through config.ParseConfig: this command only needs
 // two keys, and rejecting a file over an unrelated field (one a newer Orobox added, say) would
 // make an unrelated problem block it.
-func configuredDockerfile(src []byte) (string, error) {
+func configuredDockerfile(configFile string, src []byte) (string, error) {
 	var cfg struct {
 		Dockerfile string `yaml:"dockerfile"`
 		Image      *struct {
@@ -176,15 +231,23 @@ func configuredDockerfile(src []byte) (string, error) {
 // says which of the two happened. It goes through Write so the never-overwrite rule is the one
 // every other generated file already follows.
 func writeTemplateOnce(projectDir, rel, tmpl string) (Receipt, error) {
-	res, err := Write(projectDir, Artifact{RelPath: rel, TemplatePath: tmpl, Ownership: WriteOnce}, nil)
+	receipt := Receipt{Path: filepath.ToSlash(rel), Action: ActionSkipped}
+	// Lstat: a dangling symlink is an existing entry, never something to write through.
+	switch _, err := os.Lstat(filepath.Join(projectDir, filepath.FromSlash(rel))); {
+	case err == nil:
+		return receipt, nil
+	case !errors.Is(err, os.ErrNotExist):
+		return Receipt{}, fmt.Errorf("could not check %s: %w", rel, err)
+	}
+	rendered, err := Render(tmpl, nil)
 	if err != nil {
+		return Receipt{}, fmt.Errorf("could not render %s: %w", rel, err)
+	}
+	if err := writeInsideProject(projectDir, filepath.ToSlash(rel), rendered, true); err != nil {
 		return Receipt{}, err
 	}
-	action := ActionCreated
-	if res.Skipped {
-		action = ActionSkipped
-	}
-	return Receipt{Path: filepath.ToSlash(rel), Action: action}, nil
+	receipt.Action = ActionCreated
+	return receipt, nil
 }
 
 // ignoreLocalOverride appends the personal override to .gitignore. It returns nil when there is no
@@ -212,8 +275,8 @@ func ignoreLocalOverride(projectDir string) (*Receipt, error) {
 		updated += "\n"
 	}
 	updated += gitignoreEntry + "\n"
-	if err := os.WriteFile(target, []byte(updated), 0o644); err != nil {
-		return nil, fmt.Errorf("could not write .gitignore: %w", err)
+	if err := writeInsideProject(projectDir, ".gitignore", []byte(updated), false); err != nil {
+		return nil, err
 	}
 	return &Receipt{Path: ".gitignore", Action: ActionUpdated}, nil
 }
