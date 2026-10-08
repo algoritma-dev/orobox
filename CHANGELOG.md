@@ -10,6 +10,17 @@ group commits by theme rather than listing every commit.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-08
+
+- Faster development stacks. OPcache is now on for every install type; in development it keeps
+  timestamp checks (`opcache.revalidate_freq=2`), so source edits still show up within 2 seconds.
+  Rebuild the image to pick it up, or set the `opcache.*` directives through `php_ini` meanwhile.
+- `var/cache` now lives on a Docker volume for `project` and `demo` as well, because the Symfony
+  cache is far slower on a bind mount. It is no longer visible from the host; `var/data` and
+  `var/logs` stay on the host for those types.
+- The generated `.env` carries `ORO_DEBUG` (`1` in development, `0` in `demo`). Set it to `0` for
+  faster pages; after editing config or services run `bin/console cache:clear` by hand.
+
 ## [1.1.0] - 2026-10-02
 
 - Added stack customization, so a project no longer has to fork Orobox's templates to change its
