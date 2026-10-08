@@ -289,3 +289,52 @@ func isExecutable(head []byte) bool {
 func sameVersion(a, b string) bool {
 	return strings.TrimPrefix(a, "v") == strings.TrimPrefix(b, "v")
 }
+
+// isNewerVersion reports whether a is a later release than b. Numeric parts compare as numbers
+// (1.10.0 > 1.9.0); a pre-release ("1.0.0-rc34") sorts before its release and by its own numbers.
+func isNewerVersion(a, b string) bool {
+	split := func(v string) ([]int, []int, bool) {
+		core, pre, hasPre := strings.Cut(strings.TrimPrefix(v, "v"), "-")
+		nums := func(x string, seps string) []int {
+			var out []int
+			for _, f := range strings.FieldsFunc(x, func(r rune) bool { return strings.ContainsRune(seps, r) }) {
+				n := 0
+				for _, c := range f {
+					if c >= '0' && c <= '9' {
+						n = n*10 + int(c-'0')
+					}
+				}
+				out = append(out, n)
+			}
+			return out
+		}
+		return nums(core, "."), nums(pre, ".-"), hasPre
+	}
+	cmp := func(x, y []int) int {
+		for i := 0; i < len(x) || i < len(y); i++ {
+			var xi, yi int
+			if i < len(x) {
+				xi = x[i]
+			}
+			if i < len(y) {
+				yi = y[i]
+			}
+			if xi != yi {
+				if xi > yi {
+					return 1
+				}
+				return -1
+			}
+		}
+		return 0
+	}
+	ac, ap, aHas := split(a)
+	bc, bp, bHas := split(b)
+	if c := cmp(ac, bc); c != 0 {
+		return c > 0
+	}
+	if aHas != bHas {
+		return !aHas
+	}
+	return cmp(ap, bp) > 0
+}

@@ -156,23 +156,23 @@ func seededCache(t *testing.T, age time.Duration, version string) string {
 
 func TestRunUpdateCheck(t *testing.T) {
 	t.Run("UsesAFreshCacheWithoutCallingGitHub", func(t *testing.T) {
-		withUpdateCache(t, seededCache(t, time.Hour, "1.0.0-rc99"))
+		withUpdateCache(t, seededCache(t, time.Hour, "99.0.0"))
 		withFetch(t, func() (string, error) {
 			t.Error("expected no network call while the cache is fresh")
 			return "", nil
 		})
 
-		if got := runUpdateCheck(); got != "1.0.0-rc99" {
-			t.Errorf("got %q, want the cached 1.0.0-rc99", got)
+		if got := runUpdateCheck(); got != "99.0.0" {
+			t.Errorf("got %q, want the cached 99.0.0", got)
 		}
 	})
 
 	t.Run("RefreshesAStaleCache", func(t *testing.T) {
 		path := withUpdateCache(t, seededCache(t, 25*time.Hour, "1.0.0-rc98"))
-		withFetch(t, func() (string, error) { return "1.0.0-rc99", nil })
+		withFetch(t, func() (string, error) { return "99.0.0", nil })
 
-		if got := runUpdateCheck(); got != "1.0.0-rc99" {
-			t.Errorf("got %q, want the fetched 1.0.0-rc99", got)
+		if got := runUpdateCheck(); got != "99.0.0" {
+			t.Errorf("got %q, want the fetched 99.0.0", got)
 		}
 
 		data, err := os.ReadFile(path)
@@ -183,8 +183,8 @@ func TestRunUpdateCheck(t *testing.T) {
 		if err := json.Unmarshal(data, &c); err != nil {
 			t.Fatalf("cache is not valid JSON: %v", err)
 		}
-		if c.LatestVersion != "1.0.0-rc99" {
-			t.Errorf("cached version is %q, want 1.0.0-rc99", c.LatestVersion)
+		if c.LatestVersion != "99.0.0" {
+			t.Errorf("cached version is %q, want 99.0.0", c.LatestVersion)
 		}
 		if time.Since(c.LastCheck) > time.Minute {
 			t.Errorf("cache timestamp was not refreshed: %v", c.LastCheck)
@@ -193,10 +193,10 @@ func TestRunUpdateCheck(t *testing.T) {
 
 	t.Run("FetchesWhenThereIsNoCacheYet", func(t *testing.T) {
 		path := withUpdateCache(t, "")
-		withFetch(t, func() (string, error) { return "1.0.0-rc99", nil })
+		withFetch(t, func() (string, error) { return "99.0.0", nil })
 
-		if got := runUpdateCheck(); got != "1.0.0-rc99" {
-			t.Errorf("got %q, want 1.0.0-rc99", got)
+		if got := runUpdateCheck(); got != "99.0.0" {
+			t.Errorf("got %q, want 99.0.0", got)
 		}
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("expected the cache file to be written: %v", err)
@@ -205,10 +205,10 @@ func TestRunUpdateCheck(t *testing.T) {
 
 	t.Run("TreatsACorruptCacheAsMissing", func(t *testing.T) {
 		withUpdateCache(t, "not json at all")
-		withFetch(t, func() (string, error) { return "1.0.0-rc99", nil })
+		withFetch(t, func() (string, error) { return "99.0.0", nil })
 
-		if got := runUpdateCheck(); got != "1.0.0-rc99" {
-			t.Errorf("got %q, want the fetched 1.0.0-rc99", got)
+		if got := runUpdateCheck(); got != "99.0.0" {
+			t.Errorf("got %q, want the fetched 99.0.0", got)
 		}
 	})
 
@@ -261,14 +261,14 @@ func TestPrintUpdateNotice(t *testing.T) {
 		withTerminal(t, true)
 		t.Setenv("CI", "")
 		t.Setenv("ORO_NO_UPDATE_CHECK", "")
-		withUpdateCache(t, seededCache(t, time.Hour, "1.0.0-rc99"))
+		withUpdateCache(t, seededCache(t, time.Hour, "99.0.0"))
 		withFetch(t, func() (string, error) { return "", errors.New("must not be called") })
 
 		startUpdateCheck("up")
 		t.Cleanup(func() { updateCheckResult = nil })
 
 		out := captureNotice(t)
-		if !strings.Contains(out, "1.0.0-rc99") || !strings.Contains(out, "orobox self-update") {
+		if !strings.Contains(out, "99.0.0") || !strings.Contains(out, "orobox self-update") {
 			t.Errorf("expected the notice to name the release and the command, got %q", out)
 		}
 	})
@@ -305,7 +305,7 @@ func TestPrintUpdateNotice(t *testing.T) {
 		release := make(chan struct{})
 		withFetch(t, func() (string, error) {
 			<-release
-			return "1.0.0-rc99", nil
+			return "99.0.0", nil
 		})
 
 		prevWait := updateNoticeWait
@@ -339,7 +339,7 @@ func TestRootStartsTheUpdateCheck(t *testing.T) {
 	withTerminal(t, true)
 	t.Setenv("CI", "")
 	t.Setenv("ORO_NO_UPDATE_CHECK", "")
-	withUpdateCache(t, seededCache(t, time.Hour, "1.0.0-rc99"))
+	withUpdateCache(t, seededCache(t, time.Hour, "99.0.0"))
 	withFetch(t, func() (string, error) { return "", errors.New("must not be called") })
 
 	updateCheckResult = nil
@@ -354,4 +354,23 @@ func TestRootStartsTheUpdateCheck(t *testing.T) {
 
 	// Drain it before the cleanups restore the hooks the goroutine reads.
 	<-ch
+}
+
+func TestIsNewerVersion(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want bool
+	}{
+		{"v1.3.1", "1.3.0", true},
+		{"v1.3.0", "1.3.1", false},
+		{"v1.3.1", "1.3.1", false},
+		{"1.10.0", "1.9.0", true},
+		{"1.0.0", "1.0.0-rc34", true},
+		{"1.0.0-rc34", "1.0.0-rc33", true},
+		{"1.0.0-rc33", "1.0.0-rc34", false},
+	} {
+		if got := isNewerVersion(c.a, c.b); got != c.want {
+			t.Errorf("isNewerVersion(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
 }

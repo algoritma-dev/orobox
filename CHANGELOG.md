@@ -10,6 +10,11 @@ group commits by theme rather than listing every commit.
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-10-08
+
+- The update notice now appears only when the latest release is strictly newer than the running
+  one. A cached older tag (the check is cached for a day) no longer reads as "new version available".
+
 ## [1.3.1] - 2026-10-08
 
 - Fixed `self-update` and the update notice treating the current release as new: the tag

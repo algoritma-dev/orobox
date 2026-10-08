@@ -89,10 +89,10 @@ func updateCheckEnabled(cmdName string) bool {
 
 // updateNoticeMessage returns the line to print, or an empty string when there is nothing to say.
 //
-// The comparison is the one self-update already makes: the release tags carry no prefix and match
-// Version verbatim, so any difference means a different release.
+// Only a strictly newer release is announced: a stale cache can still hold the previous tag after
+// the user has updated, and that must stay quiet.
 func updateNoticeMessage(latest, current string) string {
-	if latest == "" || sameVersion(latest, current) {
+	if latest == "" || !isNewerVersion(latest, current) {
 		return ""
 	}
 
