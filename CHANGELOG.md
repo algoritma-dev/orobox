@@ -10,6 +10,12 @@ group commits by theme rather than listing every commit.
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-10-08
+
+- Fixed `self-update` and the update notice treating the current release as new: the tag
+  `v1.3.0` was compared with `1.3.0` verbatim, so the notice always appeared and `self-update`
+  re-downloaded the same binary. A leading `v` is now ignored.
+
 ## [1.3.0] - 2026-10-08
 
 - The `pre-commit` hook installed by `orobox qa-init` now serves people and LLM agents with one
