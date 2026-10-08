@@ -276,10 +276,11 @@ func oroboxBinary() string {
 // writePreCommitHook renders the hook into hooksDir. The binary is a parameter rather than read
 // here so the rendered file is decided by one caller and can be asserted whole.
 func writePreCommitHook(hooksDir, projectDir, binary string) error {
-	rendered, err := scaffold.Render(scaffold.QaHookTemplate, scaffold.QaHookData{
+	data := scaffold.QaHookData{
 		Binary:     utils.ShellQuote(binary),
 		ProjectDir: utils.ShellQuote(projectDir),
-	})
+	}
+	rendered, err := scaffold.Render(scaffold.QaHookTemplate, data)
 	if err != nil {
 		return err
 	}

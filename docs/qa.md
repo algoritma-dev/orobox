@@ -159,6 +159,10 @@ Everything else is narrowed by extension, and a tool with nothing staged for it 
 PHP-CS-Fixer is given `--path-mode=intersection`, so the finder in your `.php-cs-fixer.dist.php`
 still decides what is in scope: a staged file you deliberately excluded stays excluded.
 
+The same hook serves people and LLM agents: it adds `--agent` (minimal output) to `qa --staged` and
+`test` when `CLAUDECODE`, `CURSOR_AGENT`, `GEMINI_CLI` or `OROBOX_AGENT` is set in the committer's
+environment, and runs them plain otherwise. Set `OROBOX_AGENT=1` for an agent that sets none of those.
+
 To skip the hook for one commit:
 
 ```bash

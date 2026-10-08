@@ -89,8 +89,8 @@ func TestWritePreCommitHook(t *testing.T) {
 
 	for _, want := range []string{
 		"#!/bin/sh",
-		`"$OROBOX" qa --staged || exit 1`,
-		`"$OROBOX" test || exit 1`,
+		`"$OROBOX" qa --staged $AGENT || exit 1`,
+		`"$OROBOX" test $AGENT || exit 1`,
 		"OROBOX_SKIP_PRECOMMIT",
 		"cd '" + root + "'",
 	} {
@@ -192,4 +192,33 @@ func withAnswers(t *testing.T, answers string) {
 	old := stdin
 	stdin = strings.NewReader(answers)
 	t.Cleanup(func() { stdin = old })
+}
+
+// TestPreCommitHookAgentDetection: one hook, --agent only when an agent is the committer.
+func TestPreCommitHookAgentDetection(t *testing.T) {
+	root := hookRepo(t)
+	hooksDir, err := gitHooksDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writePreCommitHook(hooksDir, root, "/bin/echo"); err != nil {
+		t.Fatal(err)
+	}
+	hook := filepath.Join(hooksDir, preCommitHookFile)
+	run := func(env ...string) string {
+		cmd := exec.Command("sh", hook)
+		cmd.Dir = root
+		cmd.Env = append([]string{"PATH=/usr/bin:/bin"}, env...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("hook: %v\n%s", err, out)
+		}
+		return string(out)
+	}
+	if got := run(); strings.Contains(got, "--agent") {
+		t.Errorf("human commit got --agent: %s", got)
+	}
+	if got := run("CLAUDECODE=1"); !strings.Contains(got, "qa --staged --agent") {
+		t.Errorf("agent commit missing --agent: %s", got)
+	}
 }

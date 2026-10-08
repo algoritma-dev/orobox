@@ -22,14 +22,21 @@ fi
 # .orobox.yaml.
 cd [[.ProjectDir]] || exit 1
 
-"$OROBOX" qa --staged || exit 1
+# An LLM agent committing gets the minimal --agent output; a person gets the normal one. OROBOX_AGENT
+# forces it for an agent that sets none of the variables below.
+AGENT=
+if [ -n "$OROBOX_AGENT" ] || [ -n "$CLAUDECODE" ] || [ -n "$CURSOR_AGENT" ] || [ -n "$GEMINI_CLI" ]; then
+    AGENT=--agent
+fi
+
+"$OROBOX" qa --staged $AGENT || exit 1
 
 # The test suite is not narrowed to the staged files, the way PHPStan is not: a changed entity or
 # service breaks tests in files this commit never touched, so a narrowed run would report a green
 # suite that is not green. It is skipped entirely when the commit stages no PHP, which is what
 # keeps a commit of templates or assets from paying for the whole suite.
 if git diff --cached --name-only --diff-filter=ACMR | grep -qi '\.php$'; then
-    "$OROBOX" test || exit 1
+    "$OROBOX" test $AGENT || exit 1
 fi
 
 exit 0
