@@ -160,13 +160,13 @@ RUN { \
         echo 'date.timezone=UTC'; \
         echo 'short_open_tag=off'; \
         echo 'intl.error_level=0'; \
-        echo "opcache.enable={{if eq .Type "demo"}}1{{else}}0{{end}}"; \
-        echo "opcache.enable_cli={{if eq .Type "demo"}}1{{else}}0{{end}}"; \
+        echo 'opcache.enable=1'; \
+        echo 'opcache.enable_cli=1'; \
         echo 'opcache.memory_consumption=256'; \
         echo 'opcache.interned_strings_buffer=32'; \
         echo 'opcache.max_accelerated_files=32531'; \
         echo 'opcache.validate_timestamps={{if eq .Type "demo"}}0{{else}}1{{end}}'; \
-        echo 'opcache.revalidate_freq=0'; \
+        echo 'opcache.revalidate_freq={{if eq .Type "demo"}}0{{else}}2{{end}}'; \
         echo 'opcache.fast_shutdown=1'; \
         echo 'realpath_cache_size=4096K'; \
         echo 'realpath_cache_ttl=600'; \

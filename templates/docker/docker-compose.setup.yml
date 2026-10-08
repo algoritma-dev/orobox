@@ -25,8 +25,10 @@ x-templates:
     - "{{.BundlePath}}:{{.BundleRootContainerPath}}:cached"
     - "{{.BundlePath}}/vendor-oro:{{.OroRootDir}}/vendor:delegated"
     {{- end}}
-    {{if not .BindsVarToHost -}}
+    # var/cache always sits on a Docker volume: on a bind mount (Docker Desktop) the Symfony
+    # cache is the hottest write path of every request and is far slower there.
     - "cache:{{.OroRootDir}}/var/cache:delegated"
+    {{if not .BindsVarToHost -}}
     - "private_storage:{{.OroRootDir}}/var/data:delegated"
     {{- end}}
     - "public_storage:{{.OroRootDir}}/public/media:delegated"
@@ -89,8 +91,10 @@ services:
     {{if .SyncsVendorToHost -}}
     - "{{.BundlePath}}/vendor-oro:/vendor-host:delegated"
     {{end -}}
-    {{if not .BindsVarToHost -}}
+    # var/cache always sits on a Docker volume: on a bind mount (Docker Desktop) the Symfony
+    # cache is the hottest write path of every request and is far slower there.
     - "cache:{{.OroRootDir}}/var/cache:delegated"
+    {{if not .BindsVarToHost -}}
     - "private_storage:{{.OroRootDir}}/var/data:delegated"
     {{- end}}
     - "public_storage:{{.OroRootDir}}/public/media:delegated"

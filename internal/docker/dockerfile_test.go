@@ -21,17 +21,18 @@ func dockerfileData(installType string) map[string]any {
 func TestDockerfileOpcachePerType(t *testing.T) {
 	const path = "../../templates/docker/Dockerfile"
 
-	t.Run("bundle keeps opcache off and Xdebug available", func(t *testing.T) {
+	t.Run("bundle enables opcache with timestamp checks and Xdebug available", func(t *testing.T) {
 		out := renderRealTemplate(t, path, dockerfileData("bundle"))
-		mustContain(t, out, "opcache.enable=0")
-		mustContain(t, out, "opcache.enable_cli=0")
+		mustContain(t, out, "opcache.enable=1")
+		mustContain(t, out, "opcache.enable_cli=1")
 		mustContain(t, out, "opcache.validate_timestamps=1")
+		mustContain(t, out, "opcache.revalidate_freq=2")
 		mustContain(t, out, `[ "bundle" != "demo" ]`)
 	})
 
-	t.Run("project keeps opcache off", func(t *testing.T) {
+	t.Run("project enables opcache with timestamp checks", func(t *testing.T) {
 		out := renderRealTemplate(t, path, dockerfileData("project"))
-		mustContain(t, out, "opcache.enable=0")
+		mustContain(t, out, "opcache.enable=1")
 		mustContain(t, out, "opcache.validate_timestamps=1")
 	})
 
