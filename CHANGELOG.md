@@ -10,6 +10,13 @@ group commits by theme rather than listing every commit.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-08
+
+- The `pre-commit` hook installed by `orobox qa-init` now serves people and LLM agents with one
+  file: it runs `qa --staged` and `test` with `--agent` (minimal output) when `CLAUDECODE`,
+  `CURSOR_AGENT`, `GEMINI_CLI` or `OROBOX_AGENT` is set, and plain otherwise. Re-run `orobox qa-init`
+  to replace an installed hook.
+
 ## [1.2.0] - 2026-10-08
 
 - Faster development stacks. OPcache is now on for every install type; in development it keeps
