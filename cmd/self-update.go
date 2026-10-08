@@ -42,7 +42,7 @@ var selfUpdateCmd = &cobra.Command{
 			return fmt.Errorf("failed to check for updates: %w", err)
 		}
 
-		if latest.TagName != Version {
+		if !sameVersion(latest.TagName, Version) {
 			utils.PrintSuccess(fmt.Sprintf("New version available: %s", latest.TagName))
 
 			assetURL, assetName := findBestAsset(latest)
@@ -282,4 +282,10 @@ func isExecutable(head []byte) bool {
 	}
 
 	return false
+}
+
+// sameVersion compares release tags and Version ignoring a leading "v": tags are published as
+// "v1.3.0" while Version is "1.3.0".
+func sameVersion(a, b string) bool {
+	return strings.TrimPrefix(a, "v") == strings.TrimPrefix(b, "v")
 }

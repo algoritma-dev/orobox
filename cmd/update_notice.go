@@ -92,7 +92,7 @@ func updateCheckEnabled(cmdName string) bool {
 // The comparison is the one self-update already makes: the release tags carry no prefix and match
 // Version verbatim, so any difference means a different release.
 func updateNoticeMessage(latest, current string) string {
-	if latest == "" || latest == current {
+	if latest == "" || sameVersion(latest, current) {
 		return ""
 	}
 
