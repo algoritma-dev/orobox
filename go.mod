@@ -3,7 +3,7 @@ module github.com/algoritma-dev/orobox
 go 1.26.1
 
 require (
-	dagger.io/dagger v0.21.9
+	dagger.io/dagger v0.21.10
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	golang.org/x/sync v0.23.0
