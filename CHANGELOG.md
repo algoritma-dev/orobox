@@ -10,6 +10,12 @@ group commits by theme rather than listing every commit.
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-10-09
+
+- Fixed `db restore` failing on Oro 6.1 with `Undefined array key "oro_migration.migration.post_up"`:
+  `oro:platform:update` now runs with debug off, because the migration container reset clears the
+  debug event dispatcher's listener map while `post_up` is still being dispatched.
+
 ## [1.3.2] - 2026-10-08
 
 - The update notice now appears only when the latest release is strictly newer than the running
