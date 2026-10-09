@@ -294,11 +294,14 @@ func restoreDatabase(file string) error {
 	}
 
 	// 4. Update platform
+	// Debug is forced off: the debug event dispatcher is wrapped in TraceableEventDispatcher,
+	// and MigrationContainer::reset() clears its listener map while oro_migration.migration.post_up
+	// is still dispatching, which dies with "Undefined array key" on Oro 6.1.
 	// The restore is not finished until the schema matches the code: reporting
 	// "Restore completed successfully!" after this failed left a database the application
 	// cannot boot against behind a zero exit code.
 	utils.StartLoader("Running oro:platform:update...")
-	if err := docker.RunComposeCommandSilently("", "exec", "-T", "application", "bin/console", "oro:platform:update", "--force", "--timeout=0"); err != nil {
+	if err := docker.RunComposeCommandSilently("", "exec", "-T", "-e", "ORO_DEBUG=0", "-e", "APP_DEBUG=0", "application", "bin/console", "oro:platform:update", "--force", "--timeout=0"); err != nil {
 		utils.StopLoader()
 		utils.PrintError(fmt.Sprintf("oro:platform:update failed: %v", err))
 		return err
