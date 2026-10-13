@@ -34,7 +34,8 @@ The argument is the bundle **namespace**, and where the bundle lands is read fro
 `"": "src/"`, so inside a project checkout the command above writes
 `src/Acme/Bundle/FooBundle/`. The project already autoloads that path and Oro's kernel
 discovers the generated `Resources/config/oro/bundles.yml`, so the bundle needs no
-`composer.json` of its own — clear the cache and it is loaded:
+`composer.json` of its own — clear the cache and it is loaded (in debug mode run
+`orobox console cache:clear` twice: the first run can leave Oro's cached bundle list stale):
 
 ```text
 src/Acme/Bundle/FooBundle/

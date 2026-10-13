@@ -484,6 +484,13 @@ func assertCreatedBundleIsLoaded(t *testing.T, box *Box) {
 	// autoloadable, fails here rather than at the assertion below.
 	box.Run("console", "cache:clear")
 
+	// In debug mode cache:clear can report "Cache is fresh." and stop: booting the kernel to run
+	// the command already rebuilt the container because the new bundle's files changed, and
+	// Symfony then skips the clear/warmup that would regenerate var/cache/<env>/bundles.php.
+	// Oro caches the bundle list there without tracking changes, so the first clear can leave the
+	// new bundle out. The container is fresh by the second run, which does the full clear.
+	box.Run("console", "cache:clear")
+
 	// debug:config is asked for the bundle by name rather than for the bundle list, and that is
 	// the whole assertion: the command resolves the name through the kernel's bundles, looks up
 	// the extension it registered, asks that extension for its Configuration and dumps the

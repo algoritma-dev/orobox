@@ -111,7 +111,7 @@ it somewhere else.`,
 		if placement.Standalone {
 			utils.PrintSuccess(fmt.Sprintf("Bundle scaffolded in %q. Run 'orobox init' inside it to provision the environment.", placement.Dir))
 		} else {
-			utils.PrintSuccess(fmt.Sprintf("Bundle scaffolded in %q. It is autoloaded by this project already — clear the cache to let Oro pick it up.", placement.Dir))
+			utils.PrintSuccess(fmt.Sprintf("Bundle scaffolded in %q. It is autoloaded by this project already — clear the cache to let Oro pick it up (in debug mode run cache:clear twice: the first run can leave the bundle list stale).", placement.Dir))
 		}
 		return nil
 	},
